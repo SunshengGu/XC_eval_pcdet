@@ -2,12 +2,16 @@ import torch
 from torch.utils.data import DataLoader
 from .dataset import DatasetTemplate
 from .kitti.kitti_dataset import KittiDataset
+from .cadc.cadc_dataset import CadcDataset
+# from .nuscenes.nuscenes_dataset import NuScenesDataset
 from torch.utils.data import DistributedSampler as _DistributedSampler
 from pcdet.utils import common_utils
 
 __all__ = {
     'DatasetTemplate': DatasetTemplate,
     'KittiDataset': KittiDataset,
+    'CadcDataset': CadcDataset,
+    # 'NuScenesDataset': NuScenesDataset,
 }
 
 class DistributedSampler(_DistributedSampler):

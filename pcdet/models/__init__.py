@@ -18,8 +18,12 @@ def model_fn_decorator():
         for key, val in batch_dict.items():
             if not isinstance(val, np.ndarray):
                 continue
-            if key in ['frame_id']:
+            if key in ['frame_id', 'sample_idx']:
                 continue
+            # print('val start')
+            # print(key)
+            # print(val)
+            # print('val end')
             batch_dict[key] = torch.from_numpy(val).float().cuda()
         ret_dict, tb_dict, disp_dict = model(batch_dict)
 

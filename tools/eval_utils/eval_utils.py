@@ -54,7 +54,7 @@ def eval_one_epoch(cfg, model, dataloader, epoch_id, logger, dist_test=False, sa
         for key, val in batch_dict.items():
             if not isinstance(val, np.ndarray):
                 continue
-            if key in ['frame_id', 'calib', 'image_shape']:
+            if key in ['frame_id', 'calib', 'image_shape', 'sample_idx']:
                 continue
             batch_dict[key] = torch.from_numpy(val).float().cuda()
 

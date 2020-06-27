@@ -1,0 +1,561 @@
+import os
+import sys
+import pickle
+import copy
+import numpy as np
+import json
+from skimage import io
+from pathlib import Path
+import torch
+import spconv
+
+from ...utils import box_utils, common_utils
+from ..dataset import DatasetTemplate
+from ...ops.roiaware_pool3d import roiaware_pool3d_utils
+from pcdet.config import cfg
+from pcdet.datasets.cadc import cadc_calibration
+
+
+class CadcDataset(DatasetTemplate):
+    def __init__(self, dataset_cfg, class_names, training=True, root_path=None, logger=None):
+        """
+        Args:
+            root_path:
+            dataset_cfg:
+            class_names:
+            training:
+            logger:
+        """
+        super().__init__(
+            dataset_cfg=dataset_cfg, class_names=class_names, training=training, root_path=root_path, logger=logger
+        )
+        self.split = self.dataset_cfg.DATA_SPLIT[self.mode]
+        self.root_split_path = self.root_path / ('training' if self.split != 'test' else 'testing')
+
+        split_dir = self.root_path / 'ImageSets' / (self.split + '.txt')
+        self.sample_id_list = [x.strip().split(' ') for x in open(split_dir).readlines()] if split_dir.exists() else None
+
+        self.cadc_infos = []
+        self.include_cadc_data(self.mode)
+
+    def include_cadc_data(self, mode):
+        if self.logger is not None:
+            self.logger.info('Loading CADC dataset')
+        cadc_infos = []
+
+        for info_path in self.dataset_cfg.INFO_PATH[mode]:
+            info_path = self.root_path / info_path
+            if not info_path.exists():
+                continue
+            with open(info_path, 'rb') as f:
+                infos = pickle.load(f)
+                cadc_infos.extend(infos)
+
+        self.cadc_infos.extend(cadc_infos)
+
+        if self.logger is not None:
+            self.logger.info('Total samples for CADC dataset: %d' % (len(cadc_infos)))
+
+    def set_split(self, split):
+        super().__init__(
+            dataset_cfg=self.dataset_cfg, class_names=self.class_names, training=self.training, root_path=self.root_path, logger=self.logger
+        )
+        self.split = split
+        self.root_split_path = self.root_path / ('training' if self.split != 'test' else 'testing')
+
+        split_dir = self.root_path / 'ImageSets' / (self.split + '.txt')
+        self.sample_id_list = [x.strip().split(' ') for x in open(split_dir).readlines()] if split_dir.exists() else None
+
+    def get_lidar(self, sample_idx):
+        date, set_num, idx = sample_idx
+        lidar_file = os.path.join(self.root_path, date, set_num, 'processed', 'lidar_points', 'data', '%s.bin' % idx)
+        assert os.path.exists(lidar_file)
+        points = np.fromfile(lidar_file, dtype=np.float32).reshape(-1, 4)
+        points[:, 3] /= 255
+        return points
+
+    def get_image_shape(self, sample_idx):
+        if len(sample_idx) != 3:
+            print("get_image_shape wrong len")
+            print(sample_idx)
+            print(len(sample_idx))
+            exit
+        date, set_num, idx = sample_idx
+        img_file = os.path.join(self.root_path, date, set_num, 'processed', 'image_00', 'data', '%s.png' % idx)
+        assert os.path.exists(img_file)
+        return np.array(io.imread(img_file).shape[:2], dtype=np.int32)
+
+    def get_label(self, sample_idx):
+        date, set_num, idx = sample_idx
+        label_file = os.path.join(self.root_path, date, set_num, '3d_ann.json')
+        assert os.path.exists(label_file)
+        return json.load(open(label_file, 'r'))
+
+    def get_calib(self, sample_idx):
+        date, set_num, idx = sample_idx
+        calib_path = os.path.join(self.root_path, date, 'calib')
+        assert os.path.exists(calib_path)
+        return cadc_calibration.Calibration(calib_path)
+
+    def get_road_plane(self, idx):
+        """
+        plane_file = os.path.join(self.root_path, 'planes', '%s.txt' % idx)
+        with open(plane_file, 'r') as f:
+            lines = f.readlines()
+        lines = [float(i) for i in lines[3].split()]
+        plane = np.asarray(lines)
+
+        # Ensure normal is always facing up, this is in the rectified camera coordinate
+        if plane[1] > 0:
+            plane = -plane
+
+        norm = np.linalg.norm(plane[0:3])
+        plane = plane / norm
+        return plane
+        """
+        # Currently unsupported in CADC
+        raise NotImplementedError
+
+    def get_annotation_from_label(self, calib, sample_idx):
+        date, set_num, idx = sample_idx
+        obj_list = self.get_label(sample_idx)[int(idx)]['cuboids']
+        
+        annotations = {}
+        annotations['name'] = np.array([obj['label'] for obj in obj_list])
+        annotations['num_points_in_gt'] = [[obj['points_count'] for obj in obj_list]]
+        
+        loc_lidar = np.array([[obj['position']['x'],obj['position']['y'],obj['position']['z']] for obj in obj_list]) 
+        dims = np.array([[obj['dimensions']['x'],obj['dimensions']['y'],obj['dimensions']['z']] for obj in obj_list])
+        rots = np.array([obj['yaw'] for obj in obj_list])
+        gt_boxes_lidar = np.concatenate([loc_lidar, dims, rots[..., np.newaxis]], axis=1)
+        annotations['gt_boxes_lidar'] = gt_boxes_lidar
+        
+        # in camera 0 frame. Probably meaningless as most objects aren't in frame.
+        annotations['location'] = calib.lidar_to_rect(loc_lidar) 
+        annotations['rotation_y'] = rots
+        annotations['dimensions'] = np.array([[obj['dimensions']['y'], obj['dimensions']['z'], obj['dimensions']['x']] for obj in obj_list])  # lhw format
+        
+        gt_boxes_camera = box_utils.boxes3d_lidar_to_kitti_camera(gt_boxes_lidar, calib)
+        
+        # Currently unused for CADC, and don't make too much since as we primarily use 360 degree 3d LIDAR boxes.
+        annotations['score'] = np.array([1 for _ in obj_list])
+        annotations['difficulty'] = np.array([0 for obj in obj_list], np.int32)
+        annotations['truncated'] = np.array([0 for _ in obj_list])
+        annotations['occluded'] = np.array([0 for _ in obj_list])
+        annotations['alpha'] = np.array([-np.arctan2(-gt_boxes_lidar[i][1], gt_boxes_lidar[i][0]) + gt_boxes_camera[i][6] for i in range(len(obj_list))]) 
+        annotations['bbox'] = gt_boxes_camera
+        
+        return annotations
+    
+    @staticmethod
+    def get_fov_flag(pts_rect, img_shape, calib):
+        '''
+        Valid point should be in the image (and in the PC_AREA_SCOPE)
+        :param pts_rect:
+        :param img_shape:
+        :return:
+        '''
+        pts_img, pts_rect_depth = calib.rect_to_img(pts_rect)
+        val_flag_1 = np.logical_and(pts_img[:, 0] >= 0, pts_img[:, 0] < img_shape[1])
+        val_flag_2 = np.logical_and(pts_img[:, 1] >= 0, pts_img[:, 1] < img_shape[0])
+        val_flag_merge = np.logical_and(val_flag_1, val_flag_2)
+        pts_valid_flag = np.logical_and(val_flag_merge, pts_rect_depth >= 0)
+
+        return pts_valid_flag
+
+    def get_infos(self, num_workers=4, has_label=True, count_inside_pts=True, sample_id_list=None):
+        import concurrent.futures as futures
+
+        def process_single_scene(sample_idx):
+            
+            print('%s sample_idx: %s ' % (self.split, sample_idx))
+            info = {}
+            pc_info = {'num_features': 4, 'lidar_idx': sample_idx}
+            info['point_cloud'] = pc_info
+
+            image_info = {'image_idx': sample_idx, 'image_shape': self.get_image_shape(sample_idx)}
+            info['image'] = image_info
+            calib = self.get_calib(sample_idx)
+            
+            calib_info = {'T_IMG_CAM0': calib.t_img_cam[0], 'T_CAM_LIDAR': calib.t_cam_lidar[0]}
+
+            info['calib'] = calib_info
+
+            if has_label:
+                annotations = self.get_annotation_from_label(calib, sample_idx)
+                info['annos'] = annotations
+            return info
+
+        # temp = process_single_scene(self.sample_id_list[0])
+        sample_id_list = sample_id_list if sample_id_list is not None else self.sample_id_list
+        with futures.ThreadPoolExecutor(num_workers) as executor:
+            infos = executor.map(process_single_scene, sample_id_list)
+        return list(infos)
+
+    def create_groundtruth_database(self, info_path=None, used_classes=None, split='train'):
+        database_save_path = Path(self.root_path) / ('gt_database' if split == 'train' else ('gt_database_%s' % split))
+        db_info_save_path = Path(self.root_path) / ('cadc_dbinfos_%s.pkl' % split)
+
+        database_save_path.mkdir(parents=True, exist_ok=True)
+        all_db_infos = {}
+
+        with open(info_path, 'rb') as f:
+            infos = pickle.load(f)
+
+        for k in range(len(infos)):
+            print('gt_database sample: %d/%d' % (k + 1, len(infos)))
+            info = infos[k]
+            sample_idx = info['point_cloud']['lidar_idx']
+            points = self.get_lidar(sample_idx)
+            annos = info['annos']
+            names = annos['name']
+            difficulty = annos['difficulty']
+            bbox = annos['bbox']
+            gt_boxes = annos['gt_boxes_lidar']
+
+            num_obj = gt_boxes.shape[0]
+            point_indices = roiaware_pool3d_utils.points_in_boxes_cpu(
+                torch.from_numpy(points[:, 0:3]), torch.from_numpy(gt_boxes[:,:7])
+            ).numpy()  # (nboxes, npoints)
+
+            for i in range(num_obj):
+                filename = '%s_%s_%s_%s_%d.bin' % (sample_idx[0], sample_idx[1], sample_idx[2], names[i], i)
+                filepath = database_save_path / filename
+                gt_points = points[point_indices[i] > 0]
+
+                gt_points[:, :3] -= gt_boxes[i, :3]
+                with open(filepath, 'w') as f:
+                    gt_points.tofile(f)
+
+                if (used_classes is None) or names[i] in used_classes:
+                    db_path = str(filepath.relative_to(self.root_path))  # gt_database/xxxxx.bin
+                    db_info = {'name': names[i], 'path': db_path, 'image_idx': sample_idx, 'gt_idx': i,
+                               'box3d_lidar': gt_boxes[i], 'num_points_in_gt': gt_points.shape[0],
+                               'difficulty': difficulty[i], 'bbox': bbox[i], 'score': annos['score'][i]}
+                    if names[i] in all_db_infos:
+                        all_db_infos[names[i]].append(db_info)
+                    else:
+                        all_db_infos[names[i]] = [db_info]
+        for k, v in all_db_infos.items():
+            print('Database %s: %d' % (k, len(v)))
+
+        with open(db_info_save_path, 'wb') as f:
+            pickle.dump(all_db_infos, f)
+
+    @staticmethod
+    def generate_prediction_dicts(batch_dict, pred_dicts, class_names, output_path=None):
+        """
+        Args:
+            batch_dict:
+                frame_id:
+            pred_dicts: list of pred_dicts
+                pred_boxes: (N, 7), Tensor
+                pred_scores: (N), Tensor
+                pred_labels: (N), Tensor
+            class_names:
+            output_path:
+
+        Returns:
+
+        """
+        def get_template_prediction(num_samples):
+            ret_dict = {
+                'name': np.zeros(num_samples), 'truncated': np.zeros(num_samples),
+                'occluded': np.zeros(num_samples), 'alpha': np.zeros(num_samples),
+                'bbox': np.zeros([num_samples, 4]), 'dimensions': np.zeros([num_samples, 3]),
+                'location': np.zeros([num_samples, 3]), 'rotation_y': np.zeros(num_samples),
+                'score': np.zeros(num_samples), 'boxes_lidar': np.zeros([num_samples, 7])
+            }
+            return ret_dict
+
+        def generate_single_sample_dict(batch_index, box_dict):
+            pred_scores = box_dict['pred_scores'].cpu().numpy()
+            pred_boxes = box_dict['pred_boxes'].cpu().numpy()
+            pred_labels = box_dict['pred_labels'].cpu().numpy()
+            pred_dict = get_template_prediction(pred_scores.shape[0])
+            if pred_scores.shape[0] == 0:
+                return pred_dict
+
+            calib = batch_dict['calib'][batch_index]
+            image_shape = batch_dict['image_shape'][batch_index]
+            pred_boxes_camera = box_utils.boxes3d_lidar_to_kitti_camera(pred_boxes, calib)
+            pred_boxes_img = box_utils.boxes3d_kitti_camera_to_imageboxes(
+                pred_boxes_camera, calib, image_shape=image_shape
+            )
+
+            pred_dict['name'] = np.array(class_names)[pred_labels - 1]
+            pred_dict['alpha'] = -np.arctan2(-pred_boxes[:, 1], pred_boxes[:, 0]) + pred_boxes_camera[:, 6]
+            pred_dict['bbox'] = pred_boxes_img
+            pred_dict['dimensions'] = pred_boxes_camera[:, 3:6]
+            pred_dict['location'] = pred_boxes_camera[:, 0:3]
+            pred_dict['rotation_y'] = pred_boxes_camera[:, 6]
+            pred_dict['score'] = pred_scores
+            pred_dict['boxes_lidar'] = pred_boxes
+
+            return pred_dict
+
+        annos = []
+        for index, box_dict in enumerate(pred_dicts):
+            # frame_id = batch_dict['frame_id'][index]
+            frame_id = batch_dict['sample_idx'][index]
+
+            single_pred_dict = generate_single_sample_dict(index, box_dict)
+            single_pred_dict['frame_id'] = frame_id
+            annos.append(single_pred_dict)
+
+            if output_path is not None:
+                cur_det_file = output_path / ('%s.txt' % frame_id)
+                with open(cur_det_file, 'w') as f:
+                    bbox = single_pred_dict['bbox']
+                    loc = single_pred_dict['location']
+                    dims = single_pred_dict['dimensions']  # lhw -> hwl
+
+                    for idx in range(len(bbox)):
+                        print('%s -1 -1 %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f %.4f'
+                              % (single_pred_dict['name'][idx], single_pred_dict['alpha'][idx],
+                                 bbox[idx][0], bbox[idx][1], bbox[idx][2], bbox[idx][3],
+                                 dims[idx][1], dims[idx][2], dims[idx][0], loc[idx][0],
+                                 loc[idx][1], loc[idx][2], single_pred_dict['rotation_y'][idx],
+                                 single_pred_dict['score'][idx]), file=f)
+
+        return annos
+
+    # @staticmethod
+    # def generate_prediction_dict(input_dict, index, record_dict):
+    #     # finally generate predictions.
+    #     sample_idx = input_dict['sample_idx'][index] if 'sample_idx' in input_dict else -1
+    #     boxes3d_lidar_preds = record_dict['boxes'].cpu().numpy()
+
+    #     if boxes3d_lidar_preds.shape[0] == 0:
+    #         return {'sample_idx': sample_idx}
+
+    #     calib = input_dict['calib'][index]
+    #     image_shape = input_dict['image_shape'][index]
+
+    #     boxes3d_camera_preds = box_utils.boxes3d_lidar_to_kitti_camera(boxes3d_lidar_preds, calib)
+    #     boxes2d_image_preds = box_utils.boxes3d_kitti_camera_to_imageboxes(boxes3d_camera_preds, calib,
+    #                                                                  image_shape=image_shape)
+    #     # predictions
+    #     predictions_dict = {
+    #         'bbox': boxes2d_image_preds,
+    #         'box3d_camera': boxes3d_camera_preds,
+    #         'box3d_lidar': boxes3d_lidar_preds,
+    #         'scores': record_dict['scores'].cpu().numpy(),
+    #         'label_preds': record_dict['labels'].cpu().numpy(),
+    #         'sample_idx': sample_idx,
+    #     }
+    #     return predictions_dict
+
+    # @staticmethod
+    # def generate_annotations(input_dict, pred_dicts, class_names, save_to_file=False, output_dir=None):
+    #     def get_empty_prediction():
+    #         ret_dict = {
+    #             'name': np.array([]), 'truncated': np.array([]), 'occluded': np.array([]),
+    #             'alpha': np.array([]), 'bbox': np.zeros([0, 4]), 'dimensions': np.zeros([0, 3]),
+    #             'location': np.zeros([0, 3]), 'rotation_y': np.array([]), 'score': np.array([]),
+    #             'boxes_lidar': np.zeros([0, 7])
+    #         }
+    #         return ret_dict
+
+    #     def generate_single_anno(idx, box_dict):
+    #         num_example = 0
+    #         if 'bbox' not in box_dict:
+    #             return get_empty_prediction(), num_example
+
+    #         sample_idx = box_dict['sample_idx']
+    #         box_preds_image = box_dict['bbox']
+    #         box_preds_camera = box_dict['box3d_camera']
+    #         box_preds_lidar = box_dict['box3d_lidar']
+    #         scores = box_dict['scores']
+    #         label_preds = box_dict['label_preds']
+
+    #         anno = {'name': [], 'truncated': [], 'occluded': [], 'alpha': [], 'bbox': [], 'dimensions': [],
+    #                 'location': [], 'rotation_y': [], 'score': [], 'boxes_lidar': []}
+
+    #         for box_camera, box_lidar, bbox, score, label in zip(box_preds_camera, box_preds_lidar, box_preds_image,
+    #                                                              scores, label_preds):
+
+    #             if not (np.all(box_lidar[3:6] > -0.1)):
+    #                 print('Invalid size(sample %s): ' % str(sample_idx), box_lidar)
+    #                 continue
+
+    #             anno['name'].append(class_names[int(label - 1)])
+    #             anno['truncated'].append(0.0)
+    #             anno['occluded'].append(0)
+    #             anno['alpha'].append(-np.arctan2(-box_lidar[1], box_lidar[0]) + box_camera[6])
+    #             anno['bbox'].append(bbox)
+    #             anno['dimensions'].append(box_camera[3:6])
+    #             anno['location'].append(box_camera[:3])
+    #             anno['rotation_y'].append(box_camera[6])
+    #             anno['score'].append(score)
+    #             anno['boxes_lidar'].append(box_lidar)
+
+    #             num_example += 1
+
+    #         if num_example != 0:
+    #             anno = {k: np.stack(v) for k, v in anno.items()}
+    #         else:
+    #             anno = get_empty_prediction()
+
+    #         return anno, num_example
+
+    #     annos = []
+    #     for i, box_dict in enumerate(pred_dicts):
+    #         sample_idx = box_dict['sample_idx']
+    #         single_anno, num_example = generate_single_anno(i, box_dict)
+    #         single_anno['num_example'] = num_example
+    #         single_anno['sample_idx'] = np.array([sample_idx] * num_example, dtype=np.int64)
+    #         annos.append(single_anno)
+    #         if save_to_file:
+    #             cur_det_file = os.path.join(output_dir, '%s_%s_%s.json' % (sample_idx[0],sample_idx[1],sample_idx[2]))
+    #             boxes_lidar = single_anno['boxes_lidar'] # x y z w l h yaw
+    #             pred_json = {}
+    #             pred_json['cuboids'] = []
+    #             for idx in range(len(bbox)):
+    #                 data['cuboids'].append({
+    #                     'label': single_anno['name'][idx],
+    #                     'position': {
+    #                         'x': boxes_lidar[idx][0],
+    #                         'y': boxes_lidar[idx][1],
+    #                         'z': boxes_lidar[idx][2],
+    #                     },
+    #                     'dimension': {
+    #                         'x': boxes_lidar[idx][3],
+    #                         'y': boxes_lidar[idx][4],
+    #                         'z': boxes_lidar[idx][5],
+    #                     },
+    #                     "yaw": boxes_lidar[idx][6],
+    #                     "score": single_anno['score'][idx]
+    #                 })
+    #             with open(cur_det_file, 'w') as f:
+    #                 json.dump(pred_json, f)
+
+    #     return annos
+
+    def evaluation(self, det_annos, class_names, **kwargs):
+        assert 'annos' in self.cadc_infos[0].keys()
+        import pcdet.datasets.kitti.kitti_object_eval_python.eval as kitti_eval
+
+        if 'annos' not in self.cadc_infos[0]:
+            return 'None', {}
+
+        eval_det_annos = copy.deepcopy(det_annos)
+        eval_gt_annos = [copy.deepcopy(info['annos']) for info in self.cadc_infos]
+        ap_result_str, ap_dict = kitti_eval.get_official_eval_result(eval_gt_annos, eval_det_annos, class_names)
+
+        return ap_result_str, ap_dict
+
+    def __len__(self):
+        return len(self.cadc_infos)
+
+    def __getitem__(self, index):
+        # index = 4
+        info = copy.deepcopy(self.cadc_infos[index])
+
+        sample_idx = info['point_cloud']['lidar_idx']
+
+        points = self.get_lidar(sample_idx)
+        calib = self.get_calib(sample_idx)
+
+        img_shape = info['image']['image_shape']
+        if cfg.DATA_CONFIG.FOV_POINTS_ONLY:
+            pts_rect = calib.lidar_to_rect(points[:, 0:3])
+            fov_flag = self.get_fov_flag(pts_rect, img_shape, calib)
+            points = points[fov_flag]
+
+        input_dict = {
+            'points': points,
+            'sample_idx': sample_idx,
+            'calib': calib,
+        }
+
+        if 'annos' in info:
+            annos = info['annos']
+            #annos = common_utils.drop_info_with_name(annos, name='DontCare')
+            loc, dims, rots = annos['location'], annos['dimensions'], annos['rotation_y']
+            gt_names = annos['name']
+            bbox = annos['bbox']
+            gt_boxes_camera = np.concatenate([loc, dims, rots[..., np.newaxis]], axis=1).astype(np.float32)
+            if 'gt_boxes_lidar' in annos:
+                gt_boxes_lidar = annos['gt_boxes_lidar']
+            else:
+                gt_boxes_lidar = box_utils.boxes3d_kitti_camera_to_lidar(gt_boxes_camera, calib)
+
+            input_dict.update({
+                # 'gt_boxes': gt_boxes_camera,
+                'gt_names': gt_names,
+                # 'gt_box2d': bbox,
+                'gt_boxes': gt_boxes_lidar
+            })
+
+        data_dict = self.prepare_data(data_dict=input_dict)
+
+        data_dict['image_shape'] = img_shape
+        return data_dict 
+
+def create_cadc_infos(dataset_cfg, class_names, data_path, save_path, workers=4):
+    dataset = CadcDataset(dataset_cfg=dataset_cfg, class_names=class_names, root_path=data_path, training=False)
+    train_split, val_split = 'train', 'val'
+
+    train_filename = save_path / ('cadc_infos_%s.pkl' % train_split)
+    val_filename = save_path / ('cadc_infos_%s.pkl' % val_split)
+    trainval_filename = save_path / 'cadc_infos_trainval.pkl'
+    test_filename = save_path / 'cadc_infos_test.pkl'
+
+    print('---------------Start to generate data infos---------------')
+
+    dataset.set_split(train_split)
+    cadc_infos_train = dataset.get_infos(num_workers=workers, has_label=True, count_inside_pts=True)
+    with open(train_filename, 'wb') as f:
+        pickle.dump(cadc_infos_train, f)
+    print('Cadc info train file is saved to %s' % train_filename)
+
+    dataset.set_split(val_split)
+    cadc_infos_val = dataset.get_infos(num_workers=workers, has_label=True, count_inside_pts=True)
+    with open(val_filename, 'wb') as f:
+        pickle.dump(cadc_infos_val, f)
+    print('Cadc info val file is saved to %s' % val_filename)
+
+    with open(trainval_filename, 'wb') as f:
+        pickle.dump(cadc_infos_train + cadc_infos_val, f)
+    print('Cadc info trainval file is saved to %s' % trainval_filename)
+
+    dataset.set_split('test')
+    cadc_infos_test = dataset.get_infos(num_workers=workers, has_label=False, count_inside_pts=False)
+    with open(test_filename, 'wb') as f:
+        pickle.dump(cadc_infos_test, f)
+    print('Cadc info test file is saved to %s' % test_filename)
+
+    print('---------------Start create groundtruth database for data augmentation---------------')
+    dataset.set_split(train_split)
+    dataset.create_groundtruth_database(train_filename, split=train_split)
+
+    print('---------------Data preparation Done---------------')
+
+if __name__ == '__main__':
+    import sys
+    if sys.argv.__len__() > 1 and sys.argv[1] == 'create_cadc_infos':
+        import yaml
+        from pathlib import Path
+        from easydict import EasyDict
+        dataset_cfg = EasyDict(yaml.load(open(sys.argv[2])))
+        ROOT_DIR = (Path(__file__).resolve().parent / '../../../').resolve()
+        create_cadc_infos(
+            dataset_cfg=dataset_cfg,
+            class_names=['Car', 'Pedestrian', 'Truck'],
+            data_path=ROOT_DIR / 'data' / 'cadc',
+            save_path=ROOT_DIR / 'data' / 'cadc'
+        )
+
+    # if sys.argv.__len__() > 1 and sys.argv[1] == 'create_cadc_infos':
+    #     create_cadc_infos(
+    #         data_path=cfg.ROOT_DIR / 'data' / 'cadcd',
+    #         save_path=cfg.ROOT_DIR / 'data' / 'cadcd'
+    #     )
+    # else:
+    #     A = CadcDataset(root_path='data/cadcd', class_names=cfg.CLASS_NAMES, split='train', training=True)
+    #     import pdb
+    #     pdb.set_trace()
+    #     ans = A[1]
+
+
