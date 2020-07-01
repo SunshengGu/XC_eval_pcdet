@@ -10,8 +10,14 @@ from pcdet.datasets.cadc.cadc_dataset import CadcDataset
 REPO_DIR='/home/matthew/git/cadc_testing/WISEOpenLidarPerceptron'
 ROOT_PATH=os.path.join(REPO_DIR, 'data/cadc')
 CONFIG_PATH=os.path.join(REPO_DIR, 'tools/cfgs/dataset_configs/cadc_dataset.yaml')
-RESULT_PATH= os.path.join(REPO_DIR,'output/pointpillar_cadc/default/eval/epoch_50/val/default/result.pkl')
-OUTPUT_DIR=os.path.join(ROOT_PATH, 'bev_pred')
+USE_PRETRAINED = True
+if USE_PRETRAINED == False:
+    RESULT_PATH= os.path.join(REPO_DIR,'output/cadc_models/pointpillar/default/eval/epoch_50/val/default/result.pkl')
+    OUTPUT_DIR=os.path.join(ROOT_PATH, 'bev_pred')
+else:
+    RESULT_PATH= os.path.join(REPO_DIR,'output/cadc_models/pointpillar/default/eval/epoch_7728/val/default/result.pkl')
+    OUTPUT_DIR=os.path.join(ROOT_PATH, 'bev_pred_pretrained')
+
 CLASSES=['Car', 'Pedestrian', 'Truck']
 
 def cuboid_to_bev(x,y,z,w,l,h,yaw):
@@ -161,7 +167,7 @@ def draw_bev(lidar, annotations, predictions, output_path, s1=50,s2=50,f1=50,f2=
         ax.add_patch(polys)
 
     ax.scatter(x_img, y_img, s=1, c=pixel_values, alpha=1.0, cmap=cmap) # Plot Lidar points
-    ax.set_facecolor((0, 0, 0))  # backgrounD is black
+    ax.set_facecolor((0, 0, 0))  # background is black
     ax.axis('scaled')  # {equal, scaled}
     ax.xaxis.set_visible(False)  # Do not draw axis tick marks
     ax.yaxis.set_visible(False)  # Do not draw axis tick marks
@@ -177,8 +183,9 @@ def main():
     import yaml
     from pathlib import Path
     from easydict import EasyDict
-    dataset_cfg = EasyDict(yaml.load(CONFIG_PATH))
-    dataset = CadcDataset(root_path=ROOT_PATH, dataset_cfg=dataset_cfg, class_names=CLASSES)
+
+    dataset_cfg = EasyDict(yaml.load(open(CONFIG_PATH), Loader=yaml.SafeLoader))
+    dataset = CadcDataset(root_path=Path(ROOT_PATH), dataset_cfg=dataset_cfg, class_names=CLASSES)
     results = np.load(RESULT_PATH, allow_pickle=True)
     
     viz_set = np.append(np.array(range(5)), np.random.randint(low=0, high=len(results), size=20))
@@ -186,11 +193,19 @@ def main():
     
     for viz_idx in viz_set:
         result_frame = results[viz_idx]
-        if (len(result_frame['sample_idx']) == 0): 
+        # TODO double check, this is either sample_idx or frame_id depending on
+        # code in generate_prediction_dicts() in cadc_dataset.py
+        unique_id = 'frame_id'
+        if (len(result_frame[unique_id]) == 0): 
             continue
-        sample_idx = result_frame['sample_idx'][0]
-        date, run, frame = str(sample_idx[0]), str(sample_idx[1]).zfill(4), str(sample_idx[2]).zfill(10)
-        date = date[0:4] + '_' + date[4:6] + '_' + date[6:]
+
+        # TODO uncomment this if the unique id is modified to only be a number
+        # sample_idx = result_frame[unique_id][0]
+        # date, run, frame = str(sample_idx[0]), str(sample_idx[1]).zfill(4), str(sample_idx[2]).zfill(10)
+        # date = date[0:4] + '_' + date[4:6] + '_' + date[6:]
+
+        # For now since we send over three variables we can do it this way
+        date, run, frame = result_frame[unique_id]
         
         lidar_data = dataset.get_lidar([date, run, frame])
         annotations = dataset.get_label([date, run, frame])[int(frame)]
@@ -199,6 +214,8 @@ def main():
         print("Processing Sample: %s_%s_%s" % (date, run, frame))
         
         draw_bev(lidar_data, annotations, predictions, os.path.join(OUTPUT_DIR, "%s_%s_%s.png" % (date, run, frame)))
+    
+    print("Images written to:", OUTPUT_DIR)
 
 if __name__ == '__main__':
     main()

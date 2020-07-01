@@ -89,3 +89,13 @@ python train.py --cfg_file cfgs/cadc_models/pointpillar.yaml --batch_size 6 --ep
 ```
 tensorboard --logdir output/cadc_models/pointpillar/default/
 ```
+
+
+* Test with a pretrained model: 
+```shell script
+python test.py --cfg_file cfgs/cadc_models/pointpillar.yaml --batch_size 6 --ckpt ../output/kitti_models/pointpillar_7728.pth
+```
+
+```
+python test.py --cfg_file cfgs/cadc_models/pointpillar.yaml --batch_size 6 --eval-all
+```
