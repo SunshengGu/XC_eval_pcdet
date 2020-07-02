@@ -93,9 +93,9 @@ tensorboard --logdir output/cadc_models/pointpillar/default/
 
 * Test with a pretrained model: 
 ```shell script
-python test.py --cfg_file cfgs/cadc_models/pointpillar.yaml --batch_size 6 --ckpt ../output/kitti_models/pointpillar_7728.pth
+python test.py --cfg_file cfgs/cadc_models/pointpillar.yaml --batch_size 4 --ckpt ../output/kitti_models/pointpillar_7728.pth
 ```
 
 ```
-python test.py --cfg_file cfgs/cadc_models/pointpillar.yaml --batch_size 6 --eval-all
+python test.py --cfg_file cfgs/cadc_models/pointpillar.yaml --batch_size 6 --ckpt ../output/cadc_models/pointpillar/default/ckpt/checkpoint_epoch_50.pth
 ```

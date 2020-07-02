@@ -68,11 +68,11 @@ MODEL:
                 'feature_map_stride': 2
             },
             {
-                'anchor_sizes': [[1.76, 0.6, 1.73]],
+                'anchor_sizes': [[5.89, 2.03, 1.92]], # F-150 length, width, height
                 'anchor_rotations': [0, 1.57],
                 'anchor_bottom_heights': [-0.6],
                 'align_center': False,
-                'feature_map_stride': 2
+                'feature_map_stride': 6
             }
         ]
 
