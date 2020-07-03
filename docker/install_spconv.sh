@@ -1,3 +1,5 @@
+#! /usr/bin/env bash
+
 # Ubuntu 18.04
 # Step 0: Clone repo
 echo "Enter FULL path of where to clone spconv"

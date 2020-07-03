@@ -1,0 +1,35 @@
+# PCDet Docker Support
+## Preparation
+Before building the docker image, make sure to check the
+configurations in the `config.sh` file. 
+You may need to make changes to the `HOST_*` variables
+to the **absolute** paths of the corresponding directories.
+```bash
+# In config.sh
+HOST_PCDET_ROOT=...     # PCDet location
+HOST_NUSC_ROOT=...      # NuScenes dataset that contains nuscenes-devkit
+                        # and data directory (e.g. v1.0-mini)
+HOST_CADC_ROOT=...      # CADC dataset directory
+HOST_LOGDIR=...         # Output location
+                        # can be used to store model checkpoints etc.
+```
+
+## Build Docker Image
+Use the provided script to build the docker image.
+The name of the image is by default `pcdet-standalone`.
+```bash
+bash build.sh
+```
+This process should take a few minutes.
+
+## Run Docker Container
+Use the provided script to run the docker container.
+The name of the container is by default `pcdet-standalone.$(whoami).$RANDOM`.
+```bash
+bash run.sh
+```
+Additional arguments for `docker run` can be passed directly.
+For example
+```bash
+bash run.sh --cpuset-cpus=0,1
+```

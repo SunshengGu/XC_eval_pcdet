@@ -1,3 +1,5 @@
+#! /usr/bin/env bash
+
 # Remove current version
 sudo apt purge --auto-remove cmake
 # https://askubuntu.com/questions/355565/how-do-i-install-the-latest-version-of-cmake-from-the-command-line
