@@ -1,8 +1,8 @@
 # PCDet Docker Support
 ## Preparation
 Before building the docker image, make sure to check the
-configurations in the `config.sh` file. 
-You may need to make changes to the `HOST_*` variables
+configurations in `config.sh`. 
+You may need to change the `HOST_*` variables
 to the **absolute** paths of the corresponding directories.
 ```bash
 # In config.sh
@@ -32,4 +32,12 @@ Additional arguments for `docker run` can be passed directly.
 For example
 ```bash
 bash run.sh --cpuset-cpus=0,1
+```
+
+The following directories from host will be mounted to the container's workspace:
+```bash
+HOST_PCDET_ROOT  =>  PCDET_ROOT     # `/root/pcdet` by default
+HOST_NUSC_ROOT   =>  NUSC_ROOT      # `/root/nusc` by default
+HOST_CADC_ROOT   =>  CADC_ROOT      # `/root/cadc` by default
+HOST_LOGDIR      =>  LOGDIR         # `/root/logdir` by default
 ```
