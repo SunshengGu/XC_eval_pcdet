@@ -17,7 +17,7 @@ class DatasetTemplate(torch_data.Dataset):
         self.logger = logger
         self.root_path = root_path if root_path is not None else Path(self.dataset_cfg.DATA_PATH)
         self.logger = logger
-        if self.dataset_cfg is None:
+        if self.dataset_cfg is None or class_names is None:
             return
 
         self.point_cloud_range = np.array(self.dataset_cfg.POINT_CLOUD_RANGE, dtype=np.float32)
@@ -39,10 +39,47 @@ class DatasetTemplate(torch_data.Dataset):
     def mode(self):
         return 'train' if self.training else 'test'
 
+    def __getstate__(self):
+        d = dict(self.__dict__)
+        del d['logger']
+        return d
+
+    def __setstate__(self, d):
+        self.__dict__.update(d)
+
+    @staticmethod
+    def generate_prediction_dicts(batch_dict, pred_dicts, class_names, output_path=None):
+        """
+        To support a custom dataset, implement this function to receive the predicted results from the model, and then
+        transform the unified normative coordinate to your required coordinate, and optionally save them to disk.
+
+        Args:
+            batch_dict: dict of original data from the dataloader
+            pred_dicts: dict of predicted results from the model
+                pred_boxes: (N, 7), Tensor
+                pred_scores: (N), Tensor
+                pred_labels: (N), Tensor
+            class_names:
+            output_path: if it is not None, save the results to this path
+        Returns:
+
+        """
+
     def __len__(self):
         raise NotImplementedError
 
-    def forward(self, index):
+    def __getitem__(self, index):
+        """
+        To support a custom dataset, implement this function to load the raw data (and labels), then transform them to
+        the unified normative coordinate and call the function self.prepare_data() to process the data and send them
+        to the model.
+
+        Args:
+            index:
+
+        Returns:
+
+        """
         raise NotImplementedError
 
     def prepare_data(self, data_dict):
@@ -93,7 +130,7 @@ class DatasetTemplate(torch_data.Dataset):
         data_dict = self.data_processor.forward(
             data_dict=data_dict
         )
-        data_dict.pop('gt_names')
+        data_dict.pop('gt_names', None)
 
         return data_dict
 
@@ -107,22 +144,26 @@ class DatasetTemplate(torch_data.Dataset):
         ret = {}
 
         for key, val in data_dict.items():
-            if key in ['voxels', 'voxel_num_points']:
-                ret[key] = np.concatenate(val, axis=0)
-            elif key in ['points', 'voxel_coords']:
-                coors = []
-                for i, coor in enumerate(val):
-                    coor_pad = np.pad(coor, ((0, 0), (1, 0)), mode='constant', constant_values=i)
-                    coors.append(coor_pad)
-                ret[key] = np.concatenate(coors, axis=0)
-            elif key in ['gt_boxes']:
-                max_gt = max([len(x) for x in val])
-                batch_gt_boxes3d = np.zeros((batch_size, max_gt, val[0].shape[-1]), dtype=np.float32)
-                for k in range(batch_size):
-                    batch_gt_boxes3d[k, :val[k].__len__(), :] = val[k]
-                ret[key] = batch_gt_boxes3d
-            else:
-                ret[key] = np.stack(val, axis=0)
+            try:
+                if key in ['voxels', 'voxel_num_points']:
+                    ret[key] = np.concatenate(val, axis=0)
+                elif key in ['points', 'voxel_coords']:
+                    coors = []
+                    for i, coor in enumerate(val):
+                        coor_pad = np.pad(coor, ((0, 0), (1, 0)), mode='constant', constant_values=i)
+                        coors.append(coor_pad)
+                    ret[key] = np.concatenate(coors, axis=0)
+                elif key in ['gt_boxes']:
+                    max_gt = max([len(x) for x in val])
+                    batch_gt_boxes3d = np.zeros((batch_size, max_gt, val[0].shape[-1]), dtype=np.float32)
+                    for k in range(batch_size):
+                        batch_gt_boxes3d[k, :val[k].__len__(), :] = val[k]
+                    ret[key] = batch_gt_boxes3d
+                else:
+                    ret[key] = np.stack(val, axis=0)
+            except:
+                print('Error in collate_batch: key=%s' % key)
+                raise TypeError
 
         ret['batch_size'] = batch_size
         return ret
