@@ -70,9 +70,7 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
         cachetools \
         easydict \
         enum34 \
-        fire \
         future \
-        h5py \
         motmetrics \
         numba \
         numpy \
@@ -117,7 +115,6 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
     git checkout 8da6f967fb9a054d8870c3515b1b44eca2103634 && \
     SPCONV_FORCE_BUILD_CUDA=1 \
     python setup.py bdist_wheel && \
-    ls -la ~/spconv/dist/ && \
     $PIP_INSTALL ~/spconv/dist/spconv-*.whl && \
 
 # ==================================================================
@@ -132,6 +129,9 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
         /tmp/* \
         ~/*
 
+# ==================================================================
+# environment setup
+# ------------------------------------------------------------------
 
 ARG PCDET_ROOT=/root/pcdet
 ENV PCDET_ROOT=$PCDET_ROOT
@@ -147,6 +147,8 @@ ENV LOGDIR=$LOGDIR
 
 ENV PYTHONPATH=$PYTHONPATH:$PCDET_ROOT
 ENV PYTHONPATH=$PYTHONPATH:$NUSC_ROOT/nuscenes-devkit/python-sdk
+
+ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib/python${PYTHON_VERSION}/dist-packages/spconv
 
 # TODO: Create dataset symlinks for datasets
 
