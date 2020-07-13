@@ -1,7 +1,7 @@
 DATASET: 'CadcDataset'
 DATA_PATH: '../data/cadc'
 
-POINT_CLOUD_RANGE: [-50, -50, -10, 50, 50, 10]
+POINT_CLOUD_RANGE: [-50, -50, -5, 50, 50, 3]
 
 DATA_SPLIT: {
     'train': train,
@@ -22,7 +22,7 @@ DATA_AUGMENTOR:
       DB_INFO_PATH:
           - cadc_dbinfos_train.pkl
       PREPARE: {
-         filter_by_min_points: ['Car:50', 'Pedestrian:50', 'Truck:50'],
+         filter_by_min_points: ['Car:50', 'Pedestrian:20', 'Truck:50'],
          filter_by_difficulty: [-1],
       }
 
@@ -41,6 +41,11 @@ DATA_AUGMENTOR:
     - NAME: random_world_scaling
       WORLD_SCALE_RANGE: [0.95, 1.05]
 
+FILTER_CRITERIA: {
+     filter_by_min_points: ['Car:50', 'Pedestrian:20', 'Truck:50'],
+     distance: 60,
+     score: 0.2
+}
 
 POINT_FEATURE_ENCODING: {
     encoding_type: absolute_coordinates_encoding,

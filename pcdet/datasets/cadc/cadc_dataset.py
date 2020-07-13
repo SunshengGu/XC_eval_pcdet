@@ -68,7 +68,7 @@ class CadcDataset(DatasetTemplate):
 
     def get_lidar(self, sample_idx):
         date, set_num, idx = sample_idx
-        lidar_file = os.path.join(self.root_path, date, set_num, 'processed', 'lidar_points', 'data', '%s.bin' % idx)
+        lidar_file = os.path.join(self.root_path, date, set_num, 'labeled', 'lidar_points', 'data', '%s.bin' % idx)
         assert os.path.exists(lidar_file)
         points = np.fromfile(lidar_file, dtype=np.float32).reshape(-1, 4)
         points[:, 3] /= 255
@@ -81,7 +81,7 @@ class CadcDataset(DatasetTemplate):
             print(len(sample_idx))
             exit
         date, set_num, idx = sample_idx
-        img_file = os.path.join(self.root_path, date, set_num, 'processed', 'image_00', 'data', '%s.png' % idx)
+        img_file = os.path.join(self.root_path, date, set_num, 'labeled', 'image_00', 'data', '%s.png' % idx)
         assert os.path.exists(img_file)
         return np.array(io.imread(img_file).shape[:2], dtype=np.int32)
 
@@ -116,10 +116,52 @@ class CadcDataset(DatasetTemplate):
         # Currently unsupported in CADC
         raise NotImplementedError
 
+    # Get point_count, distance, score threshold from yaml file
+    def get_threshold(self):
+        params = self.dataset_cfg.FILTER_CRITERIA['filter_by_min_points']
+        point_count_threshold = {}
+        for elem in params:
+            key, val = elem.split(':')
+            point_count_threshold[key] = int(val)
+
+        distance_threshold = self.dataset_cfg.FILTER_CRITERIA['distance']
+        score_threshold = self.dataset_cfg.FILTER_CRITERIA['score']
+        return point_count_threshold, distance_threshold, score_threshold
+
     def get_annotation_from_label(self, calib, sample_idx):
         date, set_num, idx = sample_idx
-        obj_list = self.get_label(sample_idx)[int(idx)]['cuboids']
+        obj_list_temp = self.get_label(sample_idx)[int(idx)]['cuboids']
+        point_count_threshold, distance_threshold, _ = self.get_threshold()
+
+        obj_list = []
+        closest_ratio_to_criteria, closest_idx_to_criteria = 0.0, 0
+
+        # Filter out objects
+        for idx, obj in enumerate(obj_list_temp):
+            # filter by label
+            if (obj['label'] not in ['Car', 'Pedestrian', 'Truck']):
+                continue
+            if (obj['label'] == 'Truck' and obj['attributes']['truck_type'] != 'Pickup_Truck'):
+                continue
+            # filter by point_count
+            if obj['points_count'] < point_count_threshold[obj['label']]:
+                ratio_to_criteria = obj['points_count'] / point_count_threshold[obj['label']]
+                if ratio_to_criteria > closest_ratio_to_criteria:
+                    closest_idx_to_criteria = idx
+                continue
+            # filter by distance
+            x, y, z = obj['position']['x'],obj['position']['y'],obj['position']['z']
+            distance = np.sqrt(np.square(x)+np.square(y)+np.square(z))
+            if distance > distance_threshold:
+                continue
+            obj_list.append(obj)
         
+        # If there is no object in the frame satisfying the filter criteria, add
+        # the object that is the closest to the filter criteria to avoid empty
+        # annotations error downstream in other functions.
+        if len(obj_list) == 0:
+            obj_list.append(obj_list_temp[closest_idx_to_criteria])
+
         annotations = {}
         annotations['name'] = np.array([obj['label'] for obj in obj_list])
         annotations['num_points_in_gt'] = [[obj['points_count'] for obj in obj_list]]
@@ -242,8 +284,14 @@ class CadcDataset(DatasetTemplate):
         with open(db_info_save_path, 'wb') as f:
             pickle.dump(all_db_infos, f)
 
+    
+    # instance method wrapper, in order to use the instance method get_threshold()
+    def generate_prediction_dicts(self, batch_dict, pred_dicts, class_names, output_path=None):
+        filter_thresholds = self.get_threshold()
+        return self._generate_prediction_dicts(batch_dict, pred_dicts, class_names, filter_thresholds, output_path=None)
+
     @staticmethod
-    def generate_prediction_dicts(batch_dict, pred_dicts, class_names, output_path=None):
+    def _generate_prediction_dicts(batch_dict, pred_dicts, class_names, filter_thresholds, output_path=None):
         """
         Args:
             batch_dict:
@@ -268,17 +316,38 @@ class CadcDataset(DatasetTemplate):
             }
             return ret_dict
 
-        def generate_single_sample_dict(batch_index, box_dict):
+        # Return a list of index which satisfies score and distance criteria
+        def filter_criteria(pred_scores, pred_locations, score_threshold, distance_threshold):
+            x, y, z = pred_locations[:,0], pred_locations[:,1], pred_locations[:,2]
+            distance = np.sqrt(np.square(x)+np.square(y)+np.square(z))
+            index = []
+            for i in range(pred_scores.shape[0]):
+                if pred_scores[i] >= score_threshold and distance[i] < distance_threshold:
+                    index.append(True)
+                else:
+                    index.append(False)
+            index = np.array(index)
+            return index
+
+        def generate_single_sample_dict(batch_index, box_dict, filter_thresholds):
             pred_scores = box_dict['pred_scores'].cpu().numpy()
             pred_boxes = box_dict['pred_boxes'].cpu().numpy()
             pred_labels = box_dict['pred_labels'].cpu().numpy()
-            pred_dict = get_template_prediction(pred_scores.shape[0])
-            if pred_scores.shape[0] == 0:
-                return pred_dict
 
             calib = batch_dict['calib'][batch_index]
             image_shape = batch_dict['image_shape'][batch_index]
             pred_boxes_camera = box_utils.boxes3d_lidar_to_kitti_camera(pred_boxes, calib)
+
+            # filter by score and distance
+            _, distance_threshold, score_threshold = filter_thresholds
+            index = filter_criteria(pred_scores, pred_boxes_camera[:,0:3], score_threshold, distance_threshold)
+            pred_scores, pred_boxes, pred_labels, pred_boxes_camera = \
+            pred_scores[index], pred_boxes[index], pred_labels[index], pred_boxes_camera[index]
+
+            pred_dict = get_template_prediction(pred_scores.shape[0])
+            if pred_scores.shape[0] == 0:
+                return pred_dict
+
             pred_boxes_img = box_utils.boxes3d_kitti_camera_to_imageboxes(
                 pred_boxes_camera, calib, image_shape=image_shape
             )
@@ -299,7 +368,7 @@ class CadcDataset(DatasetTemplate):
             # frame_id = batch_dict['frame_id'][index]
             frame_id = batch_dict['sample_idx'][index]
 
-            single_pred_dict = generate_single_sample_dict(index, box_dict)
+            single_pred_dict = generate_single_sample_dict(index, box_dict, filter_thresholds)
             single_pred_dict['frame_id'] = frame_id
             annos.append(single_pred_dict)
 
@@ -317,120 +386,7 @@ class CadcDataset(DatasetTemplate):
                                  dims[idx][1], dims[idx][2], dims[idx][0], loc[idx][0],
                                  loc[idx][1], loc[idx][2], single_pred_dict['rotation_y'][idx],
                                  single_pred_dict['score'][idx]), file=f)
-
         return annos
-
-    # @staticmethod
-    # def generate_prediction_dict(input_dict, index, record_dict):
-    #     # finally generate predictions.
-    #     sample_idx = input_dict['sample_idx'][index] if 'sample_idx' in input_dict else -1
-    #     boxes3d_lidar_preds = record_dict['boxes'].cpu().numpy()
-
-    #     if boxes3d_lidar_preds.shape[0] == 0:
-    #         return {'sample_idx': sample_idx}
-
-    #     calib = input_dict['calib'][index]
-    #     image_shape = input_dict['image_shape'][index]
-
-    #     boxes3d_camera_preds = box_utils.boxes3d_lidar_to_kitti_camera(boxes3d_lidar_preds, calib)
-    #     boxes2d_image_preds = box_utils.boxes3d_kitti_camera_to_imageboxes(boxes3d_camera_preds, calib,
-    #                                                                  image_shape=image_shape)
-    #     # predictions
-    #     predictions_dict = {
-    #         'bbox': boxes2d_image_preds,
-    #         'box3d_camera': boxes3d_camera_preds,
-    #         'box3d_lidar': boxes3d_lidar_preds,
-    #         'scores': record_dict['scores'].cpu().numpy(),
-    #         'label_preds': record_dict['labels'].cpu().numpy(),
-    #         'sample_idx': sample_idx,
-    #     }
-    #     return predictions_dict
-
-    # @staticmethod
-    # def generate_annotations(input_dict, pred_dicts, class_names, save_to_file=False, output_dir=None):
-    #     def get_empty_prediction():
-    #         ret_dict = {
-    #             'name': np.array([]), 'truncated': np.array([]), 'occluded': np.array([]),
-    #             'alpha': np.array([]), 'bbox': np.zeros([0, 4]), 'dimensions': np.zeros([0, 3]),
-    #             'location': np.zeros([0, 3]), 'rotation_y': np.array([]), 'score': np.array([]),
-    #             'boxes_lidar': np.zeros([0, 7])
-    #         }
-    #         return ret_dict
-
-    #     def generate_single_anno(idx, box_dict):
-    #         num_example = 0
-    #         if 'bbox' not in box_dict:
-    #             return get_empty_prediction(), num_example
-
-    #         sample_idx = box_dict['sample_idx']
-    #         box_preds_image = box_dict['bbox']
-    #         box_preds_camera = box_dict['box3d_camera']
-    #         box_preds_lidar = box_dict['box3d_lidar']
-    #         scores = box_dict['scores']
-    #         label_preds = box_dict['label_preds']
-
-    #         anno = {'name': [], 'truncated': [], 'occluded': [], 'alpha': [], 'bbox': [], 'dimensions': [],
-    #                 'location': [], 'rotation_y': [], 'score': [], 'boxes_lidar': []}
-
-    #         for box_camera, box_lidar, bbox, score, label in zip(box_preds_camera, box_preds_lidar, box_preds_image,
-    #                                                              scores, label_preds):
-
-    #             if not (np.all(box_lidar[3:6] > -0.1)):
-    #                 print('Invalid size(sample %s): ' % str(sample_idx), box_lidar)
-    #                 continue
-
-    #             anno['name'].append(class_names[int(label - 1)])
-    #             anno['truncated'].append(0.0)
-    #             anno['occluded'].append(0)
-    #             anno['alpha'].append(-np.arctan2(-box_lidar[1], box_lidar[0]) + box_camera[6])
-    #             anno['bbox'].append(bbox)
-    #             anno['dimensions'].append(box_camera[3:6])
-    #             anno['location'].append(box_camera[:3])
-    #             anno['rotation_y'].append(box_camera[6])
-    #             anno['score'].append(score)
-    #             anno['boxes_lidar'].append(box_lidar)
-
-    #             num_example += 1
-
-    #         if num_example != 0:
-    #             anno = {k: np.stack(v) for k, v in anno.items()}
-    #         else:
-    #             anno = get_empty_prediction()
-
-    #         return anno, num_example
-
-    #     annos = []
-    #     for i, box_dict in enumerate(pred_dicts):
-    #         sample_idx = box_dict['sample_idx']
-    #         single_anno, num_example = generate_single_anno(i, box_dict)
-    #         single_anno['num_example'] = num_example
-    #         single_anno['sample_idx'] = np.array([sample_idx] * num_example, dtype=np.int64)
-    #         annos.append(single_anno)
-    #         if save_to_file:
-    #             cur_det_file = os.path.join(output_dir, '%s_%s_%s.json' % (sample_idx[0],sample_idx[1],sample_idx[2]))
-    #             boxes_lidar = single_anno['boxes_lidar'] # x y z w l h yaw
-    #             pred_json = {}
-    #             pred_json['cuboids'] = []
-    #             for idx in range(len(bbox)):
-    #                 data['cuboids'].append({
-    #                     'label': single_anno['name'][idx],
-    #                     'position': {
-    #                         'x': boxes_lidar[idx][0],
-    #                         'y': boxes_lidar[idx][1],
-    #                         'z': boxes_lidar[idx][2],
-    #                     },
-    #                     'dimension': {
-    #                         'x': boxes_lidar[idx][3],
-    #                         'y': boxes_lidar[idx][4],
-    #                         'z': boxes_lidar[idx][5],
-    #                     },
-    #                     "yaw": boxes_lidar[idx][6],
-    #                     "score": single_anno['score'][idx]
-    #                 })
-    #             with open(cur_det_file, 'w') as f:
-    #                 json.dump(pred_json, f)
-
-    #     return annos
 
     def evaluation(self, det_annos, class_names, **kwargs):
         assert 'annos' in self.cadc_infos[0].keys()
@@ -441,6 +397,21 @@ class CadcDataset(DatasetTemplate):
 
         eval_det_annos = copy.deepcopy(det_annos)
         eval_gt_annos = [copy.deepcopy(info['annos']) for info in self.cadc_infos]
+
+        # Convert gt bbox from 3d to 2d
+        for i in range(len(eval_gt_annos)):
+            # For calib
+            info = copy.deepcopy(self.cadc_infos[i])
+            sample_idx = info['point_cloud']['lidar_idx']
+            calib = self.get_calib(sample_idx)
+
+            # For image_shape
+            image_shape = self.cadc_infos[i]['image']['image_shape']
+            eval_gt_annos[i]["bbox"] = box_utils.boxes3d_kitti_camera_to_imageboxes(
+                eval_gt_annos[i]["bbox"],
+                calib,
+                image_shape)
+
         ap_result_str, ap_dict = kitti_eval.get_official_eval_result(eval_gt_annos, eval_det_annos, class_names)
 
         return ap_result_str, ap_dict

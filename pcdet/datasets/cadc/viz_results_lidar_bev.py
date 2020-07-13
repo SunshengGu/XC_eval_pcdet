@@ -7,12 +7,12 @@ import os
 from pcdet.datasets.cadc.cadc_dataset import CadcDataset
 
 
-REPO_DIR='/home/matthew/git/cadc_testing/WISEOpenLidarPerceptron'
+REPO_DIR='/home/mm/my_work/WISEOpenLidarPerceptron'
 ROOT_PATH=os.path.join(REPO_DIR, 'data/cadc')
 CONFIG_PATH=os.path.join(REPO_DIR, 'tools/cfgs/dataset_configs/cadc_dataset.yaml')
-USE_PRETRAINED = True
+USE_PRETRAINED = False
 if USE_PRETRAINED == False:
-    RESULT_PATH= os.path.join(REPO_DIR,'output/cadc_models/pointpillar/default/eval/epoch_50/val/default/result.pkl')
+    RESULT_PATH= os.path.join(REPO_DIR,'output/cfgs/cadc_models/pointpillar/default/eval/epoch_50/val/default/result.pkl')
     OUTPUT_DIR=os.path.join(ROOT_PATH, 'bev_pred')
 else:
     RESULT_PATH= os.path.join(REPO_DIR,'output/cadc_models/pointpillar/default/eval/epoch_7728/val/default/result.pkl')
@@ -94,7 +94,7 @@ def draw_bev(lidar, annotations, predictions, output_path, s1=50,s2=50,f1=50,f2=
     #limit the viewing range
     side_range = [-s1,s2] #15 meters from either side of the car
     fwd_range = [-f1,f2] # 15 m infront of the car
-    
+
     lidar_x = lidar[:,0]
     lidar_y = lidar[:,1]
     lidar_z = lidar [:,2]
@@ -131,8 +131,7 @@ def draw_bev(lidar, annotations, predictions, output_path, s1=50,s2=50,f1=50,f2=
         h = cuboid['dimensions']['z']
         yaw = cuboid['yaw']
         
-        if (x < fwd_range[0] or x > fwd_range[1] or y < side_range[0] or y > side_range[1] or\
-            cuboid['label'] not in CLASSES or cuboid['points_count'] < 5):
+        if (x < fwd_range[0] or x > fwd_range[1] or y < side_range[0] or y > side_range[1]):
             continue # out of bounds
         
         gt_poly.append(cuboid_to_bev(x,y,z,w,l,h,yaw))
@@ -193,6 +192,7 @@ def main():
     
     for viz_idx in viz_set:
         result_frame = results[viz_idx]
+
         # TODO double check, this is either sample_idx or frame_id depending on
         # code in generate_prediction_dicts() in cadc_dataset.py
         unique_id = 'frame_id'
@@ -209,7 +209,28 @@ def main():
         
         lidar_data = dataset.get_lidar([date, run, frame])
         annotations = dataset.get_label([date, run, frame])[int(frame)]
-        predictions = result_frame['boxes_lidar']
+
+        point_count_threshold, distance_threshold, score_threshold = dataset.get_threshold()
+        # filter gt
+        gt = []
+        for cuboid in annotations['cuboids']:
+            x, y, z = cuboid['position']['x'], cuboid['position']['y'], cuboid['position']['z']
+            distance = np.sqrt(np.square(x)+np.square(y)+np.square(z))
+            if cuboid['label'] in CLASSES and \
+            cuboid['points_count'] >= point_count_threshold[cuboid['label']] and \
+            distance < distance_threshold:
+                gt.append(cuboid)
+        annotations['cuboids'] = gt
+
+        # filter prediction
+        print(result_frame.keys())
+        input()
+        predictions = []
+        for i in range(len(result_frame['boxes_lidar'])):
+            x, y, z = result_frame['location'][i][0],result_frame['location'][i][1],result_frame['location'][i][2]
+            distance = np.sqrt(np.square(x)+np.square(y)+np.square(z))
+            if result_frame['score'][i] >= score_threshold and distance < distance_threshold:
+                predictions.append(result_frame['boxes_lidar'][i])
         
         print("Processing Sample: %s_%s_%s" % (date, run, frame))
         
