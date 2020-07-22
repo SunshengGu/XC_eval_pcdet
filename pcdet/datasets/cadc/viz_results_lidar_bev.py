@@ -150,7 +150,6 @@ def draw_bev(lidar, annotations, predictions, output_path, s1=50,s2=50,f1=50,f2=
     gt_poly = [poly + offset for poly in gt_poly]
     pred_poly = [poly + offset for poly in pred_poly]
 
-
     # PLOT THE IMAGE
     cmap = "jet"    # Color map to use
     dpi = 100       # Image resolution
@@ -217,14 +216,13 @@ def main():
             x, y, z = cuboid['position']['x'], cuboid['position']['y'], cuboid['position']['z']
             distance = np.sqrt(np.square(x)+np.square(y)+np.square(z))
             if cuboid['label'] in CLASSES and \
+            (cuboid['label'] != 'Truck' or cuboid['attributes']['truck_type'] == 'Pickup_Truck') and \
             cuboid['points_count'] >= point_count_threshold[cuboid['label']] and \
             distance < distance_threshold:
                 gt.append(cuboid)
         annotations['cuboids'] = gt
 
         # filter prediction
-        print(result_frame.keys())
-        input()
         predictions = []
         for i in range(len(result_frame['boxes_lidar'])):
             x, y, z = result_frame['location'][i][0],result_frame['location'][i][1],result_frame['location'][i][2]

@@ -398,21 +398,40 @@ class CadcDataset(DatasetTemplate):
         eval_det_annos = copy.deepcopy(det_annos)
         eval_gt_annos = [copy.deepcopy(info['annos']) for info in self.cadc_infos]
 
-        # Convert gt bbox from 3d to 2d
         for i in range(len(eval_gt_annos)):
-            # For calib
-            info = copy.deepcopy(self.cadc_infos[i])
-            sample_idx = info['point_cloud']['lidar_idx']
-            calib = self.get_calib(sample_idx)
+            boxes3d_lidar = np.array(eval_gt_annos[i]['gt_boxes_lidar'])
+            # Original get_official_eval_result is for kitti or nuscenes depending on the setting
+            # Convert cadc lidar data to in the same axes as the nuscenes
+            boxes3d_lidar = boxes3d_lidar[:,[1,0,2,3,4,5,6]]
+            boxes3d_lidar[:,0] *= -1
+            eval_gt_annos[i]['location'] = boxes3d_lidar[:,:3]
+            eval_gt_annos[i]['dimensions'] = boxes3d_lidar[:,3:6]
+            eval_gt_annos[i]['rotation_y'] = boxes3d_lidar[:,6]
+            
+            # Arbituarily set bbox as it's not applicable in cadc
+            # Note you need to make sure the height of the box > 40 or it will be filtered out
+            bbox = []
+            for j in range(len(eval_gt_annos[i]['bbox'])):
+                bbox.append(np.array([0,0,50,50]))
+            eval_gt_annos[i]['bbox'] = bbox
 
-            # For image_shape
-            image_shape = self.cadc_infos[i]['image']['image_shape']
-            eval_gt_annos[i]["bbox"] = box_utils.boxes3d_kitti_camera_to_imageboxes(
-                eval_gt_annos[i]["bbox"],
-                calib,
-                image_shape)
+        for i in range(len(eval_det_annos)):
+            boxes3d_lidar = np.array(eval_det_annos[i]['boxes_lidar'])
+            # Seems like the lidar location is wrt the center of (x,y) axis and bottom of z-axis
+            # Adding h/2 to it so that it's wrt to the center of z-axis, like the gt box
+            boxes3d_lidar[:, 2] += boxes3d_lidar[:, 5] / 2
+            boxes3d_lidar = boxes3d_lidar[:,[1,0,2,3,4,5,6]]
+            boxes3d_lidar[:,0] *= -1
+            eval_det_annos[i]['location'] = boxes3d_lidar[:,:3]
+            eval_det_annos[i]['dimensions'] = boxes3d_lidar[:,3:6]
+            eval_det_annos[i]['rotation_y'] = boxes3d_lidar[:,6]
+            bbox = []
+            for j in range(len(eval_det_annos[i]['bbox'])):
+                bbox.append(np.array([0,0,50,50]))
+            eval_det_annos[i]['bbox'] = np.array(bbox)
 
-        ap_result_str, ap_dict = kitti_eval.get_official_eval_result(eval_gt_annos, eval_det_annos, class_names)
+        ap_result_str, ap_dict = kitti_eval.get_official_eval_result(eval_gt_annos, eval_det_annos, class_names, 
+            z_axis=2, z_center=0.5)
 
         return ap_result_str, ap_dict
 
