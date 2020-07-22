@@ -117,7 +117,7 @@ def bev_box_overlap(boxes, qboxes, criterion=-1):
 
 
 @numba.jit(nopython=True, parallel=True)
-def box3d_overlap_kernel(boxes,
+def d3_box_overlap_kernel(boxes,
                           qboxes,
                           rinc,
                           criterion=-1,
@@ -154,7 +154,7 @@ def box3d_overlap_kernel(boxes,
                 else:
                     rinc[i, j] = 0.0
 
-def box3d_overlap(boxes, qboxes, criterion=-1, z_axis=1, z_center=1.0):
+def d3_box_overlap(boxes, qboxes, criterion=-1, z_axis=1, z_center=1.0):
     """
     kitti camera format z_axis=1, z_center=1.0
     cadc lidar format z_axis=2, z_center=0.5
@@ -164,7 +164,7 @@ def box3d_overlap(boxes, qboxes, criterion=-1, z_axis=1, z_center=1.0):
     bev_axes.pop(z_axis)
     
     rinc = rotate_iou_gpu_eval(boxes[:, bev_axes], qboxes[:, bev_axes], 2)
-    box3d_overlap_kernel(boxes, qboxes, rinc, criterion, z_axis, z_center)
+    d3_box_overlap_kernel(boxes, qboxes, rinc, criterion, z_axis, z_center)
     return rinc
 
 
@@ -410,7 +410,7 @@ def calculate_iou_partly(gt_annos,
             rots = np.concatenate([a["rotation_y"] for a in dt_annos_part], 0)
             dt_boxes = np.concatenate([loc, dims, rots[..., np.newaxis]],
                                       axis=1)
-            overlap_part = box3d_overlap(
+            overlap_part = d3_box_overlap(
                 gt_boxes, dt_boxes, z_axis=z_axis,
                 z_center=z_center).astype(np.float64)
         else:
