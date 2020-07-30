@@ -6,13 +6,15 @@ You may need to change the `HOST_*` variables
 to the **absolute** paths of the corresponding directories.
 ```bash
 # In config.sh
-HOST_PCDET_ROOT=...     # PCDet location
+HOST_PCDET_ROOT=...     # PCDet location, i.e. the repo itself
 HOST_NUSC_ROOT=...      # NuScenes dataset that contains nuscenes-devkit
                         # and data directory (e.g. v1.0-mini)
 HOST_CADC_ROOT=...      # CADC dataset directory
 HOST_LOGDIR=...         # Output location
                         # can be used to store model checkpoints etc.
 ```
+Also, you need to make sure that the file structure of the dataset 
+match the outline in `docs/INSTALL.md`.
 
 ## Build Docker Image
 Use the provided script to build the docker image.
