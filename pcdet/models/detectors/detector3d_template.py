@@ -30,6 +30,11 @@ class Detector3DTemplate(nn.Module):
         self.global_step += 1
 
     def build_networks(self):
+        # ********** debug message **************
+        print("\n keys in self.state_dict before model is built:")
+        for key in self.state_dict():
+            print(key)
+        # ********** debug message **************
         model_info_dict = {
             'module_list': [],
             'num_rawpoint_features': self.dataset.point_feature_encoder.num_point_features,
@@ -37,15 +42,28 @@ class Detector3DTemplate(nn.Module):
             'point_cloud_range': self.dataset.point_cloud_range,
             'voxel_size': self.dataset.voxel_size
         }
+        # ********** debug message **************
+        print("showing module names in self.module_topology")
+        for mod_name in self.module_topology:
+            print(mod_name)
+        # ********** debug message **************
         for module_name in self.module_topology:
             module, model_info_dict = getattr(self, 'build_%s' % module_name)(
                 model_info_dict=model_info_dict
             )
             self.add_module(module_name, module)
+        # ********** debug message **************
+        print("\n keys in self.state_dict after model is built:")
+        for key in self.state_dict():
+            print(key)
+        # ********** debug message **************
         return model_info_dict['module_list']
 
     def build_vfe(self, model_info_dict):
         if self.model_cfg.get('VFE', None) is None:
+            # ********** debug message **************
+            print('\n no VFE')
+            # ********** debug message **************
             return None, model_info_dict
 
         vfe_module = vfe.__all__[self.model_cfg.VFE.NAME](
@@ -60,6 +78,9 @@ class Detector3DTemplate(nn.Module):
 
     def build_backbone_3d(self, model_info_dict):
         if self.model_cfg.get('BACKBONE_3D', None) is None:
+            # ********** debug message **************
+            print('\n no 3D backbone')
+            # ********** debug message **************
             return None, model_info_dict
 
         backbone_3d_module = backbones_3d.__all__[self.model_cfg.BACKBONE_3D.NAME](
@@ -75,6 +96,9 @@ class Detector3DTemplate(nn.Module):
 
     def build_map_to_bev_module(self, model_info_dict):
         if self.model_cfg.get('MAP_TO_BEV', None) is None:
+            # ********** debug message **************
+            print('\n no map_to_bev_module')
+            # ********** debug message **************
             return None, model_info_dict
 
         map_to_bev_module = map_to_bev.__all__[self.model_cfg.MAP_TO_BEV.NAME](
@@ -87,11 +111,17 @@ class Detector3DTemplate(nn.Module):
 
     def build_backbone_2d(self, model_info_dict):
         if self.model_cfg.get('BACKBONE_2D', None) is None:
+            # ********** debug message **************
+            print('\n no 2D backbone')
+            # ********** debug message **************
             return None, model_info_dict
-
+        if 'num_bev_features' not in model_info_dict:
+            model_info_dict['num_bev_features'] = 64
         backbone_2d_module = backbones_2d.__all__[self.model_cfg.BACKBONE_2D.NAME](
             model_cfg=self.model_cfg.BACKBONE_2D,
             input_channels=model_info_dict['num_bev_features']
+            # # TODO: hard code just for the sake of building a simpler pointpillar, need to change back later
+            # input_channels=64
         )
         model_info_dict['module_list'].append(backbone_2d_module)
         model_info_dict['num_bev_features'] = backbone_2d_module.num_bev_features
@@ -99,6 +129,9 @@ class Detector3DTemplate(nn.Module):
 
     def build_pfe(self, model_info_dict):
         if self.model_cfg.get('PFE', None) is None:
+            # ********** debug message **************
+            print('\n no pfe')
+            # ********** debug message **************
             return None, model_info_dict
 
         pfe_module = pfe.__all__[self.model_cfg.PFE.NAME](
@@ -276,6 +309,7 @@ class Detector3DTemplate(nn.Module):
         return recall_dict
 
     def load_params_from_file(self, filename, logger, to_cpu=False):
+        # file name is a checkpoint file
         if not os.path.isfile(filename):
             raise FileNotFoundError
 
@@ -286,6 +320,12 @@ class Detector3DTemplate(nn.Module):
 
         if 'version' in checkpoint:
             logger.info('==> Checkpoint trained from version: %s' % checkpoint['version'])
+
+        # # ********** debug message **************
+        # print("keys in self.state_dict before processing ckpt data")
+        # for key in self.state_dict():
+        #     print(key)
+        # # ********** debug message **************
 
         update_model_state = {}
         for key, val in model_state_disk.items():
