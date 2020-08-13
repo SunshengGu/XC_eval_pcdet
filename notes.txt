@@ -1,0 +1,114 @@
+build_network:
+- In tools/test.py and tools/train.py, the model is built by build_network()
+- This function is found in pcdet/models/__init__.py
+- Which calls build_detector to create a model
+
+build_detector:
+- Found in pcdet/models/detectors/__init__.py
+- Picks the right model based on model_cfg.NAME, and builds the model by passing model_cfg, num_class, dataset
+- All detector models are defined in pcdet/models/detectors, and have Detector3DTemplate as the parent class
+- Parent class of Detector3DTemplate is torch.nn.Module (proved that the model is indeed a torch nn)
+
+pointpillar.py:
+- self.module_list = self.build_networks(), this returns a list of modules
+- so, each detector is just a module that contains a bunch of modules
+- getattr(object, name[, default]): Return the value of the named attribute of object. name must be a string
+- self.module_topology: the elements of which can be used one by one to build 'vfe', 'backbone_3d', 'map_to_bev_module', 'pfe', 'backbone_2d', 'dense_head',  'point_head', 'roi_head'
+- Take vfe for example, it is in the folder pcdet/models/vfe
+- For all vfe's, the base class is VFETemplate, which inherits from nn.Module
+- forward(batch_dict): feed the batch_dict in a sequential fashion through the network to get losses and stuff
+    - return: pred_dicts, recall_dicts = self.post_processing(batch_dict) (in the case of testing)
+
+detector post_processing():
+- defined in pcdet/models/detectors/detector3d_template.py
+
+training loss calculation:
+- Calculated by the get_loss function in pcdet/models/dense_heads/anchor_head_template.py
+- classification loss computed by self.get_cls_layer_loss()
+***
+- box class labels are in self.forward_ret_dict['box_cls_labels']
+***
+- forward_ret_dict is filled in pcdet/models/dense_heads/anchor_head_single.py
+- ground truth comes from data_dict['gt_boxes']
+
+Input for XAI:
+- should be the same as the input for the first part of the network
+***
+- easier version: do explanation for the detection head and the 2D backbone, ignore VFE and BEV stuff for now
+- so the input should really be the input to the 2D backbone: data_dict['spatial_features']
+- see pcdet/models/backbones_2d/base_bev_backbone.py
+***
+
+dataset:
+- In both tools/test.py and tools/train.py, dataset is prepared by build_dataloader()
+- This function is defined in pcdet/datasets/__init__.py
+- dataset is created by taking the following as inputs and feed them to the dataset py file: 
+		dataset_cfg=dataset_cfg,
+        class_names=class_names,
+        root_path=root_path,
+        training=training,
+        logger=logger,
+- Each dataset has a corresponding py file in pcdet/datasets folder, and has a class corresponding to the dataset
+- Each dataset class has DatasetTemplate as the base class, defined in pcdet/datasets
+- DatasetTemplate inherites from torch_data.Dataset(torch_data is alias of torch.utils.data)
+- torch.utils.data.Dataset: All datasets that represent a map from keys to data samples should subclass it
+- DatasetTemplate: set up the dataset based on settings in the config files
+
+test_loader:
+- In both tools/test.py and tools/train.py, dataset is prepared by build_dataloader()
+- This function is defined in pcdet/datasets/__init__.py
+- DataLoader is from torch.utils.data: https://pytorch.org/docs/stable/data.html#torch.utils.data.DataLoader
+
+Sampler:
+- An instance of torch.utils.data.distributed.DistributedSampler
+- Sampler that restricts data loading to a subset of the dataset
+- Not used in test.py
+
+eval_single_ckpt: (are the methods of KittiDataset such as `get_lidar` being used here?)
+- In test.py
+- load_params_from_file(): defined in pcdet/models/detectors/detector3d_template.py
+    - Uses a state_dict to store model states in a ckpt file: https://pytorch.org/tutorials/beginner/saving_loading_models.html
+    - Updates the model's state_dict() by calling self.load_state_dict(state_dict)
+    - State_dict is a dict, both the model and the optimizer have a state_dict
+- cuda(): Moves all model parameters and buffers to the GPU
+- eval_utils.eval_one_epoch():
+    - In tools/eval_utils
+    - These lines show how the training is done:
+        for i, batch_dict in enumerate(dataloader):
+            load_data_to_gpu(batch_dict)
+            with torch.no_grad():
+                pred_dicts, ret_dict = model(batch_dict)
+
+Target assigner:
+- See pcdet/models/dense_heads/anchor_head_single.py, self.assign_targets()
+- Pointpillar uses AxisAlignedTargetAssigner, which takes the following as inputs:
+        anchor_target_cfg=anchor_target_cfg,
+        anchor_generator_cfg=anchor_generator_cfg,
+        class_names=self.class_names,
+        box_coder=self.box_coder,
+        match_height=anchor_target_cfg.MATCH_HEIGHT
+- The assign_target method is defined in pcdet/models/dense_heads/target_assigner/axis_aligned_target_assigner.py
+- How to get class labels and box info from the ground truth boxes:
+        gt_classes = gt_boxes_with_classes[:, :, 7]
+        gt_boxes = gt_boxes_with_classes[:, :, :7]
+
+cfg:
+- In test.py and train.py, cfg came from pcdet.config, but filled by cfg_from_yaml_file(args.cfg_file, cfg) in parse_config()
+- Get config from yaml: cfg_from_yaml_file(), defined in pcdet/config.py
+- cfg is an EasyDict instance, EasyDict allows to access dict values as attributes (works recursively).
+
+torch.nn.Module
+- Base class for all neural network modules
+
+How does PointPillar process KITTI lidar data:
+- Use test.py as example, `test_set` is the first thing returned by the build_dataloader() function
+- build_dataloader() is defined in pcdet/datasets/__init__.py
+- The first return value, `dataset`, is created by the KittiDataset class in the case of KITTI
+- KittiDataset is defined in pcdet/dataset/kitti/kitti_dataset.py, and inherits from DatasetTemplate, which in term inherits from torch_data.Dataset
+- The KittiDataset class basically learns the settings in kitti_dataset.yaml and pointpillar.yaml
+
+From: https://docs.python.org/3/tutorial/modules.html
+- The __init__.py files are required to make Python treat directories containing the file as packages.
+- Note that when using from package import item, the item can be either a submodule (or subpackage) of the package, or some other name defined in the package, like a function, class or variable
+- Contrarily, when using syntax like import item.subitem.subsubitem, each item except for the last must be a package; the last item can be a module or a package but can’t be a class or function or variable defined in the previous item.
+- The import statement uses the following convention: if a package’s __init__.py code defines a list named __all__, it is taken to be the list of module names that should be imported when from package import * is encountered. 
