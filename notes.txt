@@ -111,4 +111,22 @@ From: https://docs.python.org/3/tutorial/modules.html
 - The __init__.py files are required to make Python treat directories containing the file as packages.
 - Note that when using from package import item, the item can be either a submodule (or subpackage) of the package, or some other name defined in the package, like a function, class or variable
 - Contrarily, when using syntax like import item.subitem.subsubitem, each item except for the last must be a package; the last item can be a module or a package but can’t be a class or function or variable defined in the previous item.
-- The import statement uses the following convention: if a package’s __init__.py code defines a list named __all__, it is taken to be the list of module names that should be imported when from package import * is encountered. 
+- The import statement uses the following convention: if a package’s __init__.py code defines a list named __all__, it is taken to be the list of module names that should be imported when from package import * is encountered.
+
+XAI command:
+- python XAI.py --cfg_file ~/pcdet/tools/cfgs/kitti_models/pointpillar.yaml --explained_cfg_file ~/pcdet/tools/cfgs/kitti_models/pointpillar_2DBackbone_DetHead.yaml --batch_size 4 --ckpt ~/pcdet/output/kitti_models/pointpillar/default/ckpt/checkpoint_epoch_2.pth
+
+In pcdet/models/dense_heads/anchor_head_single.py, what is the difference between self.forward_ret_dict['cls_preds'] vs data_dict['batch_cls_preds']
+-   cls_preds data type: <class 'torch.Tensor'>
+    cls_preds shape: torch.Size([4, 248, 216, 18])
+    cls_preds[0] shape: torch.Size([248, 216, 18])
+    box_preds data type: <class 'torch.Tensor'>
+    box_preds shape: torch.Size([4, 248, 216, 42])
+    box_preds[0] shape: torch.Size([248, 216, 42])
+    batch_cls_preds data type: <class 'torch.Tensor'>
+    batch_cls_preds shape: torch.Size([4, 321408, 3])
+    batch_cls_preds[0] shape: torch.Size([321408, 3])
+    batch_box_preds data type: <class 'torch.Tensor'>
+    batch_box_preds shape: torch.Size([4, 321408, 7])
+    batch_box_preds[0] shape: torch.Size([321408, 7])
+-
