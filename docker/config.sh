@@ -12,11 +12,14 @@ PCDET_ROOT=/root/pcdet
 NUSC_ROOT=/root/nusc
 CADC_ROOT=/root/cadc
 KITTI_ROOT=/root/kitti
+CAPTUM_ROOT=/root/captum
 LOGDIR=/root/logdir
 
 # Workspace structure on host machine
+# Change to path to your own machine, don't leave these lines as they are
 HOST_PCDET_ROOT=/path/to/pcdet
-HOST_NUSC_ROOT=/path/to/nuscenes
+HOST_NUSC_ROOT=/path/to/nusc
 HOST_CADC_ROOT=/path/to/cadc
 HOST_KITTI_ROOT=/path/to/kitti
-HOST_LOGDIR=/path/to/logdi
+HOST_CAPTUM_ROOT=/path/to/captum
+HOST_LOGDIR=/path/to/logdir
