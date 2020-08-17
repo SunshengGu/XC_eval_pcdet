@@ -42,6 +42,7 @@ class Detector3DTemplate(nn.Module):
             'point_cloud_range': self.dataset.point_cloud_range,
             'voxel_size': self.dataset.voxel_size
         }
+
         # ********** debug message **************
         print("showing module names in self.module_topology")
         for mod_name in self.module_topology:
@@ -212,18 +213,25 @@ class Detector3DTemplate(nn.Module):
         recall_dict = {}
         pred_dicts = []
         for index in range(batch_size):
+            # the 'None' here just means return None if key not found
             if batch_dict.get('batch_index', None) is not None:
+                print('\n batch_dict has the \'bactch_index\' entry!')
+                print('\n shape of batch_dict[\'batch_cls_preds\']' + str(batch_dict['batch_cls_preds'].shape))
                 assert batch_dict['batch_cls_preds'].shape.__len__() == 2
                 batch_mask = (batch_dict['batch_index'] == index)
             else:
+                print('\n batch_dict does NOT have the \'bactch_index\' entry!')
+                print('\n shape of batch_dict[\'batch_cls_preds\']' + str(batch_dict['batch_cls_preds'].shape))
                 assert batch_dict['batch_cls_preds'].shape.__len__() == 3
                 batch_mask = index
 
+            # inside the for loop, we only care about one particular sample, not the entire mini-batch
             box_preds = batch_dict['batch_box_preds'][batch_mask]
             cls_preds = batch_dict['batch_cls_preds'][batch_mask]
 
             src_cls_preds = cls_preds
             src_box_preds = box_preds
+            # the second dimension of cls_preds should be the same as the number of classes
             assert cls_preds.shape[1] in [1, self.num_class]
 
             if not batch_dict['cls_preds_normalized']:
@@ -232,8 +240,20 @@ class Detector3DTemplate(nn.Module):
             if post_process_cfg.NMS_CONFIG.MULTI_CLASSES_NMS:
                 raise NotImplementedError
             else:
+                # in python, -1 means the last dimension
+                # torch.max(input, dim, keepdim=False, out=None) returns a tuple:
+                # 1. the maximum values in the indicated dimension
+                # 2. the indices of the maximum values in the indicated dimension
+                # now, for each box, we have a class prediction
                 cls_preds, label_preds = torch.max(cls_preds, dim=-1)
+                print('\n shape of label_preds before: ' + str(label_preds.shape))
+                print('label_preds data type: ' + str(type(label_preds)))
+                # question: why add 1 to each element of label_preds?
+                # because class labels are 1,2,3 instead of 0,1,2?
                 label_preds = batch_dict['roi_labels'][index] if batch_dict.get('has_class_labels', False) else label_preds + 1
+                if batch_dict.get('has_class_labels', False):
+                    print('\n no key named \'has_class_labels\' in batch_dict')
+                print('\n shape of label_preds after: ' + str(label_preds.shape))
 
                 selected, selected_scores = class_agnostic_nms(
                     box_scores=cls_preds, box_preds=box_preds,

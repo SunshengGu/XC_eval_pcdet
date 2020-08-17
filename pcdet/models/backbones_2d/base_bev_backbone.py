@@ -64,7 +64,13 @@ class BaseBEVBackbone(nn.Module):
                 spatial_features
         Returns:
         """
+        # if type(data_dict) is dict:
+        #     spatial_features = data_dict['spatial_features']
+        # else:
+        #     spatial_features = data_dict
         spatial_features = data_dict['spatial_features']
+        print('\n shape of spatial_features in base_bev_backbone.py')
+        print(spatial_features.shape)
         ups = []
         ret_dict = {}
         x = spatial_features

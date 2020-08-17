@@ -46,6 +46,13 @@ class AnchorHeadSingle(AnchorHeadTemplate):
         cls_preds = cls_preds.permute(0, 2, 3, 1).contiguous()  # [N, H, W, C]
         box_preds = box_preds.permute(0, 2, 3, 1).contiguous()  # [N, H, W, C]
 
+        print('cls_preds data type: ' + str(type(cls_preds)))
+        print('cls_preds shape: ' + str(cls_preds.shape))
+        print('cls_preds[0] shape: ' + str(cls_preds[0].shape))
+        print('box_preds data type: ' + str(type(box_preds)))
+        print('box_preds shape: ' + str(box_preds.shape))
+        print('box_preds[0] shape: ' + str(box_preds[0].shape))
+
         self.forward_ret_dict['cls_preds'] = cls_preds
         self.forward_ret_dict['box_preds'] = box_preds
 
@@ -60,6 +67,8 @@ class AnchorHeadSingle(AnchorHeadTemplate):
             targets_dict = self.assign_targets(
                 gt_boxes=data_dict['gt_boxes']
             )
+            # The update() method updates the dictionary with the elements from the another dictionary object or from
+            # an iterable of key / value pairs.
             self.forward_ret_dict.update(targets_dict)
 
         if not self.training or self.predict_boxes_when_training:
@@ -70,6 +79,12 @@ class AnchorHeadSingle(AnchorHeadTemplate):
             data_dict['batch_cls_preds'] = batch_cls_preds
             data_dict['batch_box_preds'] = batch_box_preds
             data_dict['cls_preds_normalized'] = False
+            print('batch_cls_preds data type: ' + str(type(batch_cls_preds)))
+            print('batch_cls_preds shape: ' + str(batch_cls_preds.shape))
+            print('batch_cls_preds[0] shape: ' + str(batch_cls_preds[0].shape))
+            print('batch_box_preds data type: ' + str(type(batch_box_preds)))
+            print('batch_box_preds shape: ' + str(batch_box_preds.shape))
+            print('batch_box_preds[0] shape: ' + str(batch_box_preds[0].shape))
 
         return data_dict
 

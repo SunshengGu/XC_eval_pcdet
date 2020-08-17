@@ -207,6 +207,17 @@ def main():
 
     ckpt_dir = args.ckpt_dir if args.ckpt_dir is not None else output_dir / 'ckpt'
 
+    # Create dummy `dataset` object to pass necessary information to `build_network`.
+    # test_set = EasyDict({
+    #     'class_names': cfg.CLASS_NAMES,
+    #     'grid_size': cfg.GRID_SIZE,
+    #     'voxel_size': cfg.VOXEL_SIZE,
+    #     'point_cloud_range': cfg.POINT_CLOUD_RANGE,
+    #     'point_feature_encoder': {
+    #         'num_point_features': cfg.NUM_POINT_FEATURES
+    #     }
+    # })
+
     test_set, test_loader, sampler = build_dataloader(
         dataset_cfg=cfg.DATA_CONFIG,
         class_names=cfg.CLASS_NAMES,
@@ -290,16 +301,16 @@ def main():
         # transform the original image to have shape H x W x C, where C means channels
         original_image = np.transpose(PseudoImage2D[0].cpu().detach().numpy(), (1, 2, 0))
         print('original_image dimensions: ' + str(original_image.shape))
-        print('\n \n strutcture of the 2D network:')
-        print(model2D)
-        print('\n \n structure of the full network: ')
-        print(model)
-        # grads = saliency2D.attribute(SinglePseudoImage2D, target=1)
-        # grads = np.transpose(grads.squeeze().cpu().detach().numpy(), (1, 2, 0))
-        # print('grads dimensions: ' + str(grads.shape))
-        # grad_viz = viz.visualize_image_attr(grads, original_image, method="blended_heat_map", sign="absolute_value",
-        #                       show_colorbar=True, title="Overlayed Gradient Magnitudes")
-        # grad_viz[0].savefig('XAI_results/grad_viz.png')
+        # print('\n \n strutcture of the 2D network:')
+        # print(model2D)
+        # print('\n \n structure of the full network: ')
+        # print(model)
+        grads = saliency2D.attribute(batch_dict, target=1)
+        grads = np.transpose(grads.squeeze().cpu().detach().numpy(), (1, 2, 0))
+        print('grads dimensions: ' + str(grads.shape))
+        grad_viz = viz.visualize_image_attr(grads, original_image, method="blended_heat_map", sign="absolute_value",
+                              show_colorbar=True, title="Overlayed Gradient Magnitudes")
+        grad_viz[0].savefig('XAI_results/grad_viz.png')
         break
         # just need one explanation for example
     # *****************

@@ -13,7 +13,24 @@ from pcdet.models import build_network
 from pcdet.utils import common_utils
 from pcdet.config import cfg, cfg_from_list, cfg_from_yaml_file, log_config_to_file
 from eval_utils import eval_utils
+from pcdet.models import load_data_to_gpu
 
+# XAI related imports
+import matplotlib.pyplot as plt
+import numpy as np
+
+import torch
+import torchvision
+import torchvision.transforms as transforms
+import torchvision.transforms.functional as TF
+
+from torchvision import models
+
+from captum.attr import IntegratedGradients
+from captum.attr import Saliency
+from captum.attr import DeepLift
+from captum.attr import NoiseTunnel
+from captum.attr import visualization as viz
 
 def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
@@ -37,7 +54,6 @@ def parse_config():
     parser.add_argument('--eval_all', action='store_true', default=False, help='whether to evaluate all checkpoints')
     parser.add_argument('--ckpt_dir', type=str, default=None, help='specify a ckpt directory to be evaluated if needed')
     parser.add_argument('--save_to_file', action='store_true', default=False, help='')
-
     args = parser.parse_args()
 
     cfg_from_yaml_file(args.cfg_file, cfg)
@@ -126,7 +142,6 @@ def repeat_eval_ckpt(model, test_loader, args, eval_output_dir, logger, ckpt_dir
             print('%s' % cur_epoch_id, file=f)
         logger.info('Epoch %s has been evaluated' % cur_epoch_id)
 
-
 def main():
     args, cfg = parse_config()
     if args.launcher == 'none':
@@ -183,7 +198,6 @@ def main():
             repeat_eval_ckpt(model, test_loader, args, eval_output_dir, logger, ckpt_dir, dist_test=dist_test)
         else:
             eval_single_ckpt(model, test_loader, args, eval_output_dir, logger, epoch_id, dist_test=dist_test)
-
 
 if __name__ == '__main__':
     main()

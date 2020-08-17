@@ -1,0 +1,50 @@
+Use captum/attr/_core/saliency.py as an example and trace how the explanations are generated:
+
+Base class:
+- `GradientAttribution` is the base class for `Saliency`, defined in captum/attr/_utils/attribution.py
+- `Attribution` is the base class for `GradientAttribution`, also defined in captum/attr/_utils/attribution.py
+- Meant to return attribution values for each input tensor. The `attributions` have the same shape and dimensionality
+as the inputs.
+- `self.forward_func` is usually the same as the model's forward function
+- `self.gradient_func = compute_gradients`
+
+`attribute` for Saliency:
+- First, conduct type checking on the input: TensorOrTupleOfTensorsGeneric
+- See captum/_utils/typing.py, has to be tensor or a tuple of tensors
+- `-> TensorOrTupleOfTensorsGeneric`, this specifies the return type
+- Target: "Output indices for which gradients are computed"
+
+Big question:
+- How do I use Captum for object detection, where we have 7 parameters for bounding box and last 1 param for class?
+
+apply_gradient_requirements
+- Defined here: captum/_utils/gradient.py
+- Sets `requires_grad` to be true for each input
+- Initialize all gradients to be zero
+
+compute_gradients:
+- Defined here: captum/_utils/gradient.py
+- Computes gradients of the output with respect to inputs for an arbitrary forward function
+- Calls `_run_forward` (defined in captum/_utils/common.py) and returns _select_targets(output, target)
+- The `output` in the line above is the output obtained by feeding input to the model of interest
+
+_select_targets:
+- Output is a Tensor
+- Defined in captum/_utils/common.py
+- Output is `compute_gradients`'s output
+- Can handle many types of targets: int or tuple, tensor, list
+- The simple case, when target is an integer: `_verify_select_column(output, target)`
+- This function checks if the selected target's dimensions are valid
+- Information on the slice object: https://www.programiz.com/python-programming/methods/built-in/slice
+- Slice(None) is similar to ':'
+- The use of asterisks: https://treyhunner.com/2018/10/asterisks-in-python-what-they-are-and-how-to-use-them/
+    - get a bunch of stuff at once without length limit
+    - access key-only arguments
+- Note: tuple can be used a key for dict
+- output[(slice(None), *target)]: for each sample in the `output` tensor, obtain results corresponding to all targets.
+
+_format_output:
+- Defined in captum/_utils/common.py
+- Return output if is_inputs_tuple else output[0]
+- Make sure output and input format matches
+
