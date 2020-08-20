@@ -232,7 +232,7 @@ def main():
         print('\n has VFE')
     # ********** debug message **************
     print('\n \n building the 2d network')
-    model2D = build_network(model_cfg=x_cfg.MODEL, num_class=len(x_cfg.CLASS_NAMES), dataset=test_set)
+    model2D = build_network(model_cfg=x_cfg.MODEL, num_class=len(x_cfg.CLASS_NAMES), dataset=test_set, explain=True)
     print('\n \n building the full network')
     model = build_network(model_cfg=cfg.MODEL, num_class=len(cfg.CLASS_NAMES), dataset=test_set)
 
@@ -264,10 +264,20 @@ def main():
     model.cuda()
     model.eval()
     for i, batch_dict in enumerate(test_loader):
+        # batch_dict['XAI'] = True
         # run the forward pass once to generate outputs and intermediate representations
-        load_data_to_gpu(batch_dict)
+        dummy_tensor = 0
+        load_data_to_gpu(batch_dict) # this function is designed for dict, don't use for other data types!
         with torch.no_grad():
-            pred_dicts, ret_dict = model(batch_dict)
+            pred_dicts, ret_dict = model(dummy_tensor, batch_dict)
+        '''
+        Note:
+        - In Captum, the forward function of the model is called in such a way: forward_func(input, addtional_input_args)
+        - We are using the batch_dict as the addtional_input_args
+        - Hence needed a dummy_tensor before batch_dict when we are not in explain mode
+        - Alternatively, can modify Captum, but I prefer not to
+        '''
+        # note: boxes_with_cls_scores contains class scores for each box identified
         # this is the pseudo image used as input for the 2D backbone
         PseudoImage2D = batch_dict['spatial_features']
         # now, need one prediction, which serves as the target
@@ -276,21 +286,21 @@ def main():
         BoxGroundTruth = batch_dict['gt_boxes']
         # BoxGroundTruth = DetectionHead.forward_ret_dict['box_cls_labels']
         # verify if pred and gt have the same dimensions
-        print('PseudoImage2D data type: ' + str(type(PseudoImage2D)))
-        print('PseudoImage2D dimensions: ' + str(list(PseudoImage2D.size())))
-        print('Prediction data type: ' + str(type(BoxPrediction)))
-        print('Prediction dimensions: ' + str(list(BoxPrediction.size())))
-        print('Ground truth data type: ' + str(type(BoxGroundTruth)))
-        print('Ground truth dimensions: ' + str(list(BoxGroundTruth.size())))
-        print('pred_dicts data type: ' + str(type(pred_dicts)))
-        print('pred_dicts elements type: ' + str(type(pred_dicts[0])))
-        print('pred_dicts elements size: ' + str(len(pred_dicts[0])))
-        # for p_key in pred_dicts:
-        #     print("a key in pred_dict is: "+str(p_key))
-        # for r_key in ret_dict:
-        #     print("a key in ret_dict is: "+str(r_key))
-        print("Ground truth in ret_dict:")
-        print(ret_dict['gt'])
+        # print('PseudoImage2D data type: ' + str(type(PseudoImage2D)))
+        # print('PseudoImage2D dimensions: ' + str(list(PseudoImage2D.size())))
+        # print('Prediction data type: ' + str(type(BoxPrediction)))
+        # print('Prediction dimensions: ' + str(list(BoxPrediction.size())))
+        # print('Ground truth data type: ' + str(type(BoxGroundTruth)))
+        # print('Ground truth dimensions: ' + str(list(BoxGroundTruth.size())))
+        # print('pred_dicts data type: ' + str(type(pred_dicts)))
+        # print('pred_dicts elements type: ' + str(type(pred_dicts[0])))
+        # print('pred_dicts elements size: ' + str(len(pred_dicts[0])))
+        # # for p_key in pred_dicts:
+        # #     print("a key in pred_dict is: "+str(p_key))
+        # # for r_key in ret_dict:
+        # #     print("a key in ret_dict is: "+str(r_key))
+        # print("Ground truth in ret_dict:")
+        # print(ret_dict['gt'])
         # print('Ground Truth Size: ' + len(BoxGroundTruth))
         # TODO: need to somehow zero out all other predictions and keep just one (idea: single activated neuron)
         # # need to understand better what the target meant in the original Captum example
@@ -305,7 +315,7 @@ def main():
         # print(model2D)
         # print('\n \n structure of the full network: ')
         # print(model)
-        grads = saliency2D.attribute(batch_dict, target=1)
+        grads = saliency2D.attribute(PseudoImage2D, target=1, additional_forward_args=batch_dict)
         grads = np.transpose(grads.squeeze().cpu().detach().numpy(), (1, 2, 0))
         print('grads dimensions: ' + str(grads.shape))
         grad_viz = viz.visualize_image_attr(grads, original_image, method="blended_heat_map", sign="absolute_value",

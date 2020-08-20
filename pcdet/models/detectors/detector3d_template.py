@@ -9,8 +9,9 @@ from ...ops.iou3d_nms import iou3d_nms_utils
 
 
 class Detector3DTemplate(nn.Module):
-    def __init__(self, model_cfg, num_class, dataset):
+    def __init__(self, model_cfg, num_class, dataset, explain):
         super().__init__()
+        self.explain = explain # additional argument indicating if we are in explain mode
         self.model_cfg = model_cfg
         self.num_class = num_class
         self.dataset = dataset
@@ -30,11 +31,11 @@ class Detector3DTemplate(nn.Module):
         self.global_step += 1
 
     def build_networks(self):
-        # ********** debug message **************
-        print("\n keys in self.state_dict before model is built:")
-        for key in self.state_dict():
-            print(key)
-        # ********** debug message **************
+        # # ********** debug message **************
+        # print("\n keys in self.state_dict before model is built:")
+        # for key in self.state_dict():
+        #     print(key)
+        # # ********** debug message **************
         model_info_dict = {
             'module_list': [],
             'num_rawpoint_features': self.dataset.point_feature_encoder.num_point_features,
@@ -43,21 +44,21 @@ class Detector3DTemplate(nn.Module):
             'voxel_size': self.dataset.voxel_size
         }
 
-        # ********** debug message **************
-        print("showing module names in self.module_topology")
-        for mod_name in self.module_topology:
-            print(mod_name)
-        # ********** debug message **************
+        # # ********** debug message **************
+        # print("showing module names in self.module_topology")
+        # for mod_name in self.module_topology:
+        #     print(mod_name)
+        # # ********** debug message **************
         for module_name in self.module_topology:
             module, model_info_dict = getattr(self, 'build_%s' % module_name)(
                 model_info_dict=model_info_dict
             )
             self.add_module(module_name, module)
-        # ********** debug message **************
-        print("\n keys in self.state_dict after model is built:")
-        for key in self.state_dict():
-            print(key)
-        # ********** debug message **************
+        # # ********** debug message **************
+        # print("\n keys in self.state_dict after model is built:")
+        # for key in self.state_dict():
+        #     print(key)
+        # # ********** debug message **************
         return model_info_dict['module_list']
 
     def build_vfe(self, model_info_dict):
@@ -195,7 +196,7 @@ class Detector3DTemplate(nn.Module):
     def forward(self, **kwargs):
         raise NotImplementedError
 
-    def post_processing(self, batch_dict):
+    def post_processing(self, tensor_values, batch_dict):
         """
         Args:
             batch_dict:
@@ -208,26 +209,34 @@ class Detector3DTemplate(nn.Module):
         Returns:
 
         """
+        print('\n starting the post_processing() function')
+        # tensor_values is just for compatibility with Captum, only useful when in explain mode
         post_process_cfg = self.model_cfg.POST_PROCESSING
         batch_size = batch_dict['batch_size']
         recall_dict = {}
         pred_dicts = []
+        boxes_with_cls_scores = []
+        max_box_ind = 0 # index of the input in the batch with most number of boxes
+        max_num_boxes = 0
         for index in range(batch_size):
             # the 'None' here just means return None if key not found
             if batch_dict.get('batch_index', None) is not None:
-                print('\n batch_dict has the \'bactch_index\' entry!')
-                print('\n shape of batch_dict[\'batch_cls_preds\']' + str(batch_dict['batch_cls_preds'].shape))
+                # print('\n batch_dict has the \'bactch_index\' entry!')
+                # print('\n shape of batch_dict[\'batch_cls_preds\']' + str(batch_dict['batch_cls_preds'].shape))
                 assert batch_dict['batch_cls_preds'].shape.__len__() == 2
                 batch_mask = (batch_dict['batch_index'] == index)
             else:
-                print('\n batch_dict does NOT have the \'bactch_index\' entry!')
-                print('\n shape of batch_dict[\'batch_cls_preds\']' + str(batch_dict['batch_cls_preds'].shape))
+                # print('\n batch_dict does NOT have the \'bactch_index\' entry!')
+                # print('\n shape of batch_dict[\'batch_cls_preds\']' + str(batch_dict['batch_cls_preds'].shape))
                 assert batch_dict['batch_cls_preds'].shape.__len__() == 3
                 batch_mask = index
 
             # inside the for loop, we only care about one particular sample, not the entire mini-batch
             box_preds = batch_dict['batch_box_preds'][batch_mask]
             cls_preds = batch_dict['batch_cls_preds'][batch_mask]
+
+            if str(type(tensor_values)) == 'torch.Tensor':
+                cls_preds = tensor_values[batch_mask]
 
             src_cls_preds = cls_preds
             src_box_preds = box_preds
@@ -246,8 +255,8 @@ class Detector3DTemplate(nn.Module):
                 # 2. the indices of the maximum values in the indicated dimension
                 # now, for each box, we have a class prediction
                 cls_preds, label_preds = torch.max(cls_preds, dim=-1)
-                print('\n shape of label_preds before: ' + str(label_preds.shape))
-                print('label_preds data type: ' + str(type(label_preds)))
+                # print('\n shape of label_preds before: ' + str(label_preds.shape))
+                # print('label_preds data type: ' + str(type(label_preds)))
                 # question: why add 1 to each element of label_preds?
                 # because class labels are 1,2,3 instead of 0,1,2?
                 label_preds = batch_dict['roi_labels'][index] if batch_dict.get('has_class_labels', False) else label_preds + 1
@@ -261,13 +270,16 @@ class Detector3DTemplate(nn.Module):
                     score_thresh=post_process_cfg.SCORE_THRESH
                 )
 
-                if post_process_cfg.OUTPUT_RAW_SCORE:
+                if post_process_cfg.OUTPUT_RAW_SCORE: # no need to worry about this, false by default
                     max_cls_preds, _ = torch.max(src_cls_preds, dim=-1)
                     selected_scores = max_cls_preds[selected]
 
                 final_scores = selected_scores
                 final_labels = label_preds[selected]
                 final_boxes = box_preds[selected]
+                if final_scores.shape[0] > max_num_boxes:
+                    max_box_ind = index
+                    max_num_boxes = final_scores.shape[0]
 
             recall_dict = self.generate_recall_record(
                 box_preds=final_boxes if 'rois' not in batch_dict else src_box_preds,
@@ -282,6 +294,35 @@ class Detector3DTemplate(nn.Module):
             }
             pred_dicts.append(record_dict)
 
+            print('src_cls_pred[selected] data type: ' + str(type(src_cls_preds[selected])))
+            print('src_cls_pred[selected] shape: ' + str(src_cls_preds[selected].shape))
+            if self.explain:
+                boxes_with_cls_scores.append(src_cls_preds[selected])
+        if self.explain:
+            # boxes_with_cls_scores = torch.Tensor(boxes_with_cls_scores)
+            # print('boxes_with_cls_scores data type: ' + str(type(boxes_with_cls_scores)))
+            # print('boxes_with_cls_scores shape: ' + str(boxes_with_cls_scores.shape))
+            batch_dict['pred_dicts'] = pred_dicts
+            batch_dict['recall_dict'] = recall_dict
+            # # note: torch.stack only works if every dimension except for dimension 0 matches
+            # boxes_with_cls_scores = torch.stack(boxes_with_cls_scores)
+
+            # pad each output in the batch to match dimensions with the maximum length output
+            # then stack the individual outputs together to get a tensor as the batch outout
+            for i in range(len(boxes_with_cls_scores)):
+                padding_size = max_num_boxes - boxes_with_cls_scores[i].shape[0]
+                if padding_size == 0:
+                    continue
+                padding = torch.zeros(padding_size,3)
+                new_output = torch.cat((boxes_with_cls_scores[i],padding), 0)
+                boxes_with_cls_scores[i] = new_output
+            boxes_with_cls_scores = torch.stack(boxes_with_cls_scores)
+            print('boxes_with_cls_scores data type: ' + str(type(boxes_with_cls_scores)))
+            print('boxes_with_cls_scores shape: ' + str(boxes_with_cls_scores.shape))
+            print('\n finishing the post_processing() function')
+            return boxes_with_cls_scores
+        print('\n finishing the post_processing() function')
+        # pred_dicts contains the final predictions of the boxes, class scores, and labels!!!
         return pred_dicts, recall_dict
 
     @staticmethod
