@@ -315,12 +315,31 @@ def main():
         # print(model2D)
         # print('\n \n structure of the full network: ')
         # print(model)
-        grads = saliency2D.attribute(PseudoImage2D, target=1, additional_forward_args=batch_dict)
-        grads = np.transpose(grads.squeeze().cpu().detach().numpy(), (1, 2, 0))
-        print('grads dimensions: ' + str(grads.shape))
-        grad_viz = viz.visualize_image_attr(grads, original_image, method="blended_heat_map", sign="absolute_value",
-                              show_colorbar=True, title="Overlayed Gradient Magnitudes")
-        grad_viz[0].savefig('XAI_results/grad_viz.png')
+
+        # target dimensions: batch_size and maximum number of boxes per image
+        # 1 should correspond to the pedestrain class
+        # target = torch.ones(4,50) # in config file, the max num of boxes is 500, I chose 50 instead
+        class_name_ditc = {
+            0 : 'car',
+            1 : 'pedestrain',
+            2 : 'cyclist'
+        }
+        
+        # target = (0,0) # i.e., generate reason as to why the 0-th box is classified as the 0-th class
+        # grads = saliency2D.attribute(PseudoImage2D, target=target, additional_forward_args=batch_dict)
+        for i in range(batch_dict['batch_size']): # iterate through each sample in the batch
+            for j in range(batch_dict['box_count'][i]): # iterate through each box in this sample
+                for k in range(3): # iterate through the 3 classes
+                    if k+1 == pred_dicts[i]['pred_labels'][j]: # compute contribution for the predicted class only, +1 because labels start at 1
+                        target = (j,k) # i.e., generate reason as to why the j-th box is classified as the k-th class
+                        grads = saliency2D.attribute(PseudoImage2D, target=target, additional_forward_args=batch_dict)
+                        grad = np.transpose(grads[i].squeeze().cpu().detach().numpy(), (1, 2, 0))
+                        grad_viz = viz.visualize_image_attr(grad, original_image, method="blended_heat_map", sign="absolute_value",
+                                          show_colorbar=True, title="Overlayed Gradient Magnitudes")
+                        grad_viz[0].savefig('XAI_results/Aug20_2020_initial_results_positive_boxes/explanation_for_{}/sample_{}/box_{}.png'.format(class_name_ditc[k],i+1,j))
+
+        # print('grads dimensions: ' + str(grads.shape))
+        
         break
         # just need one explanation for example
     # *****************

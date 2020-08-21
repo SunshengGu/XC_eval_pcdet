@@ -87,14 +87,30 @@ def nms_gpu(boxes, scores, thresh, pre_maxsize=None, **kwargs):
     :param thresh:
     :return:
     """
+    # print('\n entering nms_gpu of iou3d_nms_utils.py')
     assert boxes.shape[1] == 7
+    # note that this sort function is torch.sort, not the usual python sort function
+    # torch.sort returns a tuple, [0] would be the sorted scores, [1] would be the corresponding indices
     order = scores.sort(0, descending=True)[1]
+    # print('\norder type: ' + str(type(order)))
+    # print('order shape: ' + str(order.shape))
+    # print('scores type: ' + str(type(scores)))
+    # print('scores shape: ' + str(scores.shape))
     if pre_maxsize is not None:
         order = order[:pre_maxsize]
 
+    # explanation on contiguous tensors  https: // stackoverflow.com / questions / 48915810 / pytorch - contiguous
+    # calling .contiguous() makes a copy of the tensor, instead of sharing memory with the original one
     boxes = boxes[order].contiguous()
-    keep = torch.LongTensor(boxes.size(0))
+    keep = torch.LongTensor(boxes.size(0)) # maybe this is the indices in gpu?
+    # print('keep type: ' + str(type(keep)))
+    # print('keep shape: ' + str(keep.shape))
+    # for i in range(10):
+    #     print('keep[' + str(i) + ']: ' + str(keep[i]))
     num_out = iou3d_nms_cuda.nms_gpu(boxes, keep, thresh)
+    # print('num_out type: ' + str(type(num_out)))
+    # print('num_out: ' + str(num_out))
+    # print('\n exiting nms_gpu of iou3d_nms_utils.py')
     return order[keep[:num_out].cuda()].contiguous(), None
 
 

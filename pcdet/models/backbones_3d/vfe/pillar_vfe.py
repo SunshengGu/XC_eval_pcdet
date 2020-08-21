@@ -50,6 +50,12 @@ class PillarVFE(VFETemplate):
         self.num_filters = self.model_cfg.NUM_FILTERS
         assert len(self.num_filters) > 0
         num_filters = [num_point_features] + list(self.num_filters)
+        print('\n data type of num_filters in PillarVFE: ' + str(type(num_filters)))
+        print('\n length of num_filters: ' + str(len(num_filters)))
+        print('\n num_filters[0]: ' + str(num_filters[0]))
+        print('\n num_filters[1]: ' + str(num_filters[1]))
+        # print('\n data type of num_filters[0] in PillarVFE: ' + str(type(num_filters[0])))
+        # print('\n data type of num_filters[1] in PillarVFE: ' + str(type(num_filters[1])))
 
         pfn_layers = []
         for i in range(len(num_filters) - 1):
@@ -78,8 +84,8 @@ class PillarVFE(VFETemplate):
         paddings_indicator = actual_num.int() > max_num
         return paddings_indicator
 
-    def forward(self, batch_dict, **kwargs):
-  
+    def forward(self, tensor_values, batch_dict, **kwargs):
+        # tensor_values is just for compatibility with Captum, only useful when in explain mode
         voxel_features, voxel_num_points, coords = batch_dict['voxels'], batch_dict['voxel_num_points'], batch_dict['voxel_coords']
         points_mean = voxel_features[:, :, :3].sum(dim=1, keepdim=True) / voxel_num_points.type_as(voxel_features).view(-1, 1, 1)
         f_cluster = voxel_features[:, :, :3] - points_mean
@@ -107,4 +113,4 @@ class PillarVFE(VFETemplate):
             features = pfn(features)
         features = features.squeeze()
         batch_dict['pillar_features'] = features
-        return batch_dict
+        return tensor_values, batch_dict

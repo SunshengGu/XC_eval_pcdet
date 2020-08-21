@@ -38,8 +38,8 @@ class AxisAlignedTargetAssigner(object):
         gt_boxes = gt_boxes_with_classes[:, :, :7]
         for k in range(batch_size):
             cur_gt = gt_boxes[k]
-            cnt = cur_gt.__len__() - 1
-            while cnt > 0 and cur_gt[cnt].sum() == 0:
+            cnt = cur_gt.__len__() - 1 # same as len(cur_gt)-1
+            while cnt > 0 and cur_gt[cnt].sum() == 0: # get rid of empty boxes
                 cnt -= 1
             cur_gt = cur_gt[:cnt + 1]
             cur_gt_classes = gt_classes[k][:cnt + 1].int()

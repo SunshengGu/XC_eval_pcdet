@@ -130,3 +130,42 @@ In pcdet/models/dense_heads/anchor_head_single.py, what is the difference betwee
     batch_box_preds shape: torch.Size([4, 321408, 7])
     batch_box_preds[0] shape: torch.Size([321408, 7])
 -
+
+Instructions for Martin Ma:
+
+Getting Started:
+1. Create a new branch from this `XAI` branch, call it `XAI_Martin`: https://git.uwaterloo.ca/wise-ads/WISEOpenLidarPerceptron/-/tree/XAI
+2. Follow instructions here to complete development install for Captum as you will modify its source code
+3. Switch your PCDet local repo to the `XAI_Martin` branch and change file paths for the host machine to match your file paths
+4. tools/XAI.py is modified from tools/test.py to build a model and use captum's API to explain a particular sample input for the model
+5. This contains what I've learned about how PCDet builds the PointPillar network: https://docs.google.com/presentation/d/18HLS68ET3vXomBBOjc_BQIZP1idZ9JCPIZswmoH7eLQ/edit?usp=sharing
+6. This document is work-in-progress, will be more polished as I dig deeper
+7. notes.txt is a note for myself for understanding PCDet, you may use it as well
+8. captum_notes.txt contains what I've learned about captum's Saliency method
+
+The Challenge:
+- Currently, I'm trying to generate explanation for the 2D pseudoimage in pointpillar using captum's Saliency method (equivalent to backprop with respect to input pixels)
+- (note: you may read sections 2 and 3 of the pointpillar paper https://arxiv.org/pdf/1812.05784.pdf to get a better understanding, but my Google slides has a summary)
+- I was able to create two pointpillar models using two different config files, one full pointpillar model (call it full model) and one model (call it 2D model) with just the 2D backbone and detection head (see Fig 2 in the pointpillar paper).
+- My plan: run the full model once to create the 2D pseudoimage, then I run Saliency on the 2D model using the 2D pseudoimage as input
+- (note: the full model is already trained and has a checkpoint, so don't need to worry about that)
+- (note: also, the command for running the XAI.py file is - python XAI.py --cfg_file ~/pcdet/tools/cfgs/kitti_models/pointpillar.yaml --explained_cfg_file ~/pcdet/tools/cfgs/kitti_models/pointpillar_2DBackbone_DetHead.yaml --batch_size 4 --ckpt ~/pcdet/output/kitti_models/pointpillar/default/ckpt/checkpoint_epoch_2.pth)
+- (note: no need to change that command unless you want to explain a different model or use a different checkpoint)
+- The problem is, PCDet models and captum's APIs use different input formats
+- PCDet models take a dictionary as input and will fill the dictionary with additional key-value pairs in each stage (VFE, 2D backbone, deteciton head etc.)
+- But captum expects a torch tensor as input and will feed this tensor to the model it tries to explain, it uses a separate argument to take in additional input argument other than the tensor
+
+Sunsheng's Proposed Solution:
+- We can try to make the 2D model from PCDet accept a tensor as its primary input, and use a separate dictionary to store additional required data
+- In the mean time, changes on the Captum side might be required to be able to process the additional input argument (i.e., the dictionary)
+
+Sunsheng's Tasks:
+1. Separate the tensor being fed through the network from the dictionary for pointpillar in PCDet
+2. Keep filling the PCDet/PointPillar part in this document: https://docs.google.com/presentation/d/18HLS68ET3vXomBBOjc_BQIZP1idZ9JCPIZswmoH7eLQ/edit?usp=sharing
+
+Martin's Tasks:
+1. Thoroughly understand how Captum's Saliency method processes input and creates attributions
+2. Summarize your learning in the Captum part in this document: https://docs.google.com/presentation/d/18HLS68ET3vXomBBOjc_BQIZP1idZ9JCPIZswmoH7eLQ/edit?usp=sharing
+
+End Goal:
+An attribution heatmap for the 2D model

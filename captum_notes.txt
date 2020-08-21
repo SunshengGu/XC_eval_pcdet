@@ -40,7 +40,7 @@ _select_targets:
 - The use of asterisks: https://treyhunner.com/2018/10/asterisks-in-python-what-they-are-and-how-to-use-them/
     - get a bunch of stuff at once without length limit
     - access key-only arguments
-- Note: tuple can be used a key for dict
+- Note: tuple can be used as a key for dict
 - output[(slice(None), *target)]: for each sample in the `output` tensor, obtain results corresponding to all targets.
 
 _format_output:

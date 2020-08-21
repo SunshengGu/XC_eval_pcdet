@@ -216,8 +216,9 @@ class Detector3DTemplate(nn.Module):
         recall_dict = {}
         pred_dicts = []
         boxes_with_cls_scores = []
-        max_box_ind = 0 # index of the input in the batch with most number of boxes
-        max_num_boxes = 0
+        batch_dict['box_count'] = {} # store the number of boxes for each image in the sample
+        # max_box_ind = 0 # index of the input in the batch with most number of boxes
+        max_num_boxes = 50
         for index in range(batch_size):
             # the 'None' here just means return None if key not found
             if batch_dict.get('batch_index', None) is not None:
@@ -277,9 +278,14 @@ class Detector3DTemplate(nn.Module):
                 final_scores = selected_scores
                 final_labels = label_preds[selected]
                 final_boxes = box_preds[selected]
-                if final_scores.shape[0] > max_num_boxes:
-                    max_box_ind = index
-                    max_num_boxes = final_scores.shape[0]
+
+                # for label in final_labels:
+                #     print('label is {}'.format(label))
+
+                batch_dict['box_count'][index] = final_scores.shape[0]
+                # if final_scores.shape[0] > max_num_boxes:
+                #     max_box_ind = index
+                #     max_num_boxes = final_scores.shape[0]
 
             recall_dict = self.generate_recall_record(
                 box_preds=final_boxes if 'rois' not in batch_dict else src_box_preds,
@@ -294,8 +300,8 @@ class Detector3DTemplate(nn.Module):
             }
             pred_dicts.append(record_dict)
 
-            print('src_cls_pred[selected] data type: ' + str(type(src_cls_preds[selected])))
-            print('src_cls_pred[selected] shape: ' + str(src_cls_preds[selected].shape))
+            # print('src_cls_pred[selected] data type: ' + str(type(src_cls_preds[selected])))
+            # print('src_cls_pred[selected] shape: ' + str(src_cls_preds[selected].shape))
             if self.explain:
                 boxes_with_cls_scores.append(src_cls_preds[selected])
         if self.explain:
@@ -310,15 +316,21 @@ class Detector3DTemplate(nn.Module):
             # pad each output in the batch to match dimensions with the maximum length output
             # then stack the individual outputs together to get a tensor as the batch outout
             for i in range(len(boxes_with_cls_scores)):
-                padding_size = max_num_boxes - boxes_with_cls_scores[i].shape[0]
-                if padding_size == 0:
+                if boxes_with_cls_scores[i].shape[0] > max_num_boxes:
+                    # more than max_num_boxes boxes detected
+                    boxes_with_cls_scores[i] = boxes_with_cls_scores[i][:max_num_boxes]
+                elif boxes_with_cls_scores[i].shape[0] < max_num_boxes:
+                    # less than max_num_boxes boxes detected
+                    padding_size = max_num_boxes - boxes_with_cls_scores[i].shape[0]
+                    padding = torch.zeros(padding_size,3)
+                    padding = padding.float().cuda() # load `padding` to GPU
+                    new_output = torch.cat((boxes_with_cls_scores[i],padding), 0)
+                    boxes_with_cls_scores[i] = new_output
+                else:
                     continue
-                padding = torch.zeros(padding_size,3)
-                new_output = torch.cat((boxes_with_cls_scores[i],padding), 0)
-                boxes_with_cls_scores[i] = new_output
             boxes_with_cls_scores = torch.stack(boxes_with_cls_scores)
-            print('boxes_with_cls_scores data type: ' + str(type(boxes_with_cls_scores)))
-            print('boxes_with_cls_scores shape: ' + str(boxes_with_cls_scores.shape))
+            # print('boxes_with_cls_scores data type: ' + str(type(boxes_with_cls_scores)))
+            # print('boxes_with_cls_scores shape: ' + str(boxes_with_cls_scores.shape))
             print('\n finishing the post_processing() function')
             return boxes_with_cls_scores
         print('\n finishing the post_processing() function')
