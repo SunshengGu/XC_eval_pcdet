@@ -165,6 +165,7 @@ def repeat_eval_ckpt(model, test_loader, args, eval_output_dir, logger, ckpt_dir
 
 
 def main():
+    method = 'IG'
     args, cfg, x_cfg = parse_config()
     if args.launcher == 'none':
         dist_test = False
@@ -254,6 +255,7 @@ def main():
     '''
     saliency2D = Saliency(model2D)
     saliency = Saliency(model)
+    ig2D = IntegratedGradients(model2D)
     # load checkpoint
     print('\n \n loading parameters for the 2d network')
     model2D.load_params_from_file(filename=args.ckpt, logger=logger, to_cpu=dist_test)
@@ -321,23 +323,55 @@ def main():
         # target = torch.ones(4,50) # in config file, the max num of boxes is 500, I chose 50 instead
         class_name_ditc = {
             0 : 'car',
-            1 : 'pedestrain',
+            1 : 'pedestrian',
             2 : 'cyclist'
         }
         
         # target = (0,0) # i.e., generate reason as to why the 0-th box is classified as the 0-th class
         # grads = saliency2D.attribute(PseudoImage2D, target=target, additional_forward_args=batch_dict)
-        for i in range(batch_dict['batch_size']): # iterate through each sample in the batch
-            for j in range(batch_dict['box_count'][i]): # iterate through each box in this sample
-                for k in range(3): # iterate through the 3 classes
-                    if k+1 == pred_dicts[i]['pred_labels'][j]: # compute contribution for the predicted class only, +1 because labels start at 1
-                        target = (j,k) # i.e., generate reason as to why the j-th box is classified as the k-th class
-                        grads = saliency2D.attribute(PseudoImage2D, target=target, additional_forward_args=batch_dict)
-                        grad = np.transpose(grads[i].squeeze().cpu().detach().numpy(), (1, 2, 0))
-                        grad_viz = viz.visualize_image_attr(grad, original_image, method="blended_heat_map", sign="absolute_value",
-                                          show_colorbar=True, title="Overlayed Gradient Magnitudes")
-                        grad_viz[0].savefig('XAI_results/Aug20_2020_initial_results_positive_boxes/explanation_for_{}/sample_{}/box_{}.png'.format(class_name_ditc[k],i+1,j))
-
+        if method == 'Saliency':
+            for i in range(batch_dict['batch_size']): # iterate through each sample in the batch
+                for j in range(batch_dict['box_count'][i]): # iterate through each box in this sample
+                    for k in range(3): # iterate through the 3 classes
+                        if k+1 == pred_dicts[i]['pred_labels'][j]: # compute contribution for the predicted class only, +1 because labels start at 1
+                            target = (j,k) # i.e., generate reason as to why the j-th box is classified as the k-th class
+                            grads = saliency2D.attribute(PseudoImage2D, target=target, additional_forward_args=batch_dict)
+                            grad = np.transpose(grads[i].squeeze().cpu().detach().numpy(), (1, 2, 0))
+                            grad_viz = viz.visualize_image_attr(grad, original_image, method="blended_heat_map", sign="absolute_value",
+                                              show_colorbar=True, title="Overlayed Gradient Magnitudes")
+                            grad_viz[0].savefig('XAI_results/Aug20_2020_initial_results_positive_boxes/explanation_for_{}/sample_{}/box_{}.png'.format(class_name_ditc[k],i+1,j))
+        if method == 'IG':
+            steps = 24
+            # batch_dict['batch_size'] = 1 # a temporary hack for GPU memory limit issue, actual batch size in trianing is 4
+            for i in range(batch_dict['batch_size']):  # iterate through each sample in the batch
+                for j in range(batch_dict['box_count'][i]):  # iterate through each box in this sample
+                    for k in range(3):  # iterate through the 3 classes
+                        if k + 1 == pred_dicts[i]['pred_labels'][j]:  # compute contribution for the predicted class only, +1 because labels start at 1
+                            target = (j, k)  # i.e., generate reason as to why the j-th box is classified as the k-th class
+                            get_delta = True
+                            if get_delta:
+                                attrs_ig, delta = ig2D.attribute(PseudoImage2D, baselines=PseudoImage2D*0,
+                                                                 target=target, additional_forward_args=batch_dict,
+                                                                 return_convergence_delta=True, n_steps=steps,
+                                                                 internal_batch_size=batch_dict['batch_size'])
+                                attr_ig = np.transpose(attrs_ig[i].squeeze().cpu().detach().numpy(), (1, 2, 0))
+                                ig_viz = viz.visualize_image_attr(attr_ig, original_image, method="blended_heat_map", sign="all",
+                                                                  show_colorbar=True, title="Overlayed Integrated Gradients")
+                                ig_viz[0].savefig(
+                                    'XAI_results/Aug24_2020_IG_positive_boxes_{}steps/explanation_for_{}/sample_{}/box_{}_delta_{}.png'.format(steps,
+                                        class_name_ditc[k], i + 1, j, delta))
+                            else:
+                                attrs_ig = ig2D.attribute(PseudoImage2D, baselines=PseudoImage2D * 0,
+                                                          target=target, additional_forward_args=batch_dict, n_steps=steps,
+                                                          internal_batch_size=batch_dict['batch_size'])
+                                attr_ig = np.transpose(attrs_ig[i].squeeze().cpu().detach().numpy(), (1, 2, 0))
+                                ig_viz = viz.visualize_image_attr(attr_ig, original_image, method="blended_heat_map",
+                                                                  sign="all",
+                                                                  show_colorbar=True,
+                                                                  title="Overlayed Integrated Gradients")
+                                ig_viz[0].savefig(
+                                    'XAI_results/Aug24_2020_IG_positive_boxes_{}steps/explanation_for_{}/sample_{}/box_{}.png'.format(steps,
+                                        class_name_ditc[k], i + 1, j))
         # print('grads dimensions: ' + str(grads.shape))
         
         break

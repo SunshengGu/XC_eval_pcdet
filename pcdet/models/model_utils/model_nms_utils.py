@@ -3,7 +3,7 @@ from ...ops.iou3d_nms import iou3d_nms_utils
 
 
 def class_agnostic_nms(box_scores, box_preds, nms_config, score_thresh=None):
-    # print('\n entering class_agnostic_nms of model_nms_utils.py')
+    print('\n entering class_agnostic_nms of model_nms_utils.py')
     src_box_scores = box_scores
     if score_thresh is not None:
         scores_mask = (box_scores >= score_thresh)
@@ -24,8 +24,8 @@ def class_agnostic_nms(box_scores, box_preds, nms_config, score_thresh=None):
             boxes_for_nms, box_scores_nms, nms_config.NMS_THRESH, **nms_config
         )
         selected = indices[keep_idx[:nms_config.NMS_POST_MAXSIZE]]
-        print('selected type: ' + str(type(selected)))
-        print('selected shape: ' + str(selected.shape))
+        # print('selected type: ' + str(type(selected)))
+        # print('selected shape: ' + str(selected.shape))
         # size of `selected` matches with `num_out` in nms_gpu of pcdet/ops/iou3d_nms/iou3d_nms_utils.py
 
     if score_thresh is not None: # get rid of components that fail to exceed the score threshold

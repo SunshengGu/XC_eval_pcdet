@@ -71,8 +71,10 @@ class BaseBEVBackbone(nn.Module):
         ups = []
         ret_dict = {}
         x = spatial_features
+        # print('\nstr(type(tensor_values)): {}'.format(str(type(tensor_values))))
         # TODO: use tensor_values instead of x when in explain mode
-        if str(type(tensor_values)) == 'torch.Tensor': # not a dummy tensor
+        if str(type(tensor_values)) == '<class \'torch.Tensor\'>': # not a dummy tensor
+            print('\nBaseBEVBackbone detected that we are in explain mode')
             for i in range(len(self.blocks)):
                 tensor_values = self.blocks[i](tensor_values)
 
