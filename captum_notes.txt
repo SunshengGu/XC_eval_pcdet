@@ -48,3 +48,10 @@ _format_output:
 - Return output if is_inputs_tuple else output[0]
 - Make sure output and input format matches
 
+
+Note on IntegratedGradients:
+- `gausslegendre` is the method used for approximating the integral
+- original paper mentioned the term "Riemman approximation of the integral"
+- "in practice, 20-300 steps should be enough"
+
+
