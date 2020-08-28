@@ -225,7 +225,8 @@ class Detector3DTemplate(nn.Module):
             record_dict = {
                 'pred_boxes': final_boxes,
                 'pred_scores': final_scores,
-                'pred_labels': final_labels
+                'pred_labels': final_labels,
+                'pred_scores_all': src_cls_preds[selected]
             }
             pred_dicts.append(record_dict)
 
