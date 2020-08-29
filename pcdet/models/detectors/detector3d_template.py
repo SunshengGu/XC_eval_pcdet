@@ -196,7 +196,7 @@ class Detector3DTemplate(nn.Module):
     def forward(self, **kwargs):
         raise NotImplementedError
 
-    def post_processing(self, tensor_values, batch_dict):
+    def post_processing(self, batch_dict):
         """
         Args:
             batch_dict:
@@ -207,6 +207,79 @@ class Detector3DTemplate(nn.Module):
                 batch_index: optional (N1+N2+...)
                 roi_labels: (B, num_rois)  1 .. num_classes
         Returns:
+
+        """
+        post_process_cfg = self.model_cfg.POST_PROCESSING
+        batch_size = batch_dict['batch_size']
+        recall_dict = {}
+        pred_dicts = []
+        for index in range(batch_size):
+            if batch_dict.get('batch_index', None) is not None:
+                assert batch_dict['batch_cls_preds'].shape.__len__() == 2
+                batch_mask = (batch_dict['batch_index'] == index)
+            else:
+                assert batch_dict['batch_cls_preds'].shape.__len__() == 3
+                batch_mask = index
+
+            box_preds = batch_dict['batch_box_preds'][batch_mask]
+            cls_preds = batch_dict['batch_cls_preds'][batch_mask]
+
+            src_cls_preds = cls_preds
+            src_box_preds = box_preds
+            assert cls_preds.shape[1] in [1, self.num_class]
+
+            if not batch_dict['cls_preds_normalized']:
+                cls_preds = torch.sigmoid(cls_preds)
+
+            if post_process_cfg.NMS_CONFIG.MULTI_CLASSES_NMS:
+                raise NotImplementedError
+            else:
+                cls_preds, label_preds = torch.max(cls_preds, dim=-1)
+                label_preds = batch_dict['roi_labels'][index] if batch_dict.get('has_class_labels',
+                                                                                False) else label_preds + 1
+
+                selected, selected_scores = class_agnostic_nms(
+                    box_scores=cls_preds, box_preds=box_preds,
+                    nms_config=post_process_cfg.NMS_CONFIG,
+                    score_thresh=post_process_cfg.SCORE_THRESH
+                )
+
+                if post_process_cfg.OUTPUT_RAW_SCORE:
+                    max_cls_preds, _ = torch.max(src_cls_preds, dim=-1)
+                    selected_scores = max_cls_preds[selected]
+
+                final_scores = selected_scores
+                final_labels = label_preds[selected]
+                final_boxes = box_preds[selected]
+
+            recall_dict = self.generate_recall_record(
+                box_preds=final_boxes if 'rois' not in batch_dict else src_box_preds,
+                recall_dict=recall_dict, batch_index=index, data_dict=batch_dict,
+                thresh_list=post_process_cfg.RECALL_THRESH_LIST
+            )
+
+            record_dict = {
+                'pred_boxes': final_boxes,
+                'pred_scores': final_scores,
+                'pred_labels': final_labels
+            }
+            pred_dicts.append(record_dict)
+
+        return pred_dicts, recall_dict
+
+    def post_processing_xai(self, tensor_values, batch_dict):
+        """
+        Args:
+            batch_dict:
+                batch_size:
+                batch_cls_preds: (B, num_boxes, num_classes | 1) or (N1+N2+..., num_classes | 1)
+                batch_box_preds: (B, num_boxes, 7+C) or (N1+N2+..., 7+C)
+                cls_preds_normalized: indicate whether batch_cls_preds is normalized
+                batch_index: optional (N1+N2+...)
+                roi_labels: (B, num_rois)  1 .. num_classes
+        Returns:
+        :param batch_dict:
+        :param tensor_values:
 
         """
         print('\n starting the post_processing() function')
@@ -302,40 +375,30 @@ class Detector3DTemplate(nn.Module):
 
             # print('src_cls_pred[selected] data type: ' + str(type(src_cls_preds[selected])))
             # print('src_cls_pred[selected] shape: ' + str(src_cls_preds[selected].shape))
-            if self.explain:
-                boxes_with_cls_scores.append(src_cls_preds[selected])
-        if self.explain:
-            # boxes_with_cls_scores = torch.Tensor(boxes_with_cls_scores)
-            # print('boxes_with_cls_scores data type: ' + str(type(boxes_with_cls_scores)))
-            # print('boxes_with_cls_scores shape: ' + str(boxes_with_cls_scores.shape))
-            batch_dict['pred_dicts'] = pred_dicts
-            batch_dict['recall_dict'] = recall_dict
-            # # note: torch.stack only works if every dimension except for dimension 0 matches
-            # boxes_with_cls_scores = torch.stack(boxes_with_cls_scores)
+            boxes_with_cls_scores.append(src_cls_preds[selected])
+        batch_dict['pred_dicts'] = pred_dicts
+        batch_dict['recall_dict'] = recall_dict
+        # # note: torch.stack only works if every dimension except for dimension 0 matches
+        # boxes_with_cls_scores = torch.stack(boxes_with_cls_scores)
 
-            # pad each output in the batch to match dimensions with the maximum length output
-            # then stack the individual outputs together to get a tensor as the batch outout
-            for i in range(len(boxes_with_cls_scores)):
-                if boxes_with_cls_scores[i].shape[0] > max_num_boxes:
-                    # more than max_num_boxes boxes detected
-                    boxes_with_cls_scores[i] = boxes_with_cls_scores[i][:max_num_boxes]
-                elif boxes_with_cls_scores[i].shape[0] < max_num_boxes:
-                    # less than max_num_boxes boxes detected
-                    padding_size = max_num_boxes - boxes_with_cls_scores[i].shape[0]
-                    padding = torch.zeros(padding_size,3)
-                    padding = padding.float().cuda() # load `padding` to GPU
-                    new_output = torch.cat((boxes_with_cls_scores[i],padding), 0)
-                    boxes_with_cls_scores[i] = new_output
-                else:
-                    continue
-            boxes_with_cls_scores = torch.stack(boxes_with_cls_scores)
-            # print('boxes_with_cls_scores data type: ' + str(type(boxes_with_cls_scores)))
-            # print('boxes_with_cls_scores shape: ' + str(boxes_with_cls_scores.shape))
-            print('\n finishing the post_processing() function')
-            return boxes_with_cls_scores
+        # pad each output in the batch to match dimensions with the maximum length output
+        # then stack the individual outputs together to get a tensor as the batch outout
+        for i in range(len(boxes_with_cls_scores)):
+            if boxes_with_cls_scores[i].shape[0] > max_num_boxes:
+                # more than max_num_boxes boxes detected
+                boxes_with_cls_scores[i] = boxes_with_cls_scores[i][:max_num_boxes]
+            elif boxes_with_cls_scores[i].shape[0] < max_num_boxes:
+                # less than max_num_boxes boxes detected
+                padding_size = max_num_boxes - boxes_with_cls_scores[i].shape[0]
+                padding = torch.zeros(padding_size,3)
+                padding = padding.float().cuda() # load `padding` to GPU
+                new_output = torch.cat((boxes_with_cls_scores[i],padding), 0)
+                boxes_with_cls_scores[i] = new_output
+            else:
+                continue
+        boxes_with_cls_scores = torch.stack(boxes_with_cls_scores)
         print('\n finishing the post_processing() function')
-        # pred_dicts contains the final predictions of the boxes, class scores, and labels!!!
-        return pred_dicts, recall_dict
+        return boxes_with_cls_scores
 
     @staticmethod
     def generate_recall_record(box_preds, recall_dict, batch_index, data_dict=None, thresh_list=None):

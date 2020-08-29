@@ -1,6 +1,7 @@
-from .base_bev_backbone import BaseBEVBackbone
+from .base_bev_backbone import BaseBEVBackbone, BaseBEVBackboneXAI
 
 
 __all__ = {
-    'BaseBEVBackbone': BaseBEVBackbone
+    'BaseBEVBackbone': BaseBEVBackbone,
+    'BaseBEVBackboneXAI': BaseBEVBackboneXAI
 }

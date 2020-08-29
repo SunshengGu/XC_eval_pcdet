@@ -205,7 +205,7 @@ def calculate_iou(gt_boxes, pred_boxes):
 
 def main():
     batches_to_analyze = 10
-    method = 'IG'
+    method = 'Saliency'
     mult_by_inputs = False
     args, cfg, x_cfg = parse_config()
     if args.launcher == 'none':
@@ -266,13 +266,13 @@ def main():
         batch_size=args.batch_size,
         dist=dist_test, workers=args.workers, logger=logger, training=False
     )
-    # ********** debug message **************
-    print('\n Checking if the 2d network has VFE')
-    if x_cfg.MODEL.get('VFE', None) is None:
-        print('\n no VFE')
-    else:
-        print('\n has VFE')
-    # ********** debug message **************
+    # # ********** debug message **************
+    # print('\n Checking if the 2d network has VFE')
+    # if x_cfg.MODEL.get('VFE', None) is None:
+    #     print('\n no VFE')
+    # else:
+    #     print('\n has VFE')
+    # # ********** debug message **************
     print('\n \n building the 2d network')
     model2D = build_network(model_cfg=x_cfg.MODEL, num_class=len(x_cfg.CLASS_NAMES), dataset=test_set, explain=True)
     print('\n \n building the full network')
@@ -339,7 +339,8 @@ def main():
         dummy_tensor = 0
         load_data_to_gpu(batch_dict) # this function is designed for dict, don't use for other data types!
         with torch.no_grad():
-            pred_dicts, ret_dict = model(dummy_tensor, batch_dict)
+            boxes_with_classes = model(dummy_tensor, batch_dict)
+        pred_dicts = batch_dict['pred_dicts']
         '''
         Note:
         - In Captum, the forward function of the model is called in such a way: forward_func(input, addtional_input_args)
@@ -379,12 +380,12 @@ def main():
         conf_mat = []
         for i in range(args.batch_size): # i is input image id in the batch
             conf_mat_frame = []
-            iou, gt_index = calculate_iou(gt_dict[i]['boxes'], pred_dicts[i]['pred_boxes'].cpu().numpy())
+            pred_boxes = pred_dicts[i]['pred_boxes'].cpu().numpy()
+            iou, gt_index = calculate_iou(gt_dict[i]['boxes'], pred_boxes)
             for j in range(len(pred_dicts[i]['pred_scores'])): # j is prediction box id in the i-th image
                 if pred_dicts[i]['pred_scores'][j].cpu().numpy() >= score_thres:
-                    if iou[j] >= iou_thres and \
-                            gt_dict[i]['labels'][gt_index[j]] == \
-                            class_name_dict[pred_dicts[i]['pred_labels'][j].cpu().numpy() - 1]:
+                    adjusted_pred_boxes_labels = pred_dicts[i]['pred_labels'][j].cpu().numpy() - 1
+                    if iou[j] >= iou_thres and gt_dict[i]['labels'][gt_index[j]] == class_name_dict[adjusted_pred_boxes_labels]:
                         conf_mat_frame.append('TP')
                     else:
                         conf_mat_frame.append('FP')
@@ -413,6 +414,7 @@ def main():
                         XAI_cls_path_str = XAI_batch_path_str + '/explanation_for_{}/sample_{}'.format(class_name_dict[k],i)
                         if not os.path.exists(XAI_cls_path_str):
                             os.makedirs(XAI_cls_path_str)
+                        os.chmod(XAI_cls_path_str, 0o777)
                         XAI_box_relative_path_str = XAI_cls_path_str.split("tools/",1)[1] + '/box_{}_{}.png'.format(j,conf_mat[i][j])
                         # print('XAI_box_path_str: {}'.format(XAI_box_path_str))
                         grad_viz[0].savefig(XAI_box_relative_path_str)
