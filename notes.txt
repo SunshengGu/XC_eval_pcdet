@@ -140,7 +140,13 @@ In pcdet/models/dense_heads/anchor_head_single.py, what is the difference betwee
     batch_box_preds data type: <class 'torch.Tensor'>
     batch_box_preds shape: torch.Size([4, 321408, 7])
     batch_box_preds[0] shape: torch.Size([321408, 7])
--
+
+d3_box_overlap in pcdet/datasets/kitti/kitti_object_eval_python/eval.py:
+- Creates a list of indices for box parameters
+- Delete indices for z location and height
+- Calls rotate_iou_gpu_eval from pcdet/datasets/kitti/kitti_object_eval_python/rotate_iou.py
+- rotate_iou_gpu_eval seems to calculate 2D IoU
+- d3_box_overlap_kernel from pcdet/datasets/kitti/kitti_object_eval_python/eval.py the calculates 3D IoU
 
 Instructions for Martin Ma:
 

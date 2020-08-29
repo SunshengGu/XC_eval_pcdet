@@ -64,7 +64,7 @@ class Detector3DTemplate(nn.Module):
     def build_vfe(self, model_info_dict):
         if self.model_cfg.get('VFE', None) is None:
             # ********** debug message **************
-            print('\n no VFE')
+            # print('\n no VFE')
             # ********** debug message **************
             return None, model_info_dict
 
@@ -81,7 +81,7 @@ class Detector3DTemplate(nn.Module):
     def build_backbone_3d(self, model_info_dict):
         if self.model_cfg.get('BACKBONE_3D', None) is None:
             # ********** debug message **************
-            print('\n no 3D backbone')
+            # print('\n no 3D backbone')
             # ********** debug message **************
             return None, model_info_dict
 
@@ -99,7 +99,7 @@ class Detector3DTemplate(nn.Module):
     def build_map_to_bev_module(self, model_info_dict):
         if self.model_cfg.get('MAP_TO_BEV', None) is None:
             # ********** debug message **************
-            print('\n no map_to_bev_module')
+            # print('\n no map_to_bev_module')
             # ********** debug message **************
             return None, model_info_dict
 
@@ -114,7 +114,7 @@ class Detector3DTemplate(nn.Module):
     def build_backbone_2d(self, model_info_dict):
         if self.model_cfg.get('BACKBONE_2D', None) is None:
             # ********** debug message **************
-            print('\n no 2D backbone')
+            # print('\n no 2D backbone')
             # ********** debug message **************
             return None, model_info_dict
         if 'num_bev_features' not in model_info_dict:
@@ -132,7 +132,7 @@ class Detector3DTemplate(nn.Module):
     def build_pfe(self, model_info_dict):
         if self.model_cfg.get('PFE', None) is None:
             # ********** debug message **************
-            print('\n no pfe')
+            # print('\n no pfe')
             # ********** debug message **************
             return None, model_info_dict
 

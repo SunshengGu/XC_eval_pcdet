@@ -15,6 +15,8 @@ from pcdet.utils import common_utils
 from pcdet.config import cfg, cfg_from_list, cfg_from_yaml_file, log_config_to_file
 from eval_utils import eval_utils
 from pcdet.models import load_data_to_gpu
+from pcdet.datasets.kitti.kitti_dataset import KittiDataset
+from pcdet.datasets.kitti.kitti_object_eval_python.eval import d3_box_overlap
 
 # XAI related imports
 import matplotlib.pyplot as plt
@@ -160,12 +162,51 @@ def repeat_eval_ckpt(model, test_loader, args, eval_output_dir, logger, ckpt_dir
             print('%s' % cur_epoch_id, file=f)
         logger.info('Epoch %s has been evaluated' % cur_epoch_id)
 
-# def generate_explanation(XAI_method, model, input, baseline, target):
-#     # TODO: fill this
+def get_gt_infos(cfg):
+    '''
+    :param cfg: object containing model config information
+    :return: gt_infos--containing gt boxes that have labels corresponding to the classes of interest, as well as the
+                labels themselves
+    '''
+    dataset_cfg = cfg.DATA_CONFIG
+    class_names = cfg.CLASS_NAMES
+    kitti = KittiDataset(
+        dataset_cfg=dataset_cfg,
+        class_names=class_names,
+        training=False
+    )
+    gt_infos = []
+    for info in kitti.kitti_infos:
+        box3d_lidar = np.array(info['annos']['gt_boxes_lidar'])
+        labels = np.array(info['annos']['name'])
+
+        interested = []
+        for i in range(len(labels)):
+            label = labels[i]
+            if label in cfg.CLASS_NAMES:
+                interested.append(i)
+        interested = np.array(interested)
+
+        # box3d_lidar[:,2] -= box3d_lidar[:,5] / 2
+        gt_info = {
+            'boxes' : box3d_lidar[interested],
+            'labels' : info['annos']['name'][interested],
+        }
+        gt_infos.append(gt_info)
+    return gt_infos
+
+def calculate_iou(gt_boxes, pred_boxes):
+    # based on pcdet/datasets/kitti/kitti_dataset.py line 164, z_axis should be 2
+    overlap = d3_box_overlap(gt_boxes, pred_boxes, z_axis=2, z_center=1)
+    # pick max iou wrt to each detection box
+    iou, gt_index = np.max(overlap, axis=0), np.argmax(overlap, axis=0)
+    return iou, gt_index
 
 
 def main():
+    batches_to_analyze = 10
     method = 'IG'
+    mult_by_inputs = False
     args, cfg, x_cfg = parse_config()
     if args.launcher == 'none':
         dist_test = False
@@ -255,7 +296,8 @@ def main():
     '''
     saliency2D = Saliency(model2D)
     saliency = Saliency(model)
-    ig2D = IntegratedGradients(model2D)
+    ig2D = IntegratedGradients(model2D, multiply_by_inputs=mult_by_inputs)
+    steps = 24 # number of steps for IG
     # load checkpoint
     print('\n \n loading parameters for the 2d network')
     model2D.load_params_from_file(filename=args.ckpt, logger=logger, to_cpu=dist_test)
@@ -265,7 +307,33 @@ def main():
     model.load_params_from_file(filename=args.ckpt, logger=logger, to_cpu=dist_test)
     model.cuda()
     model.eval()
-    for i, batch_dict in enumerate(test_loader):
+
+    class_name_dict = {
+        0: 'car',
+        1: 'pedestrian',
+        2: 'cyclist'
+    }
+
+    # get the date and time to create a folder for the specific time when this script is run
+    now = datetime.datetime.now()
+    dt_string = now.strftime("%b_%d_%Y_%H_%M_%S")
+    # get current working directory
+    cwd = os.getcwd()
+    # create directory to store results just for this run, include the method in folder name
+    XAI_result_path = os.path.join(cwd, 'XAI_results/{}_{}'.format(dt_string, method))
+    if method == "IG":
+        if mult_by_inputs:
+            XAI_result_path = os.path.join(cwd, 'XAI_results/{}_{}_{}_{}steps'.format(dt_string, method, 'multiply_by_inputs', steps))
+        else:
+            XAI_result_path = os.path.join(cwd, 'XAI_results/{}_{}_{}_{}steps'.format(dt_string, method, 'no_multiply_by_inputs', steps))
+    print('\nXAI_result_path: {}'.format(XAI_result_path))
+    XAI_res_path_str = str(XAI_result_path)
+    os.mkdir(XAI_result_path)
+    os.chmod(XAI_res_path_str,0o777)
+
+    for batch_num, batch_dict in enumerate(test_loader):
+        XAI_batch_path_str = XAI_res_path_str + '/batch_{}'.format(batch_num)
+        os.mkdir(XAI_batch_path_str)
         # batch_dict['XAI'] = True
         # run the forward pass once to generate outputs and intermediate representations
         dummy_tensor = 0
@@ -286,33 +354,15 @@ def main():
         DetectionHead = model.module_list[3] # note, the index 3 is specifically for pointpillar, can be other number for other models
         BoxPrediction = DetectionHead.forward_ret_dict['cls_preds']
         BoxGroundTruth = batch_dict['gt_boxes']
-        # BoxGroundTruth = DetectionHead.forward_ret_dict['box_cls_labels']
-        # verify if pred and gt have the same dimensions
-        # print('PseudoImage2D data type: ' + str(type(PseudoImage2D)))
-        # print('PseudoImage2D dimensions: ' + str(list(PseudoImage2D.size())))
-        # print('Prediction data type: ' + str(type(BoxPrediction)))
-        # print('Prediction dimensions: ' + str(list(BoxPrediction.size())))
-        # print('Ground truth data type: ' + str(type(BoxGroundTruth)))
-        # print('Ground truth dimensions: ' + str(list(BoxGroundTruth.size())))
-        # print('pred_dicts data type: ' + str(type(pred_dicts)))
-        # print('pred_dicts elements type: ' + str(type(pred_dicts[0])))
-        # print('pred_dicts elements size: ' + str(len(pred_dicts[0])))
-        # # for p_key in pred_dicts:
-        # #     print("a key in pred_dict is: "+str(p_key))
-        # # for r_key in ret_dict:
-        # #     print("a key in ret_dict is: "+str(r_key))
-        # print("Ground truth in ret_dict:")
-        # print(ret_dict['gt'])
-        # print('Ground Truth Size: ' + len(BoxGroundTruth))
         # TODO: need to somehow zero out all other predictions and keep just one (idea: single activated neuron)
         # # need to understand better what the target meant in the original Captum example
         # generate explanation for a single 2D pseudoimage at a time
         # `target = 1`: attempting to generate
         SinglePseudoImage2D = PseudoImage2D[0].unsqueeze(0)
-        print('SinglePseudoImage2D dimensions: ' + str(SinglePseudoImage2D.shape))
+        # print('SinglePseudoImage2D dimensions: ' + str(SinglePseudoImage2D.shape))
         # transform the original image to have shape H x W x C, where C means channels
         original_image = np.transpose(PseudoImage2D[0].cpu().detach().numpy(), (1, 2, 0))
-        print('original_image dimensions: ' + str(original_image.shape))
+        # print('original_image dimensions: ' + str(original_image.shape))
         # print('\n \n strutcture of the 2D network:')
         # print(model2D)
         # print('\n \n structure of the full network: ')
@@ -321,62 +371,56 @@ def main():
         # target dimensions: batch_size and maximum number of boxes per image
         # 1 should correspond to the pedestrain class
         # target = torch.ones(4,50) # in config file, the max num of boxes is 500, I chose 50 instead
-        class_name_ditc = {
-            0 : 'car',
-            1 : 'pedestrian',
-            2 : 'cyclist'
-        }
-        
-        # target = (0,0) # i.e., generate reason as to why the 0-th box is classified as the 0-th class
-        # grads = saliency2D.attribute(PseudoImage2D, target=target, additional_forward_args=batch_dict)
-        if method == 'Saliency':
-            for i in range(batch_dict['batch_size']): # iterate through each sample in the batch
-                for j in range(batch_dict['box_count'][i]): # iterate through each box in this sample
-                    for k in range(3): # iterate through the 3 classes
-                        if k+1 == pred_dicts[i]['pred_labels'][j]: # compute contribution for the predicted class only, +1 because labels start at 1
-                            target = (j,k) # i.e., generate reason as to why the j-th box is classified as the k-th class
-                            grads = saliency2D.attribute(PseudoImage2D, target=target, additional_forward_args=batch_dict)
-                            grad = np.transpose(grads[i].squeeze().cpu().detach().numpy(), (1, 2, 0))
-                            grad_viz = viz.visualize_image_attr(grad, original_image, method="blended_heat_map", sign="absolute_value",
-                                              show_colorbar=True, title="Overlayed Gradient Magnitudes")
-                            grad_viz[0].savefig('XAI_results/Aug20_2020_initial_results_positive_boxes/explanation_for_{}/sample_{}/box_{}.png'.format(class_name_ditc[k],i+1,j))
-        if method == 'IG':
-            steps = 24
-            # batch_dict['batch_size'] = 1 # a temporary hack for GPU memory limit issue, actual batch size in trianing is 4
-            for i in range(batch_dict['batch_size']):  # iterate through each sample in the batch
+
+        # Separate TP and FP
+        score_thres, iou_thres = 0.5, 0.7
+        gt_infos = get_gt_infos(cfg)
+        gt_dict = gt_infos[batch_num * args.batch_size:(batch_num + 1) * args.batch_size]
+        conf_mat = []
+        for i in range(args.batch_size): # i is input image id in the batch
+            conf_mat_frame = []
+            iou, gt_index = calculate_iou(gt_dict[i]['boxes'], pred_dicts[i]['pred_boxes'].cpu().numpy())
+            for j in range(len(pred_dicts[i]['pred_scores'])): # j is prediction box id in the i-th image
+                if pred_dicts[i]['pred_scores'][j].cpu().numpy() >= score_thres:
+                    if iou[j] >= iou_thres and \
+                            gt_dict[i]['labels'][gt_index[j]] == \
+                            class_name_dict[pred_dicts[i]['pred_labels'][j].cpu().numpy() - 1]:
+                        conf_mat_frame.append('TP')
+                    else:
+                        conf_mat_frame.append('FP')
+                else:
+                    conf_mat_frame.append('ignore')  # these boxes do not meet score thresh, ignore for now
+            conf_mat.append(conf_mat_frame)
+
+        for i in range(batch_dict['batch_size']): # iterate through each sample in the batch
+            for k in range(3):  # iterate through the 3 classes
                 for j in range(batch_dict['box_count'][i]):  # iterate through each box in this sample
-                    for k in range(3):  # iterate through the 3 classes
-                        if k + 1 == pred_dicts[i]['pred_labels'][j]:  # compute contribution for the predicted class only, +1 because labels start at 1
-                            target = (j, k)  # i.e., generate reason as to why the j-th box is classified as the k-th class
-                            get_delta = True
-                            if get_delta:
-                                attrs_ig, delta = ig2D.attribute(PseudoImage2D, baselines=PseudoImage2D*0,
-                                                                 target=target, additional_forward_args=batch_dict,
-                                                                 return_convergence_delta=True, n_steps=steps,
-                                                                 internal_batch_size=batch_dict['batch_size'])
-                                attr_ig = np.transpose(attrs_ig[i].squeeze().cpu().detach().numpy(), (1, 2, 0))
-                                ig_viz = viz.visualize_image_attr(attr_ig, original_image, method="blended_heat_map", sign="all",
-                                                                  show_colorbar=True, title="Overlayed Integrated Gradients")
-                                ig_viz[0].savefig(
-                                    'XAI_results/Aug24_2020_IG_positive_boxes_{}steps/explanation_for_{}/sample_{}/box_{}_delta_{}.png'.format(steps,
-                                        class_name_ditc[k], i + 1, j, delta))
-                            else:
-                                attrs_ig = ig2D.attribute(PseudoImage2D, baselines=PseudoImage2D * 0,
-                                                          target=target, additional_forward_args=batch_dict, n_steps=steps,
-                                                          internal_batch_size=batch_dict['batch_size'])
-                                attr_ig = np.transpose(attrs_ig[i].squeeze().cpu().detach().numpy(), (1, 2, 0))
-                                ig_viz = viz.visualize_image_attr(attr_ig, original_image, method="blended_heat_map",
-                                                                  sign="all",
-                                                                  show_colorbar=True,
-                                                                  title="Overlayed Integrated Gradients")
-                                ig_viz[0].savefig(
-                                    'XAI_results/Aug24_2020_IG_positive_boxes_{}steps/explanation_for_{}/sample_{}/box_{}.png'.format(steps,
-                                        class_name_ditc[k], i + 1, j))
-        # print('grads dimensions: ' + str(grads.shape))
-        
-        break
+                    if k+1 == pred_dicts[i]['pred_labels'][j] and conf_mat[i][j] != 'ignore':
+                        # compute contribution for the positive class only, k+1 because PCDet labels start at 1
+                        target = (j,k) # i.e., generate reason as to why the j-th box is classified as the k-th class
+                        grads = None
+                        sign = "absolute_value"
+                        if method == 'Saliency':
+                            grads = copy.deepcopy(saliency2D.attribute(PseudoImage2D, target=target, additional_forward_args=batch_dict))
+                        if method == 'IG':
+                            grads = copy.deepcopy(ig2D.attribute(PseudoImage2D, baselines=PseudoImage2D * 0,
+                                                   target=target, additional_forward_args=batch_dict, n_steps=steps,
+                                                   internal_batch_size=batch_dict['batch_size']))
+                            sign = "all"
+                        grad = np.transpose(grads[i].squeeze().cpu().detach().numpy(), (1, 2, 0))
+                        grad_viz = viz.visualize_image_attr(grad, original_image, method="blended_heat_map", sign=sign,
+                                          show_colorbar=True, title="Overlaid {}".format(method))
+                        XAI_cls_path_str = XAI_batch_path_str + '/explanation_for_{}/sample_{}'.format(class_name_dict[k],i)
+                        if not os.path.exists(XAI_cls_path_str):
+                            os.makedirs(XAI_cls_path_str)
+                        XAI_box_relative_path_str = XAI_cls_path_str.split("tools/",1)[1] + '/box_{}_{}.png'.format(j,conf_mat[i][j])
+                        # print('XAI_box_path_str: {}'.format(XAI_box_path_str))
+                        grad_viz[0].savefig(XAI_box_relative_path_str)
+                        # print('box_{}_{}.png is saved in {}'.format(j,conf_mat[i][j],XAI_cls_path_str))
+
+        if batch_num == batches_to_analyze:
+            break # just process a limited number of batches
         # just need one explanation for example
-    # *****************
 
 if __name__ == '__main__':
     main()
