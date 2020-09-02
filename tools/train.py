@@ -1,28 +1,30 @@
-import os
-import torch
-import torch.nn as nn
-from tensorboardX import SummaryWriter
-from pcdet.config import cfg, log_config_to_file, cfg_from_list, cfg_from_yaml_file
-from pcdet.utils import common_utils
-from pcdet.datasets import build_dataloader
-from pcdet.models import build_network, model_fn_decorator
-from train_utils.optimization import build_optimizer, build_scheduler
-from train_utils.train_utils import train_model
-import torch.distributed as dist
-
-from pathlib import Path
 import argparse
 import datetime
 import glob
+import os
+from pathlib import Path
+from test import repeat_eval_ckpt
+
+import torch
+import torch.distributed as dist
+import torch.nn as nn
+from tensorboardX import SummaryWriter
+
+from pcdet.config import cfg, cfg_from_list, cfg_from_yaml_file, log_config_to_file
+from pcdet.datasets import build_dataloader
+from pcdet.models import build_network, model_fn_decorator
+from pcdet.utils import common_utils
+from train_utils.optimization import build_optimizer, build_scheduler
+from train_utils.train_utils import train_model
 
 
 def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('--cfg_file', type=str, default=None, help='specify the config for training')
 
-    parser.add_argument('--batch_size', type=int, default=16, required=False, help='batch size for training')
-    parser.add_argument('--epochs', type=int, default=30, required=False, help='number of epochs to train for')
-    parser.add_argument('--workers', type=int, default=4, help='number of workers for dataloader')
+    parser.add_argument('--batch_size', type=int, default=None, required=False, help='batch size for training')
+    parser.add_argument('--epochs', type=int, default=None, required=False, help='number of epochs to train for')
+    parser.add_argument('--workers', type=int, default=8, help='number of workers for dataloader')
     parser.add_argument('--extra_tag', type=str, default='default', help='extra tag for this experiment')
     parser.add_argument('--ckpt', type=str, default=None, help='checkpoint to start from')
     parser.add_argument('--pretrained_model', type=str, default=None, help='pretrained_model')
@@ -57,11 +59,21 @@ def main():
     args, cfg = parse_config()
     if args.launcher == 'none':
         dist_train = False
+        total_gpus = 1
     else:
-        args.batch_size, cfg.LOCAL_RANK = getattr(common_utils, 'init_dist_%s' % args.launcher)(
-            args.batch_size, args.tcp_port, args.local_rank, backend='nccl'
+        total_gpus, cfg.LOCAL_RANK = getattr(common_utils, 'init_dist_%s' % args.launcher)(
+            args.tcp_port, args.local_rank, backend='nccl'
         )
         dist_train = True
+
+    if args.batch_size is None:
+        args.batch_size = cfg.OPTIMIZATION.BATCH_SIZE_PER_GPU
+    else:
+        assert args.batch_size % total_gpus == 0, 'Batch size should match the number of gpus'
+        args.batch_size = args.batch_size // total_gpus
+
+    args.epochs = cfg.OPTIMIZATION.NUM_EPOCHS if args.epochs is None else args.epochs
+
     if args.fix_random_seed:
         common_utils.set_random_seed(666)
 
@@ -79,7 +91,6 @@ def main():
     logger.info('CUDA_VISIBLE_DEVICES=%s' % gpu_list)
 
     if dist_train:
-        total_gpus = dist.get_world_size()
         logger.info('total_batch_size: %d' % (total_gpus * args.batch_size))
     for key, val in vars(args).items():
         logger.info('{:16} {}'.format(key, val))
@@ -96,7 +107,9 @@ def main():
         batch_size=args.batch_size,
         dist=dist_train, workers=args.workers,
         logger=logger,
-        training=True
+        training=True,
+        merge_all_iters_to_one_epoch=args.merge_all_iters_to_one_epoch,
+        total_epochs=args.epochs
     )
 
     model = build_network(model_cfg=cfg.MODEL, num_class=len(cfg.CLASS_NAMES), dataset=train_set)
@@ -129,9 +142,8 @@ def main():
         model = nn.parallel.DistributedDataParallel(model, device_ids=[cfg.LOCAL_RANK % torch.cuda.device_count()])
     logger.info(model)
 
-    total_iters_each_epoch = len(train_loader) if not args.merge_all_iters_to_one_epoch else len(train_loader) // args.epochs
     lr_scheduler, lr_warmup_scheduler = build_scheduler(
-        optimizer, total_iters_each_epoch=total_iters_each_epoch, total_epochs=args.epochs,
+        optimizer, total_iters_each_epoch=len(train_loader), total_epochs=args.epochs,
         last_epoch=last_epoch, optim_cfg=cfg.OPTIMIZATION
     )
 
@@ -160,6 +172,26 @@ def main():
 
     logger.info('**********************End training %s/%s(%s)**********************\n\n\n'
                 % (cfg.EXP_GROUP_PATH, cfg.TAG, args.extra_tag))
+
+    logger.info('**********************Start evaluation %s/%s(%s)**********************' %
+                (cfg.EXP_GROUP_PATH, cfg.TAG, args.extra_tag))
+    test_set, test_loader, sampler = build_dataloader(
+        dataset_cfg=cfg.DATA_CONFIG,
+        class_names=cfg.CLASS_NAMES,
+        batch_size=args.batch_size,
+        dist=dist_train, workers=args.workers, logger=logger, training=False
+    )
+    eval_output_dir = output_dir / 'eval' / 'eval_with_train'
+    eval_output_dir.mkdir(parents=True, exist_ok=True)
+    args.start_epoch = max(args.epochs - 10, 0)  # Only evaluate the last 10 epochs
+
+    repeat_eval_ckpt(
+        model.module if dist_train else model,
+        test_loader, args, eval_output_dir, logger, ckpt_dir,
+        dist_test=dist_train
+    )
+    logger.info('**********************End evaluation %s/%s(%s)**********************' %
+                (cfg.EXP_GROUP_PATH, cfg.TAG, args.extra_tag))
 
 
 if __name__ == '__main__':

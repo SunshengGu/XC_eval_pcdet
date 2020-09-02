@@ -4,8 +4,9 @@ Written by Shaoshuai Shi
 All Rights Reserved 2019-2020.
 """
 import torch
-from . import iou3d_nms_cuda
+
 from ...utils import common_utils
+from . import iou3d_nms_cuda
 
 
 def boxes_bev_iou_cpu(boxes_a, boxes_b):
@@ -105,7 +106,7 @@ def nms_normal_gpu(boxes, scores, thresh, **kwargs):
     :param thresh:
     :return:
     """
-    assert boxes.shape[0] == 7
+    assert boxes.shape[1] == 7
     order = scores.sort(0, descending=True)[1]
 
     boxes = boxes[order].contiguous()

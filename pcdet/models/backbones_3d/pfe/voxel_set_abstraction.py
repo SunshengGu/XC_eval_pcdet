@@ -1,8 +1,9 @@
 import torch
 import torch.nn as nn
-from ....utils import common_utils
+
 from ....ops.pointnet2.pointnet2_stack import pointnet2_modules as pointnet2_stack_modules
 from ....ops.pointnet2.pointnet2_stack import pointnet2_utils as pointnet2_stack_utils
+from ....utils import common_utils
 
 
 def bilinear_interpolate_torch(im, x, y):
@@ -193,7 +194,7 @@ class VoxelSetAbstraction(nn.Module):
             xyz_batch_cnt = xyz.new_zeros(batch_size).int()
             for bs_idx in range(batch_size):
                 xyz_batch_cnt[bs_idx] = (raw_points[:, 0] == bs_idx).sum()
-            point_features = raw_points[:, 4:].contiguous() if len(raw_points) > 4 else None
+            point_features = raw_points[:, 4:].contiguous() if raw_points.shape[1] > 4 else None
 
             pooled_points, pooled_features = self.SA_rawpoints(
                 xyz=xyz.contiguous(),
@@ -236,4 +237,3 @@ class VoxelSetAbstraction(nn.Module):
         batch_dict['point_features'] = point_features  # (BxN, C)
         batch_dict['point_coords'] = point_coords  # (BxN, 4)
         return batch_dict
-

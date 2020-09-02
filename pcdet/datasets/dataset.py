@@ -1,11 +1,13 @@
-from pathlib import Path
 from collections import defaultdict
+from pathlib import Path
+
 import numpy as np
 import torch.utils.data as torch_data
+
+from ..utils import common_utils
 from .augmentor.data_augmentor import DataAugmentor
 from .processor.data_processor import DataProcessor
 from .processor.point_feature_encoder import PointFeatureEncoder
-from ..utils import common_utils
 
 
 class DatasetTemplate(torch_data.Dataset):
@@ -34,6 +36,8 @@ class DatasetTemplate(torch_data.Dataset):
 
         self.grid_size = self.data_processor.grid_size
         self.voxel_size = self.data_processor.voxel_size
+        self.total_epochs = 0
+        self._merge_all_iters_to_one_epoch = False
 
     @property
     def mode(self):
@@ -64,6 +68,13 @@ class DatasetTemplate(torch_data.Dataset):
         Returns:
 
         """
+
+    def merge_all_iters_to_one_epoch(self, merge=True, epochs=None):
+        if merge:
+            self._merge_all_iters_to_one_epoch = True
+            self.total_epochs = epochs
+        else:
+            self._merge_all_iters_to_one_epoch = False
 
     def __len__(self):
         raise NotImplementedError
