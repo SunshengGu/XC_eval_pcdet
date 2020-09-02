@@ -16,6 +16,7 @@ from pcdet.config import cfg, cfg_from_list, cfg_from_yaml_file, log_config_to_f
 from eval_utils import eval_utils
 from pcdet.models import load_data_to_gpu
 from pcdet.datasets.kitti.kitti_dataset import KittiDataset
+from pcdet.datasets.cadc.cadc_dataset import CadcDataset
 from pcdet.datasets.kitti.kitti_object_eval_python.eval import d3_box_overlap
 
 # XAI related imports
@@ -35,10 +36,12 @@ from captum.attr import DeepLift
 from captum.attr import NoiseTunnel
 from captum.attr import visualization as viz
 
+
 def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('--cfg_file', type=str, default=None, help='specify the config for training')
-    parser.add_argument('--explained_cfg_file', type=str, default=None, help='specify the config for model to be explained')
+    parser.add_argument('--explained_cfg_file', type=str, default=None,
+                        help='specify the config for model to be explained')
 
     parser.add_argument('--batch_size', type=int, default=16, required=False, help='batch size for training')
     parser.add_argument('--epochs', type=int, default=80, required=False, help='Number of epochs to train for')
@@ -162,21 +165,29 @@ def repeat_eval_ckpt(model, test_loader, args, eval_output_dir, logger, ckpt_dir
             print('%s' % cur_epoch_id, file=f)
         logger.info('Epoch %s has been evaluated' % cur_epoch_id)
 
-def get_gt_infos(cfg):
+
+def get_gt_infos(cfg, dataset):
     '''
+    :param dataset: dataset object
     :param cfg: object containing model config information
     :return: gt_infos--containing gt boxes that have labels corresponding to the classes of interest, as well as the
                 labels themselves
     '''
-    dataset_cfg = cfg.DATA_CONFIG
-    class_names = cfg.CLASS_NAMES
-    kitti = KittiDataset(
-        dataset_cfg=dataset_cfg,
-        class_names=class_names,
-        training=False
-    )
+    # dataset_cfg = cfg.DATA_CONFIG
+    # class_names = cfg.CLASS_NAMES
+    # kitti = KittiDataset(
+    #     dataset_cfg=dataset_cfg,
+    #     class_names=class_names,
+    #     training=False
+    # )
     gt_infos = []
-    for info in kitti.kitti_infos:
+    dataset_infos = []
+    dataset_name = cfg.DATA_CONFIG.DATASET
+    if dataset_name == 'CadcDataset':
+        dataset_infos = dataset.cadc_infos
+    elif dataset_name == 'KittiDataset':
+        dataset_infos = dataset.kitti_infos
+    for info in dataset_infos:
         box3d_lidar = np.array(info['annos']['gt_boxes_lidar'])
         labels = np.array(info['annos']['name'])
 
@@ -189,15 +200,21 @@ def get_gt_infos(cfg):
 
         # box3d_lidar[:,2] -= box3d_lidar[:,5] / 2
         gt_info = {
-            'boxes' : box3d_lidar[interested],
-            'labels' : info['annos']['name'][interested],
+            'boxes': box3d_lidar[interested],
+            'labels': info['annos']['name'][interested],
         }
         gt_infos.append(gt_info)
     return gt_infos
 
+
 def calculate_iou(gt_boxes, pred_boxes):
-    # based on pcdet/datasets/kitti/kitti_dataset.py line 164, z_axis should be 2
-    overlap = d3_box_overlap(gt_boxes, pred_boxes, z_axis=2, z_center=1)
+    # see pcdet/datasets/kitti/kitti_object_eval_python/eval.py for explanation
+    z_axis = 2
+    z_center = 0.5
+    if cfg.DATA_CONFIG.DATASET == 'KittiDataset':
+        z_axis = 1
+        z_center = 1.0
+    overlap = d3_box_overlap(gt_boxes, pred_boxes, z_axis=z_axis, z_center=z_center)
     # pick max iou wrt to each detection box
     iou, gt_index = np.max(overlap, axis=0), np.argmax(overlap, axis=0)
     return iou, gt_index
@@ -205,7 +222,7 @@ def calculate_iou(gt_boxes, pred_boxes):
 
 def main():
     batches_to_analyze = 10
-    method = 'Saliency'
+    method = 'IG'
     mult_by_inputs = False
     args, cfg, x_cfg = parse_config()
     if args.launcher == 'none':
@@ -266,6 +283,7 @@ def main():
         batch_size=args.batch_size,
         dist=dist_test, workers=args.workers, logger=logger, training=False
     )
+    dataset_name = cfg.DATA_CONFIG.DATASET
     # # ********** debug message **************
     # print('\n Checking if the 2d network has VFE')
     # if x_cfg.MODEL.get('VFE', None) is None:
@@ -274,7 +292,7 @@ def main():
     #     print('\n has VFE')
     # # ********** debug message **************
     print('\n \n building the 2d network')
-    model2D = build_network(model_cfg=x_cfg.MODEL, num_class=len(x_cfg.CLASS_NAMES), dataset=test_set, explain=True)
+    model2D = build_network(model_cfg=x_cfg.MODEL, num_class=len(x_cfg.CLASS_NAMES), dataset=test_set)
     print('\n \n building the full network')
     model = build_network(model_cfg=cfg.MODEL, num_class=len(cfg.CLASS_NAMES), dataset=test_set)
 
@@ -297,7 +315,7 @@ def main():
     saliency2D = Saliency(model2D)
     saliency = Saliency(model)
     ig2D = IntegratedGradients(model2D, multiply_by_inputs=mult_by_inputs)
-    steps = 24 # number of steps for IG
+    steps = 24  # number of steps for IG
     # load checkpoint
     print('\n \n loading parameters for the 2d network')
     model2D.load_params_from_file(filename=args.ckpt, logger=logger, to_cpu=dist_test)
@@ -320,24 +338,25 @@ def main():
     # get current working directory
     cwd = os.getcwd()
     # create directory to store results just for this run, include the method in folder name
-    XAI_result_path = os.path.join(cwd, 'XAI_results/{}_{}'.format(dt_string, method))
+    XAI_result_path = os.path.join(cwd, 'XAI_results/{}_{}_{}'.format(dt_string, method, dataset_name))
     if method == "IG":
         if mult_by_inputs:
-            XAI_result_path = os.path.join(cwd, 'XAI_results/{}_{}_{}_{}steps'.format(dt_string, method, 'multiply_by_inputs', steps))
+            XAI_result_path = os.path.join(cwd, 'XAI_results/{}_{}_{}_{}steps_{}'.format(
+                dt_string, method, 'multiply_by_inputs', steps, dataset_name))
         else:
-            XAI_result_path = os.path.join(cwd, 'XAI_results/{}_{}_{}_{}steps'.format(dt_string, method, 'no_multiply_by_inputs', steps))
+            XAI_result_path = os.path.join(cwd, 'XAI_results/{}_{}_{}_{}steps_{}'.format(
+                dt_string, method, 'no_multiply_by_inputs', steps, dataset_name))
     print('\nXAI_result_path: {}'.format(XAI_result_path))
     XAI_res_path_str = str(XAI_result_path)
     os.mkdir(XAI_result_path)
-    os.chmod(XAI_res_path_str,0o777)
+    os.chmod(XAI_res_path_str, 0o777)
 
     for batch_num, batch_dict in enumerate(test_loader):
         XAI_batch_path_str = XAI_res_path_str + '/batch_{}'.format(batch_num)
         os.mkdir(XAI_batch_path_str)
-        # batch_dict['XAI'] = True
         # run the forward pass once to generate outputs and intermediate representations
         dummy_tensor = 0
-        load_data_to_gpu(batch_dict) # this function is designed for dict, don't use for other data types!
+        load_data_to_gpu(batch_dict)  # this function is designed for dict, don't use for other data types!
         with torch.no_grad():
             boxes_with_classes = model(dummy_tensor, batch_dict)
         pred_dicts = batch_dict['pred_dicts']
@@ -352,7 +371,8 @@ def main():
         # this is the pseudo image used as input for the 2D backbone
         PseudoImage2D = batch_dict['spatial_features']
         # now, need one prediction, which serves as the target
-        DetectionHead = model.module_list[3] # note, the index 3 is specifically for pointpillar, can be other number for other models
+        DetectionHead = model.module_list[
+            3]  # note, the index 3 is specifically for pointpillar, can be other number for other models
         BoxPrediction = DetectionHead.forward_ret_dict['cls_preds']
         BoxGroundTruth = batch_dict['gt_boxes']
         # TODO: need to somehow zero out all other predictions and keep just one (idea: single activated neuron)
@@ -375,54 +395,80 @@ def main():
 
         # Separate TP and FP
         score_thres, iou_thres = 0.5, 0.7
-        gt_infos = get_gt_infos(cfg)
+        gt_infos = get_gt_infos(cfg, test_set)
         gt_dict = gt_infos[batch_num * args.batch_size:(batch_num + 1) * args.batch_size]
         conf_mat = []
-        for i in range(args.batch_size): # i is input image id in the batch
+        for i in range(args.batch_size):  # i is input image id in the batch
             conf_mat_frame = []
             pred_boxes = pred_dicts[i]['pred_boxes'].cpu().numpy()
             iou, gt_index = calculate_iou(gt_dict[i]['boxes'], pred_boxes)
-            for j in range(len(pred_dicts[i]['pred_scores'])): # j is prediction box id in the i-th image
+            for j in range(len(pred_dicts[i]['pred_scores'])):  # j is prediction box id in the i-th image
                 if pred_dicts[i]['pred_scores'][j].cpu().numpy() >= score_thres:
                     adjusted_pred_boxes_labels = pred_dicts[i]['pred_labels'][j].cpu().numpy() - 1
-                    if iou[j] >= iou_thres and gt_dict[i]['labels'][gt_index[j]] == class_name_dict[adjusted_pred_boxes_labels]:
+                    if iou[j] >= iou_thres and gt_dict[i]['labels'][gt_index[j]] == class_name_dict[
+                        adjusted_pred_boxes_labels]:
                         conf_mat_frame.append('TP')
                     else:
                         conf_mat_frame.append('FP')
                 else:
                     conf_mat_frame.append('ignore')  # these boxes do not meet score thresh, ignore for now
             conf_mat.append(conf_mat_frame)
+            # print("sample id: {}".format(i))
+            # print("len(pred_dicts[i]['pred_scores']): {}".format(len(pred_dicts[i]['pred_scores'])))
+            # print("len(pred_dicts[i]['pred_labels']): {}".format(len(pred_dicts[i]['pred_labels'])))
+            # print('batch_dict[\'box_count\'][i]: {}'.format(batch_dict['box_count'][i]))
+            # print("len(conf_mat_frame): {}".format(len(conf_mat_frame)))
+            # print('\n')
 
-        for i in range(batch_dict['batch_size']): # iterate through each sample in the batch
+        for i in range(batch_dict['batch_size']):  # iterate through each sample in the batch
             for k in range(3):  # iterate through the 3 classes
-                for j in range(batch_dict['box_count'][i]):  # iterate through each box in this sample
-                    if k+1 == pred_dicts[i]['pred_labels'][j] and conf_mat[i][j] != 'ignore':
+                '''
+                Note:
+                - In batch_2, sample_0, as the program iterates through the boxes batch_dict['box_count'][0] was 
+                  originally 35
+                - But since the second iteration of j (i.e. j <= 1), batch_dict['box_count'][0] somehow became 36
+                - Therefore need a fix for that
+                '''
+                num_boxes = min(batch_dict['box_count'][i], len(conf_mat[i]))
+                for j in range(num_boxes):  # iterate through each box in this sample
+                    # print('i: {}'.format(i))
+                    # print('j: {}'.format(j))
+                    # print('num_boxes: {}'.format(num_boxes))
+                    # print('len(conf_mat[i]): {}'.format(len(conf_mat[i])))
+                    if k + 1 == pred_dicts[i]['pred_labels'][j] and conf_mat[i][j] != 'ignore':
                         # compute contribution for the positive class only, k+1 because PCDet labels start at 1
-                        target = (j,k) # i.e., generate reason as to why the j-th box is classified as the k-th class
+                        target = (j, k)  # i.e., generate reason as to why the j-th box is classified as the k-th class
                         grads = None
                         sign = "absolute_value"
                         if method == 'Saliency':
-                            grads = copy.deepcopy(saliency2D.attribute(PseudoImage2D, target=target, additional_forward_args=batch_dict))
+                            grads = copy.deepcopy(
+                                saliency2D.attribute(PseudoImage2D, target=target, additional_forward_args=batch_dict))
                         if method == 'IG':
                             grads = copy.deepcopy(ig2D.attribute(PseudoImage2D, baselines=PseudoImage2D * 0,
-                                                   target=target, additional_forward_args=batch_dict, n_steps=steps,
-                                                   internal_batch_size=batch_dict['batch_size']))
+                                                                 target=target, additional_forward_args=batch_dict,
+                                                                 n_steps=steps,
+                                                                 internal_batch_size=batch_dict['batch_size']))
                             sign = "all"
                         grad = np.transpose(grads[i].squeeze().cpu().detach().numpy(), (1, 2, 0))
                         grad_viz = viz.visualize_image_attr(grad, original_image, method="blended_heat_map", sign=sign,
-                                          show_colorbar=True, title="Overlaid {}".format(method))
-                        XAI_cls_path_str = XAI_batch_path_str + '/explanation_for_{}/sample_{}'.format(class_name_dict[k],i)
+                                                            show_colorbar=True, title="Overlaid {}".format(method))
+                        XAI_cls_path_str = XAI_batch_path_str + '/explanation_for_{}/sample_{}'.format(
+                            class_name_dict[k], i)
                         if not os.path.exists(XAI_cls_path_str):
                             os.makedirs(XAI_cls_path_str)
                         os.chmod(XAI_cls_path_str, 0o777)
-                        XAI_box_relative_path_str = XAI_cls_path_str.split("tools/",1)[1] + '/box_{}_{}.png'.format(j,conf_mat[i][j])
+                        XAI_box_relative_path_str = XAI_cls_path_str.split("tools/", 1)[1] + '/box_{}_{}.png'.format(j,
+                                                                                                                     conf_mat[
+                                                                                                                         i][
+                                                                                                                         j])
                         # print('XAI_box_path_str: {}'.format(XAI_box_path_str))
                         grad_viz[0].savefig(XAI_box_relative_path_str)
                         # print('box_{}_{}.png is saved in {}'.format(j,conf_mat[i][j],XAI_cls_path_str))
 
         if batch_num == batches_to_analyze:
-            break # just process a limited number of batches
+            break  # just process a limited number of batches
         # just need one explanation for example
+
 
 if __name__ == '__main__':
     main()
