@@ -152,15 +152,15 @@ class BaseBEVBackboneXAI(nn.Module):
         """
         # tensor_values is just for compatibility with Captum, only useful when in explain mode
         spatial_features = data_dict['spatial_features']
-        print('\n shape of spatial_features in base_bev_backbone.py')
-        print(spatial_features.shape)
+        # print('\n shape of spatial_features in base_bev_backbone.py')
+        # print(spatial_features.shape)
         ups = []
         ret_dict = {}
         x = spatial_features
         # print('\nstr(type(tensor_values)): {}'.format(str(type(tensor_values))))
         # TODO: use tensor_values instead of x when in explain mode
         if str(type(tensor_values)) == '<class \'torch.Tensor\'>':  # not a dummy tensor
-            print('\nBaseBEVBackbone detected that we are in explain mode')
+            # print('\nBaseBEVBackbone detected that we are in explain mode')
             for i in range(len(self.blocks)):
                 tensor_values = self.blocks[i](tensor_values)
 

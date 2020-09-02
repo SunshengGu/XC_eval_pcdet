@@ -225,7 +225,7 @@ class AnchorHeadTemplate(nn.Module):
             batch_box_preds: (B, num_boxes, 7+C)
 
         """
-        print("\nstarting generate_predicted_boxes")
+        # print("\nstarting generate_predicted_boxes")
         if isinstance(self.anchors, list):
             if self.use_multihead:
                 anchors = torch.cat([anchor.permute(3, 4, 0, 1, 2, 5).contiguous().view(-1, anchor.shape[-1])
@@ -235,8 +235,8 @@ class AnchorHeadTemplate(nn.Module):
         else:
             anchors = self.anchors
         num_anchors = anchors.view(-1, anchors.shape[-1]).shape[0]
-        print("num_anchors: {}".format(num_anchors))
-        print("cls_preds.shape: {}".format(cls_preds.shape))
+        # print("num_anchors: {}".format(num_anchors))
+        # print("cls_preds.shape: {}".format(cls_preds.shape))
         batch_anchors = anchors.view(1, -1, anchors.shape[-1]).repeat(batch_size, 1, 1)
         batch_cls_preds = cls_preds.view(batch_size, num_anchors, -1).float()
         batch_box_preds = box_preds.view(batch_size, num_anchors, -1)
@@ -258,7 +258,7 @@ class AnchorHeadTemplate(nn.Module):
             batch_box_preds[..., 6] = common_utils.limit_period(
                 -(batch_box_preds[..., 6] + np.pi / 2), offset=0.5, period=np.pi * 2
             )
-        print("\nexiting generate_predicted_boxes")
+        # print("\nexiting generate_predicted_boxes")
         return batch_cls_preds, batch_box_preds
 
     def forward(self, **kwargs):

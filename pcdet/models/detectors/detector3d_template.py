@@ -9,9 +9,9 @@ from ...ops.iou3d_nms import iou3d_nms_utils
 
 
 class Detector3DTemplate(nn.Module):
-    def __init__(self, model_cfg, num_class, dataset, explain):
+    def __init__(self, model_cfg, num_class, dataset):
         super().__init__()
-        self.explain = explain # additional argument indicating if we are in explain mode
+        # self.explain = explain # additional argument indicating if we are in explain mode
         self.model_cfg = model_cfg
         self.num_class = num_class
         self.dataset = dataset
@@ -282,7 +282,7 @@ class Detector3DTemplate(nn.Module):
         :param tensor_values:
 
         """
-        print('\n starting the post_processing() function')
+        # print('\n starting the post_processing() function')
         # tensor_values is just for compatibility with Captum, only useful when in explain mode
         post_process_cfg = self.model_cfg.POST_PROCESSING
         batch_size = batch_dict['batch_size']
@@ -336,7 +336,7 @@ class Detector3DTemplate(nn.Module):
                 label_preds = batch_dict['roi_labels'][index] if batch_dict.get('has_class_labels', False) else label_preds + 1
                 if batch_dict.get('has_class_labels', False):
                     print('\n no key named \'has_class_labels\' in batch_dict')
-                print('\n shape of label_preds after: ' + str(label_preds.shape))
+                # print('\n shape of label_preds after: ' + str(label_preds.shape))
 
                 selected, selected_scores = class_agnostic_nms(
                     box_scores=cls_preds, box_preds=box_preds,
@@ -397,7 +397,7 @@ class Detector3DTemplate(nn.Module):
             else:
                 continue
         boxes_with_cls_scores = torch.stack(boxes_with_cls_scores)
-        print('\n finishing the post_processing() function')
+        # print('\n finishing the post_processing() function')
         return boxes_with_cls_scores
 
     @staticmethod
