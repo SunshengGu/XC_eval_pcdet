@@ -127,7 +127,7 @@ Test with 2 GPUs:
 
 XAI command:
 - kitti, old (before decoupling): python XAI.py --cfg_file cfgs/kitti_models/pointpillar.yaml --explained_cfg_file ~/pcdet/tools/cfgs/kitti_models/pointpillar_2DBackbone_DetHead.yaml --batch_size 4 --ckpt ~/pcdet/output/kitti_models/pointpillar/default/ckpt/checkpoint_epoch_2.pth
-- kitti, new (after decoupling): python XAI.py --cfg_file cfgs/kitti_models/pointpillar_xai.yaml --explained_cfg_file ~/pcdet/tools/cfgs/kitti_models/pointpillar_2DBackbone_DetHead_xai.yaml --batch_size 4 --ckpt ~/pcdet/output/kitti_models/pointpillar/default/ckpt/checkpoint_epoch_2.pth
+- kitti, new (after decoupling): python XAI.py --cfg_file cfgs/kitti_models/pointpillar_xai.yaml --explained_cfg_file cfgs/kitti_models/pointpillar_2DBackbone_DetHead_xai.yaml --batch_size 4 --ckpt ~/pcdet/output/kitti_models/pointpillar/default/ckpt/checkpoint_epoch_2.pth
 - cadc, new (after decoupling): python XAI.py --cfg_file cfgs/cadc_models/pointpillar_xai.yaml --explained_cfg_file cfgs/cadc_models/pointpillar_2DBackbone_DetHead_xai.yaml --batch_size 4 --ckpt ~/pcdet/output/cadc_models/pointpillar/default/ckpt/checkpoint_epoch_4.pth
 
 XAI with 2 GPUs:

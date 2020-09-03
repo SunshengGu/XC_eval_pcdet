@@ -13,6 +13,7 @@ from pcdet.datasets import build_dataloader
 from pcdet.models import build_network
 from pcdet.utils import common_utils
 from pcdet.config import cfg, cfg_from_list, cfg_from_yaml_file, log_config_to_file
+from pcdet.datasets.cadc.cadc_bev_visualizer import CADC_BEV
 from eval_utils import eval_utils
 from pcdet.models import load_data_to_gpu
 from pcdet.datasets.kitti.kitti_dataset import KittiDataset
@@ -222,7 +223,8 @@ def calculate_iou(gt_boxes, pred_boxes):
 
 def main():
     batches_to_analyze = 10
-    method = 'IG'
+    method = 'Saliency'
+    overlay_orig_bev = True
     mult_by_inputs = False
     args, cfg, x_cfg = parse_config()
     if args.launcher == 'none':
@@ -283,6 +285,7 @@ def main():
         batch_size=args.batch_size,
         dist=dist_test, workers=args.workers, logger=logger, training=False
     )
+    print("grid size for 2D pseudoimage: {}".format(test_set.grid_size))
     dataset_name = cfg.DATA_CONFIG.DATASET
     # # ********** debug message **************
     # print('\n Checking if the 2d network has VFE')
@@ -291,6 +294,7 @@ def main():
     # else:
     #     print('\n has VFE')
     # # ********** debug message **************
+    cadc_bev = CADC_BEV(dataset=test_set, scale_to_pseudoimg=True)
     print('\n \n building the 2d network')
     model2D = build_network(model_cfg=x_cfg.MODEL, num_class=len(x_cfg.CLASS_NAMES), dataset=test_set)
     print('\n \n building the full network')
@@ -306,7 +310,7 @@ def main():
     # *****************
     # start experimenting with saliency map
     '''
-    TODO: 
+    TODO:
     what is the input?      A certain point cloud with a specific index
     what is the target?     A certain label with a specific index
     what does np.transpose do for grads?
@@ -383,6 +387,7 @@ def main():
         # print('SinglePseudoImage2D dimensions: ' + str(SinglePseudoImage2D.shape))
         # transform the original image to have shape H x W x C, where C means channels
         original_image = np.transpose(PseudoImage2D[0].cpu().detach().numpy(), (1, 2, 0))
+        print('orginal_image data type: {}'.format(type(original_image)))
         # print('original_image dimensions: ' + str(original_image.shape))
         # print('\n \n strutcture of the 2D network:')
         # print(model2D)
@@ -419,12 +424,16 @@ def main():
             # print('batch_dict[\'box_count\'][i]: {}'.format(batch_dict['box_count'][i]))
             # print("len(conf_mat_frame): {}".format(len(conf_mat_frame)))
             # print('\n')
+            # break
 
         for i in range(batch_dict['batch_size']):  # iterate through each sample in the batch
+            img_idx = batch_num * args.batch_size + i
+            bev_fig, bev_fig_data = cadc_bev.get_bev_image(img_idx)
+            bev_image = np.transpose(PseudoImage2D[i].cpu().detach().numpy(), (1, 2, 0))
             for k in range(3):  # iterate through the 3 classes
                 '''
                 Note:
-                - In batch_2, sample_0, as the program iterates through the boxes batch_dict['box_count'][0] was 
+                - In batch_2, sample_0, as the program iterates through the boxes batch_dict['box_count'][0] was
                   originally 35
                 - But since the second iteration of j (i.e. j <= 1), batch_dict['box_count'][0] somehow became 36
                 - Therefore need a fix for that
@@ -450,23 +459,24 @@ def main():
                                                                  internal_batch_size=batch_dict['batch_size']))
                             sign = "all"
                         grad = np.transpose(grads[i].squeeze().cpu().detach().numpy(), (1, 2, 0))
-                        grad_viz = viz.visualize_image_attr(grad, original_image, method="blended_heat_map", sign=sign,
+                        if overlay_orig_bev:
+                            bev_image = copy.deepcopy(bev_fig_data)
+                        grad_viz = viz.visualize_image_attr(grad, bev_image, method="blended_heat_map", sign=sign,
                                                             show_colorbar=True, title="Overlaid {}".format(method))
                         XAI_cls_path_str = XAI_batch_path_str + '/explanation_for_{}/sample_{}'.format(
                             class_name_dict[k], i)
                         if not os.path.exists(XAI_cls_path_str):
                             os.makedirs(XAI_cls_path_str)
                         os.chmod(XAI_cls_path_str, 0o777)
-                        XAI_box_relative_path_str = XAI_cls_path_str.split("tools/", 1)[1] + '/box_{}_{}.png'.format(j,
-                                                                                                                     conf_mat[
-                                                                                                                         i][
-                                                                                                                         j])
+                        XAI_box_relative_path_str = XAI_cls_path_str.split("tools/", 1)[1] +\
+                                                    '/box_{}_{}.png'.format(j, conf_mat[i][j])
                         # print('XAI_box_path_str: {}'.format(XAI_box_path_str))
                         grad_viz[0].savefig(XAI_box_relative_path_str)
                         # print('box_{}_{}.png is saved in {}'.format(j,conf_mat[i][j],XAI_cls_path_str))
 
         if batch_num == batches_to_analyze:
             break  # just process a limited number of batches
+        # break
         # just need one explanation for example
 
 

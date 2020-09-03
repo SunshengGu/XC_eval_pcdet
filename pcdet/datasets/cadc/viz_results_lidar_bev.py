@@ -10,11 +10,15 @@ from pcdet.datasets.kitti.kitti_dataset import KittiDataset
 REPO_DIR='/root/pcdet'
 ROOT_PATH=os.path.join(REPO_DIR, 'data/cadc')
 CONFIG_PATH=os.path.join(REPO_DIR, 'tools/cfgs/dataset_configs/cadc_dataset.yaml')
+SCALE_TO_PSEUDOIMAGE = True
+OUTPUT_FOLDER = 'bev_pred'
+if SCALE_TO_PSEUDOIMAGE:
+    OUTPUT_FOLDER = 'scaled_bev_pred'
 USE_PRETRAINED = False
 if USE_PRETRAINED == False:
     # note: need to run test.py to obtain this result.pkl
     RESULT_PATH= os.path.join(REPO_DIR,'output/cadc_models/pointpillar/default/eval/epoch_4/val/default/result.pkl')
-    OUTPUT_DIR=os.path.join(ROOT_PATH, 'bev_pred')
+    OUTPUT_DIR=os.path.join(ROOT_PATH, OUTPUT_FOLDER)
 else:
     RESULT_PATH= os.path.join(REPO_DIR,'output/cadc_models/pointpillar/default/eval/epoch_7728/val/default/result.pkl')
     OUTPUT_DIR=os.path.join(ROOT_PATH, 'bev_pred_pretrained')
@@ -153,10 +157,14 @@ def draw_bev(lidar, annotations, predictions, output_path, s1=50,s2=50,f1=50,f2=
 
     # PLOT THE IMAGE
     cmap = "jet"    # Color map to use
-    dpi = 100       # Image resolution
+    dpi = 100       # Image resolution, dots per inch
     x_max = side_range[1] - side_range[0]
     y_max = fwd_range[1] - fwd_range[0]
-    fig, ax = plt.subplots(figsize=(2000/dpi, 2000/dpi), dpi=dpi)
+    img_size_pix = 2000 # image size in num of pixels
+    if SCALE_TO_PSEUDOIMAGE:
+        img_size_pix = 400
+        dpi = 20
+    fig, ax = plt.subplots(figsize=(img_size_pix / dpi, img_size_pix / dpi), dpi=dpi)
 
     for poly in gt_poly: #plot the tracklets
         polys = patches.Polygon(poly,closed=True,fill=False, edgecolor ='g', linewidth=1)
@@ -171,7 +179,9 @@ def draw_bev(lidar, annotations, predictions, output_path, s1=50,s2=50,f1=50,f2=
     ax.xaxis.set_visible(False)  # Do not draw axis tick marks
     ax.yaxis.set_visible(False)  # Do not draw axis tick marks
     plt.xlim([0, x_max])
-    plt.ylim([0, y_max])  
+    plt.ylim([0, y_max])
+    size = fig.get_size_inches() * fig.dpi
+    # print('bev image size: {}'.format(size))
     fig.savefig(output_path, dpi=dpi, bbox_inches='tight', pad_inches=0.0)
     plt.close('all')
 
@@ -187,7 +197,8 @@ def main():
     dataset = CadcDataset(root_path=Path(ROOT_PATH), dataset_cfg=dataset_cfg, class_names=CLASSES)
     results = np.load(RESULT_PATH, allow_pickle=True)
     
-    viz_set = np.append(np.array(range(5)), np.random.randint(low=0, high=len(results), size=20))
+    # viz_set = np.append(np.array(range(5)), np.random.randint(low=0, high=len(results), size=20))
+    viz_set = np.array(range(5))
     print(viz_set)
     
     for viz_idx in viz_set:
