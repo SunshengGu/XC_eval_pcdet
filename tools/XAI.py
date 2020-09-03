@@ -226,6 +226,7 @@ def main():
     method = 'Saliency'
     overlay_orig_bev = True
     mult_by_inputs = False
+    gray_scale_overlay = False
     args, cfg, x_cfg = parse_config()
     if args.launcher == 'none':
         dist_test = False
@@ -459,10 +460,18 @@ def main():
                                                                  internal_batch_size=batch_dict['batch_size']))
                             sign = "all"
                         grad = np.transpose(grads[i].squeeze().cpu().detach().numpy(), (1, 2, 0))
+                        # print('grad.shape: {}'.format(grad.shape))
+                        # print('bev_fig_data.shape: {}'.format(bev_fig_data.shape))
+                        # print('bev_image.shape before: {}'.format(bev_image.shape))
                         if overlay_orig_bev:
-                            bev_image = copy.deepcopy(bev_fig_data)
+                            # need to horizontally flip the original bev image and rotate 90 degrees ccw to match location
+                            # of explanations
+                            bev_image_raw = np.flip(bev_fig_data, 0)
+                            bev_image = np.rot90(bev_image_raw, k=1, axes=(0,1))
+                        # print('bev_image.shape after: {}'.format(bev_image.shape))
                         grad_viz = viz.visualize_image_attr(grad, bev_image, method="blended_heat_map", sign=sign,
-                                                            show_colorbar=True, title="Overlaid {}".format(method))
+                                                            show_colorbar=True, title="Overlaid {}".format(method),
+                                                            gray_scale=gray_scale_overlay, alpha_overlay=0.2)
                         XAI_cls_path_str = XAI_batch_path_str + '/explanation_for_{}/sample_{}'.format(
                             class_name_dict[k], i)
                         if not os.path.exists(XAI_cls_path_str):
@@ -471,12 +480,12 @@ def main():
                         XAI_box_relative_path_str = XAI_cls_path_str.split("tools/", 1)[1] +\
                                                     '/box_{}_{}.png'.format(j, conf_mat[i][j])
                         # print('XAI_box_path_str: {}'.format(XAI_box_path_str))
-                        grad_viz[0].savefig(XAI_box_relative_path_str)
+                        grad_viz[0].savefig(XAI_box_relative_path_str, bbox_inches='tight', pad_inches=0.0)
                         # print('box_{}_{}.png is saved in {}'.format(j,conf_mat[i][j],XAI_cls_path_str))
 
-        if batch_num == batches_to_analyze:
-            break  # just process a limited number of batches
-        # break
+        # if batch_num == batches_to_analyze:
+        #     break  # just process a limited number of batches
+        break
         # just need one explanation for example
 
 

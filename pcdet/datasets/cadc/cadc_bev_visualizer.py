@@ -187,6 +187,7 @@ class CADC_BEV:
         plt.ylim([0, y_max])
         size = fig.get_size_inches() * fig.dpi
         # print('bev image size: {}'.format(size))
+        plt.tight_layout(pad=0) # must have this line to ensure that image margin is zero
         fig.savefig(output_path, dpi=dpi, bbox_inches='tight', pad_inches=0.0)
         plt.close('all')
         return fig

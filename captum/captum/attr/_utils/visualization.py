@@ -185,6 +185,9 @@ def visualize_image_attr(
                         uses Matplotlib object oriented API and simply returns a
                         figure object without showing.
                         Default: True.
+            gray_scale (boolean, optional): If True, overlay attributions on the gray
+                        scale version of the original image. If False, just overlay
+                        attributions on the original image.
 
         Returns:
             2-element tuple of **figure**, **axis**:
@@ -208,6 +211,7 @@ def visualize_image_attr(
             >>> # Displays blended heat map visualization of computed attributions.
             >>> _ = visualize_image_attr(attribution, orig_image, "blended_heat_map")
     """
+    # print("started generating attribution visualization")
     # Create plot if figure, axis not provided
     if plt_fig_axis is not None:
         plt_fig, plt_axis = plt_fig_axis
@@ -268,6 +272,7 @@ def visualize_image_attr(
             == ImageVisualizationMethod.blended_heat_map
         ):
             if original_image.shape[2] == 3 and (not gray_scale):
+                # plt_fig.tight_layout(pad=0)
                 plt_axis.imshow(original_image)
                 heat_map = plt_axis.imshow(
                     norm_attr, cmap=cmap, vmin=vmin, vmax=vmax, alpha=alpha_overlay
@@ -315,10 +320,10 @@ def visualize_image_attr(
             colorbar_axis.axis("off")
     if title:
         plt_axis.set_title(title)
-
+    plt_fig.tight_layout(pad=0)
     if use_pyplot:
         plt.show()
-
+    # print("finished generating attribution visualization")
     return plt_fig, plt_axis
 
 
