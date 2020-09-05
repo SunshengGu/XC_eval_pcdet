@@ -17,13 +17,15 @@ import datetime
 class CADC_BEV:
     def __init__(self, dataset, repo_dir='/root/pcdet', scale_to_pseudoimg=False, class_name=['Car', 'Pedestrian', 'Cyclist'],
                 result_path='output/cadc_models/pointpillar/default/eval/epoch_4/val/default/result.pkl',
-                output_path = 'data/cadc/'):
+                output_path = 'data/cadc/', background='black', width_pix = 2000):
         self.repo_dir = repo_dir
         self.scale_to_pseudoimg = scale_to_pseudoimg
         self.class_name = class_name
         self.result_path = os.path.join(repo_dir, result_path)
         self.dataset = dataset
         self.results = np.load(self.result_path, allow_pickle=True)
+        self.background = background
+        self.width_pix = width_pix
         now = datetime.datetime.now()
         dt_string = now.strftime("%b_%d_%Y_%H_%M_%S")
         output_path = output_path + '{}_bev_pred'.format(dt_string)
@@ -162,13 +164,12 @@ class CADC_BEV:
 
         # PLOT THE IMAGE
         cmap = "jet"  # Color map to use
-        dpi = 100  # Image resolution, dots per inch
         x_max = side_range[1] - side_range[0]
         y_max = fwd_range[1] - fwd_range[0]
-        img_size_pix = 2000  # image size in num of pixels
+        img_size_pix = self.width_pix  # image size in num of pixels
         if self.scale_to_pseudoimg:
             img_size_pix = 400
-            dpi = 20
+        dpi = img_size_pix / 60.0  # Image resolution, dots per inch
         fig, ax = plt.subplots(figsize=(img_size_pix / dpi, img_size_pix / dpi), dpi=dpi)
 
         for poly in gt_poly:  # plot the tracklets
@@ -179,7 +180,10 @@ class CADC_BEV:
             ax.add_patch(polys)
 
         ax.scatter(x_img, y_img, s=1, c=pixel_values, alpha=1.0, cmap=cmap)  # Plot Lidar points
-        ax.set_facecolor((0, 0, 0))  # background is black
+        if self.background == 'black':
+            ax.set_facecolor((0, 0, 0))
+        elif self.background == 'white':
+            ax.set_facecolor((1, 1, 1))
         ax.axis('scaled')  # {equal, scaled}
         ax.xaxis.set_visible(False)  # Do not draw axis tick marks
         ax.yaxis.set_visible(False)  # Do not draw axis tick marks
