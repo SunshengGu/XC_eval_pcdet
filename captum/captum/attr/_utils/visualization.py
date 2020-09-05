@@ -96,7 +96,8 @@ def visualize_image_attr(
     title: Union[None, str] = None,
     fig_size: Tuple[int, int] = (6, 6),
     use_pyplot: bool = True,
-    gray_scale: bool = True
+    gray_scale: bool = True,
+    upscale: bool = False
 ):
     r"""
         Visualizes attribution for a given image by normalizing attribution values
@@ -188,6 +189,8 @@ def visualize_image_attr(
             gray_scale (boolean, optional): If True, overlay attributions on the gray
                         scale version of the original image. If False, just overlay
                         attributions on the original image.
+            upscale:    (boolean, optional): If True, need to upscale the attributions
+                        to match input shape.
 
         Returns:
             2-element tuple of **figure**, **axis**:
@@ -244,7 +247,12 @@ def visualize_image_attr(
     else:
         # Choose appropriate signed attributions and normalize.
         norm_attr = _normalize_image_attr(attr, sign, outlier_perc)
-
+        # print('type(norm_attr): {}'.format(type(norm_attr)))
+        # print('norm_attr.shape: {}'.format(norm_attr.shape))
+        if upscale:
+            # upscale the normalized attributions to match input dimensions
+            factor = int(original_image.shape[0] / norm_attr.shape[0])
+            norm_attr = np.kron(norm_attr, np.ones((factor, factor), dtype=int))
         # Set default colormap and bounds based on sign.
         if VisualizeSign[sign] == VisualizeSign.all:
             default_cmap = LinearSegmentedColormap.from_list(
