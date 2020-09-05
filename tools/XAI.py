@@ -253,6 +253,7 @@ def main():
         orig_bev_h: Height of the original BEV in # pixels. For CADC, width = height.
     :return:
     '''
+    start_time = time.time()
     batches_to_analyze = 10
     method = 'Saliency'
     high_rez = True
@@ -332,7 +333,7 @@ def main():
     # else:
     #     print('\n has VFE')
     # # ********** debug message **************
-    cadc_bev = CADC_BEV(dataset=test_set, scale_to_pseudoimg=(not high_rez), background='black', width_pix = orig_bev_w)
+    cadc_bev = CADC_BEV(dataset=test_set, scale_to_pseudoimg=(not high_rez), background='black', width_pix=orig_bev_w)
     print('\n \n building the 2d network')
     model2D = build_network(model_cfg=x_cfg.MODEL, num_class=len(x_cfg.CLASS_NAMES), dataset=test_set)
     print('\n \n building the full network')
@@ -507,8 +508,12 @@ def main():
                             # upscale the attributions if we are using high resolution input bev
                             # also increase figure size to accommodate the higher resolution
                             figure_size = (24, 18)
-                            if dataset_name == 'CadcDataset':
-                                grad = scale_3d_array(grad, factor=scaling_factor)
+                            # if dataset_name == 'CadcDataset':
+                            #     grad = scale_3d_array(grad, factor=scaling_factor)
+                            '''
+                            note: it is more efficient to do the upscaling inside Captum's visualize_image_attr
+                            only need to upscale a single 2d array instead of 64 such arrays
+                            '''
                             # TODO: implement for kitti as well
                         # print('grad.shape: {}'.format(grad.shape))
                         # print('type(grad): {}'.format(type(grad)))
@@ -524,7 +529,7 @@ def main():
                         grad_viz = viz.visualize_image_attr(grad, bev_image, method="blended_heat_map", sign=sign,
                                                             show_colorbar=True, title="Overlaid {}".format(method),
                                                             gray_scale=gray_scale_overlay, alpha_overlay=0.1,
-                                                            fig_size=figure_size)
+                                                            fig_size=figure_size, upscale=True)
                         XAI_cls_path_str = XAI_batch_path_str + '/explanation_for_{}/sample_{}'.format(
                             class_name_dict[k], i)
                         if not os.path.exists(XAI_cls_path_str):
@@ -535,12 +540,13 @@ def main():
                         # print('XAI_box_path_str: {}'.format(XAI_box_path_str))
                         grad_viz[0].savefig(XAI_box_relative_path_str, bbox_inches='tight', pad_inches=0.0)
                         # print('box_{}_{}.png is saved in {}'.format(j,conf_mat[i][j],XAI_cls_path_str))
-            break # only processing one sample to save time
+            # break # only processing one sample to save time
 
         # if batch_num == batches_to_analyze:
         #     break  # just process a limited number of batches
         break
         # just need one explanation for example
+    print("--- {} seconds ---".format(time.time() - start_time))
 
 
 if __name__ == '__main__':
