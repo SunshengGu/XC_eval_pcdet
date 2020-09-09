@@ -247,7 +247,8 @@ def main():
             attributions onto the 2D pseudoimage.
         mult_by_inputs: Whether to pointwise-multiply Integrated Gradients attributions with the input being explained
             (i.e., the 2D pseudoimage in the case of PointPillar).
-        gray_scale_overlay: Whether to convert the input image into gray scale.
+        gray_scale_overlay: Whether to convert the input image into gray scale. True if overlaying onto pseudoimage,
+            False if overlaying onto the original BEV.
         orig_bev_w: Width of the original BEV in # pixels. For CADC, width = height. Note that this HAS to be an
             integer multiple of pseudo_img_w.
         orig_bev_h: Height of the original BEV in # pixels. For CADC, width = height.
@@ -255,17 +256,18 @@ def main():
     '''
     start_time = time.time()
     batches_to_analyze = 10
-    method = 'Saliency'
-    high_rez = True
-    overlay_orig_bev = True
+    method = 'IG'
+    high_rez = False
+    overlay_orig_bev = False
     mult_by_inputs = False
-    gray_scale_overlay = False
+    gray_scale_overlay = True
     orig_bev_w = 2000
     orig_bev_h = 2000
     pseudo_img_w = 400
     scaling_factor = int(orig_bev_w/pseudo_img_w)
     args, cfg, x_cfg = parse_config()
     dataset_name = cfg.DATA_CONFIG.DATASET
+    use_anchor_idx = x_cfg.MODEL.POST_PROCESSING.OUTPUT_ANCHOR_BOXES
     if args.launcher == 'none':
         dist_test = False
     else:
@@ -404,7 +406,7 @@ def main():
         dummy_tensor = 0
         load_data_to_gpu(batch_dict)  # this function is designed for dict, don't use for other data types!
         with torch.no_grad():
-            boxes_with_classes = model(dummy_tensor, batch_dict)
+            anchors_with_classes = model(dummy_tensor, batch_dict)
         pred_dicts = batch_dict['pred_dicts']
         '''
         Note:
@@ -473,13 +475,6 @@ def main():
             bev_fig, bev_fig_data = cadc_bev.get_bev_image(img_idx)
             bev_image = np.transpose(PseudoImage2D[i].cpu().detach().numpy(), (1, 2, 0))
             for k in range(3):  # iterate through the 3 classes
-                '''
-                Note:
-                - In batch_2, sample_0, as the program iterates through the boxes batch_dict['box_count'][0] was
-                  originally 35
-                - But since the second iteration of j (i.e. j <= 1), batch_dict['box_count'][0] somehow became 36
-                - Therefore need a fix for that
-                '''
                 num_boxes = min(batch_dict['box_count'][i], len(conf_mat[i]))
                 for j in range(num_boxes):  # iterate through each box in this sample
                     # print('i: {}'.format(i))
@@ -489,6 +484,9 @@ def main():
                     if k + 1 == pred_dicts[i]['pred_labels'][j] and conf_mat[i][j] != 'ignore':
                         # compute contribution for the positive class only, k+1 because PCDet labels start at 1
                         target = (j, k)  # i.e., generate reason as to why the j-th box is classified as the k-th class
+                        if use_anchor_idx:
+                            # if we are using anchor box outputs, need to use the indices in for anchor boxes
+                            target = (batch_dict['anchor_selections'][i][j], k)
                         grads = None
                         sign = "absolute_value"
                         if method == 'Saliency':
@@ -519,17 +517,19 @@ def main():
                         # print('type(grad): {}'.format(type(grad)))
                         # print('bev_fig_data.shape: {}'.format(bev_fig_data.shape))
                         # print('bev_image.shape before: {}'.format(bev_image.shape))
+                        overlay = 0.4
                         if overlay_orig_bev:
                             # need to horizontally flip the original bev image and rotate 90 degrees ccw to match location
                             # of explanations
                             bev_image_raw = np.flip(bev_fig_data, 0)
                             bev_image = np.rot90(bev_image_raw, k=1, axes=(0,1))
+                            overlay = 0.1
                         # print('bev_image.shape after: {}'.format(bev_image.shape))
 
                         grad_viz = viz.visualize_image_attr(grad, bev_image, method="blended_heat_map", sign=sign,
                                                             show_colorbar=True, title="Overlaid {}".format(method),
-                                                            gray_scale=gray_scale_overlay, alpha_overlay=0.1,
-                                                            fig_size=figure_size, upscale=True)
+                                                            gray_scale=gray_scale_overlay, alpha_overlay=overlay,
+                                                            fig_size=figure_size, upscale=high_rez)
                         XAI_cls_path_str = XAI_batch_path_str + '/explanation_for_{}/sample_{}'.format(
                             class_name_dict[k], i)
                         if not os.path.exists(XAI_cls_path_str):
@@ -542,9 +542,9 @@ def main():
                         # print('box_{}_{}.png is saved in {}'.format(j,conf_mat[i][j],XAI_cls_path_str))
             # break # only processing one sample to save time
 
-        # if batch_num == batches_to_analyze:
-        #     break  # just process a limited number of batches
-        break
+        if batch_num == batches_to_analyze:
+            break  # just process a limited number of batches
+        # break
         # just need one explanation for example
     print("--- {} seconds ---".format(time.time() - start_time))
 

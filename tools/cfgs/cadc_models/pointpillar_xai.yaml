@@ -105,6 +105,7 @@ MODEL:
         RECALL_THRESH_LIST: [0.3, 0.5, 0.7]
         SCORE_THRESH: 0.1
         OUTPUT_RAW_SCORE: False
+        OUTPUT_ANCHOR_BOXES: True
 
         EVAL_METRIC: cadc
 
