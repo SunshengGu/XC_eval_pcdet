@@ -412,6 +412,7 @@ def main():
     for batch_num, batch_dict in enumerate(test_loader):
         XAI_batch_path_str = XAI_res_path_str + '/batch_{}'.format(batch_num)
         os.mkdir(XAI_batch_path_str)
+        os.chmod(XAI_batch_path_str, 0o777)
         # run the forward pass once to generate outputs and intermediate representations
         dummy_tensor = 0
         load_data_to_gpu(batch_dict)  # this function is designed for dict, don't use for other data types!
@@ -544,21 +545,29 @@ def main():
                                                             show_colorbar=True, title="Overlaid {}".format(method),
                                                             gray_scale=gray_scale_overlay, alpha_overlay=overlay,
                                                             fig_size=figure_size, upscale=high_rez)
-                        XAI_cls_path_str = XAI_batch_path_str + '/explanation_for_{}/sample_{}'.format(
-                            class_name_dict[k], i)
+
+                        XAI_cls_path_str = XAI_batch_path_str + '/explanation_for_{}'.format(
+                            class_name_dict[k])
                         if not os.path.exists(XAI_cls_path_str):
                             os.makedirs(XAI_cls_path_str)
                         os.chmod(XAI_cls_path_str, 0o777)
-                        XAI_box_relative_path_str = XAI_cls_path_str.split("tools/", 1)[1] +\
+
+                        XAI_sample_path_str = XAI_cls_path_str + '/sample_{}'.format(i)
+                        if not os.path.exists(XAI_sample_path_str):
+                            os.makedirs(XAI_sample_path_str)
+                        os.chmod(XAI_sample_path_str, 0o777)
+
+                        XAI_box_relative_path_str = XAI_sample_path_str.split("tools/", 1)[1] +\
                                                     '/box_{}_{}.png'.format(j, conf_mat[i][j])
                         # print('XAI_box_path_str: {}'.format(XAI_box_path_str))
                         grad_viz[0].savefig(XAI_box_relative_path_str, bbox_inches='tight', pad_inches=0.0)
+                        os.chmod(XAI_box_relative_path_str, 0o777)
                         # print('box_{}_{}.png is saved in {}'.format(j,conf_mat[i][j],XAI_cls_path_str))
             # break # only processing one sample to save time
 
-        if batch_num == batches_to_analyze:
-            break  # just process a limited number of batches
-        # break
+        # if batch_num == batches_to_analyze:
+        #     break  # just process a limited number of batches
+        break
         # just need one explanation for example
     print("--- {} seconds ---".format(time.time() - start_time))
 
