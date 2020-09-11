@@ -13,6 +13,7 @@ from pcdet.datasets import build_dataloader
 from pcdet.models import build_network
 from pcdet.utils import common_utils
 from pcdet.config import cfg, cfg_from_list, cfg_from_yaml_file, log_config_to_file
+from pcdet.datasets.kitti.kitti_bev_visualizer import KITTI_BEV
 from pcdet.datasets.cadc.cadc_bev_visualizer import CADC_BEV
 from eval_utils import eval_utils
 from pcdet.models import load_data_to_gpu
@@ -257,16 +258,23 @@ def main():
     start_time = time.time()
     batches_to_analyze = 10
     method = 'IG'
-    high_rez = False
-    overlay_orig_bev = False
+    high_rez = True
+    overlay_orig_bev = True
     mult_by_inputs = False
-    gray_scale_overlay = True
-    orig_bev_w = 2000
-    orig_bev_h = 2000
-    pseudo_img_w = 400
-    scaling_factor = int(orig_bev_w/pseudo_img_w)
+    gray_scale_overlay = not overlay_orig_bev
+    scaling_factor = 5
     args, cfg, x_cfg = parse_config()
     dataset_name = cfg.DATA_CONFIG.DATASET
+    pseudo_img_w = 0
+    pseudo_img_h = 0
+    if dataset_name == 'CadcDataset':
+        pseudo_img_w = 400
+        pseudo_img_h = pseudo_img_w
+    elif dataset_name == 'KittiDataset':
+        pseudo_img_w = 432
+        pseudo_img_h = 496
+    orig_bev_w = pseudo_img_w * 5
+    orig_bev_h = pseudo_img_h * 5
     use_anchor_idx = x_cfg.MODEL.POST_PROCESSING.OUTPUT_ANCHOR_BOXES
     if args.launcher == 'none':
         dist_test = False
@@ -336,6 +344,8 @@ def main():
     #     print('\n has VFE')
     # # ********** debug message **************
     cadc_bev = CADC_BEV(dataset=test_set, scale_to_pseudoimg=(not high_rez), background='black', width_pix=orig_bev_w)
+    kitti_bev = KITTI_BEV(dataset=test_set, scale_to_pseudoimg=(not high_rez), background='black',
+                          width_pix=orig_bev_w, height_pix=orig_bev_h)
     print('\n \n building the 2d network')
     model2D = build_network(model_cfg=x_cfg.MODEL, num_class=len(x_cfg.CLASS_NAMES), dataset=test_set)
     print('\n \n building the full network')
@@ -472,7 +482,11 @@ def main():
 
         for i in range(batch_dict['batch_size']):  # iterate through each sample in the batch
             img_idx = batch_num * args.batch_size + i
-            bev_fig, bev_fig_data = cadc_bev.get_bev_image(img_idx)
+            bev_fig, bev_fig_data = None, None
+            if dataset_name == 'CadcDataset':
+                bev_fig, bev_fig_data = cadc_bev.get_bev_image(img_idx)
+            elif dataset_name == 'KittiDataset':
+                bev_fig, bev_fig_data = kitti_bev.get_bev_image(img_idx)
             bev_image = np.transpose(PseudoImage2D[i].cpu().detach().numpy(), (1, 2, 0))
             for k in range(3):  # iterate through the 3 classes
                 num_boxes = min(batch_dict['box_count'][i], len(conf_mat[i]))
