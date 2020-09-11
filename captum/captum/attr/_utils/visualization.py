@@ -246,9 +246,10 @@ def visualize_image_attr(
         plt_axis.imshow(original_image)
     else:
         # Choose appropriate signed attributions and normalize.
+        # print('attr.shape: {}'.format(attr.shape)) # 64 channels
         norm_attr = _normalize_image_attr(attr, sign, outlier_perc)
         # print('type(norm_attr): {}'.format(type(norm_attr)))
-        # print('norm_attr.shape: {}'.format(norm_attr.shape))
+        # print('norm_attr.shape: {}'.format(norm_attr.shape)) # just 1 channel
         if upscale:
             # upscale the normalized attributions to match input dimensions
             factor = int(original_image.shape[0] / norm_attr.shape[0])
