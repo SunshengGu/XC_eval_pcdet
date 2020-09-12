@@ -17,9 +17,9 @@ LOGDIR=/root/logdir
 
 # Workspace structure on host machine
 # Change to path to your own machine, don't leave these lines as they are
-HOST_PCDET_ROOT=/path/to/pcdet
-HOST_NUSC_ROOT=/path/to/nusc
-HOST_CADC_ROOT=/path/to/cadc
-HOST_KITTI_ROOT=/path/to/kitti
-HOST_CAPTUM_ROOT=/path/to/captum
-HOST_LOGDIR=/path/to/logdir
+HOST_PCDET_ROOT=/media/sg/02f4ed99-ea7d-47a9-9aed-3606f0fd7fda/tadenoud/Documents/WISEOpenLidarPerceptron
+HOST_NUSC_ROOT=/media/sg/02f4ed99-ea7d-47a9-9aed-3606f0fd7fda/tadenoud/Documents/WISEOpenLidarPerceptron/pcdet/datasets/nuscenes
+HOST_CADC_ROOT=/media/sg/02f4ed99-ea7d-47a9-9aed-3606f0fd7fda/tadenoud/Documents/WISEOpenLidarPerceptron/data/cadc
+HOST_KITTI_ROOT=/media/sg/02f4ed99-ea7d-47a9-9aed-3606f0fd7fda/tadenoud/Documents/WISEOpenLidarPerceptron/data/kitti
+HOST_CAPTUM_ROOT=/media/sg/02f4ed99-ea7d-47a9-9aed-3606f0fd7fda/tadenoud/Documents/captum
+HOST_LOGDIR=/media/sg/02f4ed99-ea7d-47a9-9aed-3606f0fd7fda/tadenoud/Documents/WISEOpenLidarPerceptron/output
