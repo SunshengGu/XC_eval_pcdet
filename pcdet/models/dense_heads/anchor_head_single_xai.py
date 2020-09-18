@@ -1,10 +1,9 @@
 import numpy as np
 import torch.nn as nn
-
 from .anchor_head_template import AnchorHeadTemplate
 
 
-class AnchorHeadSingle(AnchorHeadTemplate):
+class AnchorHeadSingleXAI(AnchorHeadTemplate):
     def __init__(self, model_cfg, input_channels, num_class, class_names, grid_size, point_cloud_range,
                  predict_boxes_when_training=True):
         super().__init__(
@@ -39,14 +38,24 @@ class AnchorHeadSingle(AnchorHeadTemplate):
         nn.init.constant_(self.conv_cls.bias, -np.log((1 - pi) / pi))
         nn.init.normal_(self.conv_box.weight, mean=0, std=0.001)
 
-    def forward(self, data_dict):
+    def forward(self, tensor_values, data_dict):
+        # tensor_values is just for compatibility with Captum, only useful when in explain mode
         spatial_features_2d = data_dict['spatial_features_2d']
+        if str(type(tensor_values)) == 'torch.Tensor':
+            spatial_features_2d = tensor_values
 
         cls_preds = self.conv_cls(spatial_features_2d)
         box_preds = self.conv_box(spatial_features_2d)
 
         cls_preds = cls_preds.permute(0, 2, 3, 1).contiguous()  # [N, H, W, C]
         box_preds = box_preds.permute(0, 2, 3, 1).contiguous()  # [N, H, W, C]
+
+        # print('cls_preds data type: ' + str(type(cls_preds)))
+        # print('cls_preds shape: ' + str(cls_preds.shape))
+        # print('cls_preds[0] shape: ' + str(cls_preds[0].shape))
+        # print('box_preds data type: ' + str(type(box_preds)))
+        # print('box_preds shape: ' + str(box_preds.shape))
+        # print('box_preds[0] shape: ' + str(box_preds[0].shape))
 
         self.forward_ret_dict['cls_preds'] = cls_preds
         self.forward_ret_dict['box_preds'] = box_preds
@@ -62,6 +71,8 @@ class AnchorHeadSingle(AnchorHeadTemplate):
             targets_dict = self.assign_targets(
                 gt_boxes=data_dict['gt_boxes']
             )
+            # The update() method updates the dictionary with the elements from the another dictionary object or from
+            # an iterable of key / value pairs.
             self.forward_ret_dict.update(targets_dict)
 
         if not self.training or self.predict_boxes_when_training:
@@ -72,5 +83,13 @@ class AnchorHeadSingle(AnchorHeadTemplate):
             data_dict['batch_cls_preds'] = batch_cls_preds
             data_dict['batch_box_preds'] = batch_box_preds
             data_dict['cls_preds_normalized'] = False
+            # print('batch_cls_preds data type: ' + str(type(batch_cls_preds)))
+            # print('batch_cls_preds shape: ' + str(batch_cls_preds.shape))
+            # print('batch_cls_preds[0] shape: ' + str(batch_cls_preds[0].shape))
+            # print('batch_box_preds data type: ' + str(type(batch_box_preds)))
+            # print('batch_box_preds shape: ' + str(batch_box_preds.shape))
+            # print('batch_box_preds[0] shape: ' + str(batch_box_preds[0].shape))
 
-        return data_dict
+        if str(type(tensor_values)) == 'torch.Tensor':
+            tensor_values = batch_cls_preds
+        return tensor_values, data_dict

@@ -5,5 +5,6 @@ from .vfe_template import VFETemplate
 __all__ = {
     'VFETemplate': VFETemplate,
     'MeanVFE': MeanVFE,
-    'PillarVFE': PillarVFE
+    'PillarVFE': PillarVFE,
+    'PillarVFEXAI': PillarVFEXAI
 }

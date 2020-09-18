@@ -8,6 +8,7 @@ from .point_intra_part_head import PointIntraPartOffsetHead
 __all__ = {
     'AnchorHeadTemplate': AnchorHeadTemplate,
     'AnchorHeadSingle': AnchorHeadSingle,
+    'AnchorHeadSingleXAI': AnchorHeadSingleXAI,
     'PointIntraPartOffsetHead': PointIntraPartOffsetHead,
     'PointHeadSimple': PointHeadSimple,
     'PointHeadBox': PointHeadBox,

@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 from .vfe_template import VFETemplate
 
 
@@ -24,20 +23,10 @@ class PFNLayer(nn.Module):
         else:
             self.linear = nn.Linear(in_channels, out_channels, bias=True)
 
-        self.part = 50000
-
     def forward(self, inputs):
-        if inputs.shape[0] > self.part:
-            # nn.Linear performs randomly when batch size is too large
-            num_parts = inputs.shape[0] // self.part
-            part_linear_out = [self.linear(inputs[num_part*self.part:(num_part+1)*self.part])
-                               for num_part in range(num_parts+1)]
-            x = torch.cat(part_linear_out, dim=0)
-        else:
-            x = self.linear(inputs)
-        torch.backends.cudnn.enabled = False
-        x = self.norm(x.permute(0, 2, 1)).permute(0, 2, 1) if self.use_norm else x
-        torch.backends.cudnn.enabled = True
+        x = self.linear(inputs)
+        total_points, voxel_points, channels = x.shape
+        x = self.norm(x.view(-1, channels)).view(total_points, voxel_points, channels) if self.use_norm else x
         x = F.relu(x)
         x_max = torch.max(x, dim=1, keepdim=True)[0]
 
@@ -49,7 +38,7 @@ class PFNLayer(nn.Module):
             return x_concatenated
 
 
-class PillarVFE(VFETemplate):
+class PillarVFEXAI(VFETemplate):
     def __init__(self, model_cfg, num_point_features, voxel_size, point_cloud_range):
         super().__init__(model_cfg=model_cfg)
 
@@ -63,6 +52,12 @@ class PillarVFE(VFETemplate):
         self.num_filters = self.model_cfg.NUM_FILTERS
         assert len(self.num_filters) > 0
         num_filters = [num_point_features] + list(self.num_filters)
+        print('\n data type of num_filters in PillarVFE: ' + str(type(num_filters)))
+        print('\n length of num_filters: ' + str(len(num_filters)))
+        print('\n num_filters[0]: ' + str(num_filters[0]))
+        print('\n num_filters[1]: ' + str(num_filters[1]))
+        # print('\n data type of num_filters[0] in PillarVFE: ' + str(type(num_filters[0])))
+        # print('\n data type of num_filters[1] in PillarVFE: ' + str(type(num_filters[1])))
 
         pfn_layers = []
         for i in range(len(num_filters) - 1):
@@ -91,8 +86,8 @@ class PillarVFE(VFETemplate):
         paddings_indicator = actual_num.int() > max_num
         return paddings_indicator
 
-    def forward(self, batch_dict, **kwargs):
-
+    def forward(self, tensor_values, batch_dict, **kwargs):
+        # tensor_values is just for compatibility with Captum, only useful when in explain mode
         voxel_features, voxel_num_points, coords = batch_dict['voxels'], batch_dict['voxel_num_points'], batch_dict[
             'voxel_coords']
         points_mean = voxel_features[:, :, :3].sum(dim=1, keepdim=True) / voxel_num_points.type_as(voxel_features).view(
@@ -125,4 +120,4 @@ class PillarVFE(VFETemplate):
             features = pfn(features)
         features = features.squeeze()
         batch_dict['pillar_features'] = features
-        return batch_dict
+        return tensor_values, batch_dict

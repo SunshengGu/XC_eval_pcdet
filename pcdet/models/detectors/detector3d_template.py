@@ -13,6 +13,7 @@ from ..model_utils import model_nms_utils
 class Detector3DTemplate(nn.Module):
     def __init__(self, model_cfg, num_class, dataset):
         super().__init__()
+        # self.explain = explain # additional argument indicating if we are in explain mode
         self.model_cfg = model_cfg
         self.num_class = num_class
         self.dataset = dataset
@@ -32,6 +33,11 @@ class Detector3DTemplate(nn.Module):
         self.global_step += 1
 
     def build_networks(self):
+        # # ********** debug message **************
+        # print("\n keys in self.state_dict before model is built:")
+        # for key in self.state_dict():
+        #     print(key)
+        # # ********** debug message **************
         model_info_dict = {
             'module_list': [],
             'num_rawpoint_features': self.dataset.point_feature_encoder.num_point_features,
@@ -40,15 +46,29 @@ class Detector3DTemplate(nn.Module):
             'point_cloud_range': self.dataset.point_cloud_range,
             'voxel_size': self.dataset.voxel_size
         }
+
+        # # ********** debug message **************
+        # print("showing module names in self.module_topology")
+        # for mod_name in self.module_topology:
+        #     print(mod_name)
+        # # ********** debug message **************
         for module_name in self.module_topology:
             module, model_info_dict = getattr(self, 'build_%s' % module_name)(
                 model_info_dict=model_info_dict
             )
             self.add_module(module_name, module)
+        # # ********** debug message **************
+        # print("\n keys in self.state_dict after model is built:")
+        # for key in self.state_dict():
+        #     print(key)
+        # # ********** debug message **************
         return model_info_dict['module_list']
 
     def build_vfe(self, model_info_dict):
         if self.model_cfg.get('VFE', None) is None:
+            # ********** debug message **************
+            # print('\n no VFE')
+            # ********** debug message **************
             return None, model_info_dict
 
         vfe_module = vfe.__all__[self.model_cfg.VFE.NAME](
@@ -63,6 +83,9 @@ class Detector3DTemplate(nn.Module):
 
     def build_backbone_3d(self, model_info_dict):
         if self.model_cfg.get('BACKBONE_3D', None) is None:
+            # ********** debug message **************
+            # print('\n no 3D backbone')
+            # ********** debug message **************
             return None, model_info_dict
 
         backbone_3d_module = backbones_3d.__all__[self.model_cfg.BACKBONE_3D.NAME](
@@ -78,6 +101,9 @@ class Detector3DTemplate(nn.Module):
 
     def build_map_to_bev_module(self, model_info_dict):
         if self.model_cfg.get('MAP_TO_BEV', None) is None:
+            # ********** debug message **************
+            # print('\n no map_to_bev_module')
+            # ********** debug message **************
             return None, model_info_dict
 
         map_to_bev_module = map_to_bev.__all__[self.model_cfg.MAP_TO_BEV.NAME](
@@ -90,11 +116,17 @@ class Detector3DTemplate(nn.Module):
 
     def build_backbone_2d(self, model_info_dict):
         if self.model_cfg.get('BACKBONE_2D', None) is None:
+            # ********** debug message **************
+            # print('\n no 2D backbone')
+            # ********** debug message **************
             return None, model_info_dict
-
+        if 'num_bev_features' not in model_info_dict:
+            model_info_dict['num_bev_features'] = 64
         backbone_2d_module = backbones_2d.__all__[self.model_cfg.BACKBONE_2D.NAME](
             model_cfg=self.model_cfg.BACKBONE_2D,
             input_channels=model_info_dict['num_bev_features']
+            # # TODO: hard code just for the sake of building a simpler pointpillar, need to change back later
+            # input_channels=64
         )
         model_info_dict['module_list'].append(backbone_2d_module)
         model_info_dict['num_bev_features'] = backbone_2d_module.num_bev_features
@@ -102,6 +134,9 @@ class Detector3DTemplate(nn.Module):
 
     def build_pfe(self, model_info_dict):
         if self.model_cfg.get('PFE', None) is None:
+            # ********** debug message **************
+            # print('\n no pfe')
+            # ********** debug message **************
             return None, model_info_dict
 
         pfe_module = pfe.__all__[self.model_cfg.PFE.NAME](
@@ -273,6 +308,151 @@ class Detector3DTemplate(nn.Module):
 
         return pred_dicts, recall_dict
 
+    def post_processing_xai(self, tensor_values, batch_dict):
+        """
+        Args:
+            batch_dict:
+                batch_size:
+                batch_cls_preds: (B, num_boxes, num_classes | 1) or (N1+N2+..., num_classes | 1)
+                batch_box_preds: (B, num_boxes, 7+C) or (N1+N2+..., 7+C)
+                cls_preds_normalized: indicate whether batch_cls_preds is normalized
+                batch_index: optional (N1+N2+...)
+                roi_labels: (B, num_rois)  1 .. num_classes
+        Returns:
+        :param batch_dict:
+        :param tensor_values:
+
+        """
+        # print('\n starting the post_processing() function')
+        # tensor_values is just for compatibility with Captum, only useful when in explain mode
+        post_process_cfg = self.model_cfg.POST_PROCESSING
+        batch_size = batch_dict['batch_size']
+        recall_dict = {}
+        pred_dicts = []
+        boxes_with_cls_scores = []
+        anchor_selections = []
+        batch_dict['box_count'] = {} # store the number of boxes for each image in the sample
+        output_anchor = post_process_cfg.OUTPUT_ANCHOR_BOXES # indicates if we output anchor boxes
+        anchor_scores = [] # store class scores for individual anchor boxes
+        # max_box_ind = 0 # index of the input in the batch with most number of boxes
+        max_num_boxes = 50
+        for index in range(batch_size):
+            # the 'None' here just means return None if key not found
+            if batch_dict.get('batch_index', None) is not None:
+                # print('\n batch_dict has the \'bactch_index\' entry!')
+                # print('\n shape of batch_dict[\'batch_cls_preds\']' + str(batch_dict['batch_cls_preds'].shape))
+                assert batch_dict['batch_cls_preds'].shape.__len__() == 2
+                batch_mask = (batch_dict['batch_index'] == index)
+            else:
+                # print('\n batch_dict does NOT have the \'bactch_index\' entry!')
+                # print('\n shape of batch_dict[\'batch_cls_preds\']' + str(batch_dict['batch_cls_preds'].shape))
+                assert batch_dict['batch_cls_preds'].shape.__len__() == 3
+                batch_mask = index
+
+            # inside the for loop, we only care about one particular sample, not the entire mini-batch
+            box_preds = batch_dict['batch_box_preds'][batch_mask]
+            cls_preds = batch_dict['batch_cls_preds'][batch_mask]
+
+            if str(type(tensor_values)) == 'torch.Tensor':
+                cls_preds = tensor_values[batch_mask]
+
+            src_cls_preds = cls_preds
+            src_box_preds = box_preds
+            anchor_scores.append(src_cls_preds)
+            # print('src_box_preds.shape before nms: {}'.format(src_box_preds.shape))
+            # print('src_cls_preds.shape before nms: {}'.format(src_cls_preds.shape))
+            # the second dimension of cls_preds should be the same as the number of classes
+            assert cls_preds.shape[1] in [1, self.num_class]
+
+            if not batch_dict['cls_preds_normalized']:
+                cls_preds = torch.sigmoid(cls_preds)
+
+            if post_process_cfg.NMS_CONFIG.MULTI_CLASSES_NMS:
+                raise NotImplementedError
+            else:
+                # in python, -1 means the last dimension
+                # torch.max(input, dim, keepdim=False, out=None) returns a tuple:
+                # 1. the maximum values in the indicated dimension
+                # 2. the indices of the maximum values in the indicated dimension
+                # now, for each box, we have a class prediction
+                cls_preds, label_preds = torch.max(cls_preds, dim=-1)
+                # print('\n shape of label_preds before: ' + str(label_preds.shape))
+                # print('label_preds data type: ' + str(type(label_preds)))
+                # question: why add 1 to each element of label_preds?
+                # because class labels are 1,2,3 instead of 0,1,2?
+                label_preds = batch_dict['roi_labels'][index] if batch_dict.get('has_class_labels', False) else label_preds + 1
+                if batch_dict.get('has_class_labels', False):
+                    print('\n no key named \'has_class_labels\' in batch_dict')
+                # print('\n shape of label_preds after: ' + str(label_preds.shape))
+
+                selected, selected_scores = class_agnostic_nms(
+                    box_scores=cls_preds, box_preds=box_preds,
+                    nms_config=post_process_cfg.NMS_CONFIG,
+                    score_thresh=post_process_cfg.SCORE_THRESH
+                )
+                anchor_selections.append(selected)
+
+                if post_process_cfg.OUTPUT_RAW_SCORE: # no need to worry about this, false by default
+                    max_cls_preds, _ = torch.max(src_cls_preds, dim=-1)
+                    selected_scores = max_cls_preds[selected]
+
+                final_scores = selected_scores
+                final_labels = label_preds[selected]
+                final_boxes = box_preds[selected]
+
+                # for label in final_labels:
+                #     print('label is {}'.format(label))
+
+                batch_dict['box_count'][index] = final_scores.shape[0]
+                # if final_scores.shape[0] > max_num_boxes:
+                #     max_box_ind = index
+                #     max_num_boxes = final_scores.shape[0]
+
+            recall_dict = self.generate_recall_record(
+                box_preds=final_boxes if 'rois' not in batch_dict else src_box_preds,
+                recall_dict=recall_dict, batch_index=index, data_dict=batch_dict,
+                thresh_list=post_process_cfg.RECALL_THRESH_LIST
+            )
+
+            record_dict = {
+                'pred_boxes': final_boxes,
+                'pred_scores': final_scores,
+                'pred_labels': final_labels
+            }
+            pred_dicts.append(record_dict)
+
+            # print('src_cls_pred[selected] data type: ' + str(type(src_cls_preds[selected])))
+            # print('src_cls_pred[selected] shape: ' + str(src_cls_preds[selected].shape))
+            boxes_with_cls_scores.append(src_cls_preds[selected])
+        batch_dict['pred_dicts'] = pred_dicts
+        batch_dict['recall_dict'] = recall_dict
+        batch_dict['anchor_selections'] = anchor_selections
+        # # note: torch.stack only works if every dimension except for dimension 0 matches
+        # boxes_with_cls_scores = torch.stack(boxes_with_cls_scores)
+
+        if output_anchor:
+            anchor_scores = torch.stack(anchor_scores)
+            return anchor_scores
+
+        # pad each output in the batch to match dimensions with the maximum length output
+        # then stack the individual outputs together to get a tensor as the batch outout
+        for i in range(len(boxes_with_cls_scores)):
+            if boxes_with_cls_scores[i].shape[0] > max_num_boxes:
+                # more than max_num_boxes boxes detected
+                boxes_with_cls_scores[i] = boxes_with_cls_scores[i][:max_num_boxes]
+            elif boxes_with_cls_scores[i].shape[0] < max_num_boxes:
+                # less than max_num_boxes boxes detected
+                padding_size = max_num_boxes - boxes_with_cls_scores[i].shape[0]
+                padding = torch.zeros(padding_size,3)
+                padding = padding.float().cuda() # load `padding` to GPU
+                new_output = torch.cat((boxes_with_cls_scores[i],padding), 0)
+                boxes_with_cls_scores[i] = new_output
+            else:
+                continue
+        boxes_with_cls_scores = torch.stack(boxes_with_cls_scores)
+        # print('\n finishing the post_processing() function')
+        return boxes_with_cls_scores
+
     @staticmethod
     def generate_recall_record(box_preds, recall_dict, batch_index, data_dict=None, thresh_list=None):
         if 'gt_boxes' not in data_dict:
@@ -318,6 +498,7 @@ class Detector3DTemplate(nn.Module):
         return recall_dict
 
     def load_params_from_file(self, filename, logger, to_cpu=False):
+        # file name is a checkpoint file
         if not os.path.isfile(filename):
             raise FileNotFoundError
 
@@ -328,6 +509,12 @@ class Detector3DTemplate(nn.Module):
 
         if 'version' in checkpoint:
             logger.info('==> Checkpoint trained from version: %s' % checkpoint['version'])
+
+        # # ********** debug message **************
+        # print("keys in self.state_dict before processing ckpt data")
+        # for key in self.state_dict():
+        #     print(key)
+        # # ********** debug message **************
 
         update_model_state = {}
         for key, val in model_state_disk.items():

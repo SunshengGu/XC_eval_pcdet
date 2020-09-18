@@ -77,10 +77,14 @@ def main():
     if args.fix_random_seed:
         common_utils.set_random_seed(666)
 
+    print('cfg.ROOT_DIR: {}'.format(cfg.ROOT_DIR))
+    print('cfg.EXP_GROUP_PATH: {}'.format(cfg.EXP_GROUP_PATH))
+    print('cfg.TAG: {}'.format(cfg.TAG))
     output_dir = cfg.ROOT_DIR / 'output' / cfg.EXP_GROUP_PATH / cfg.TAG / args.extra_tag
     ckpt_dir = output_dir / 'ckpt'
     output_dir.mkdir(parents=True, exist_ok=True)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
+    print('output_dir: {}'.format(output_dir))
 
     log_file = output_dir / ('log_train_%s.txt' % datetime.datetime.now().strftime('%Y%m%d-%H%M%S'))
     logger = common_utils.create_logger(log_file, rank=cfg.LOCAL_RANK)

@@ -161,6 +161,8 @@ def d3_box_overlap(boxes, qboxes, criterion=-1, z_axis=1, z_center=1.0):
     kitti camera format z_axis=1, z_center=1.0
     cadc lidar format z_axis=2, z_center=0.5
     """
+    # note: PointPillar boxes are x,y,z,l,w,h,theta in the paper
+    # looks like we are getting rid of z and l just calculate 2D iou?
     bev_axes = list(range(7))
     bev_axes.pop(z_axis + 3)
     bev_axes.pop(z_axis)
