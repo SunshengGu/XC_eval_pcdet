@@ -1,5 +1,6 @@
 from .anchor_head_template import AnchorHeadTemplate
-from .anchor_head_single import AnchorHeadSingle, AnchorHeadSingleXAI
+from .anchor_head_single import AnchorHeadSingle
+from .anchor_head_single_xai import AnchorHeadSingleXAI
 from .point_intra_part_head import PointIntraPartOffsetHead
 from .point_head_simple import PointHeadSimple
 from .anchor_head_multi import AnchorHeadMulti

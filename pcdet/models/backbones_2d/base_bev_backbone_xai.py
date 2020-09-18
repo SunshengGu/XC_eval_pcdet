@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 
-class BaseBEVBackbone(nn.Module):
+class BaseBEVBackboneXAI(nn.Module):
     def __init__(self, model_cfg, input_channels):
         super().__init__()
         self.model_cfg = model_cfg
@@ -57,17 +57,41 @@ class BaseBEVBackbone(nn.Module):
 
         self.num_bev_features = c_in
 
-    def forward(self, data_dict):
+    def forward(self, tensor_values, data_dict):
         """
         Args:
             data_dict:
                 spatial_features
         Returns:
+        :param tensor_values:
         """
+        # tensor_values is just for compatibility with Captum, only useful when in explain mode
         spatial_features = data_dict['spatial_features']
+        # print('\n shape of spatial_features in base_bev_backbone.py')
+        # print(spatial_features.shape)
         ups = []
         ret_dict = {}
         x = spatial_features
+        # print('\nstr(type(tensor_values)): {}'.format(str(type(tensor_values))))
+        # TODO: use tensor_values instead of x when in explain mode
+        if str(type(tensor_values)) == '<class \'torch.Tensor\'>':  # not a dummy tensor
+            # print('\nBaseBEVBackbone detected that we are in explain mode')
+            for i in range(len(self.blocks)):
+                tensor_values = self.blocks[i](tensor_values)
+
+                stride = int(spatial_features.shape[2] / tensor_values.shape[2])
+                ret_dict['spatial_features_%dtensor_values' % stride] = tensor_values
+                ups.append(self.deblocks[i](tensor_values))
+
+            if len(ups) > 1:
+                tensor_values = torch.cat(ups, dim=1)
+            else:
+                tensor_values = ups[0]
+            if len(self.deblocks) > len(self.blocks):
+                tensor_values = self.deblocks[-1](tensor_values)
+            data_dict['spatial_features_2d'] = tensor_values
+            return tensor_values, data_dict
+
         for i in range(len(self.blocks)):
             x = self.blocks[i](x)
 
@@ -84,6 +108,4 @@ class BaseBEVBackbone(nn.Module):
 
         data_dict['spatial_features_2d'] = x
 
-        return data_dict
-
-
+        return tensor_values, data_dict

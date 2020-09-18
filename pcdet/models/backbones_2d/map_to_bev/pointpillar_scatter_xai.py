@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 
-class PointPillarScatter(nn.Module):
+class PointPillarScatterXAI(nn.Module):
     def __init__(self, model_cfg, grid_size, **kwargs):
         super().__init__()
 
@@ -11,7 +11,8 @@ class PointPillarScatter(nn.Module):
         self.nx, self.ny, self.nz = grid_size
         assert self.nz == 1
 
-    def forward(self, batch_dict, **kwargs):
+    def forward(self, tensor_values, batch_dict, **kwargs):
+        # tensor_values is just for compatibility with Captum, only useful when in explain mode
         pillar_features, coords = batch_dict['pillar_features'], batch_dict['voxel_coords']
         batch_spatial_features = []
         batch_size = coords[:, 0].max().int().item() + 1
@@ -35,5 +36,4 @@ class PointPillarScatter(nn.Module):
         batch_spatial_features = batch_spatial_features.view(batch_size, self.num_bev_features * self.nz, self.ny,
                                                              self.nx)
         batch_dict['spatial_features'] = batch_spatial_features
-        return batch_dict
-
+        return tensor_values, batch_dict

@@ -1,6 +1,7 @@
 from .vfe_template import VFETemplate
 from .mean_vfe import MeanVFE
-from .pillar_vfe import PillarVFE, PillarVFEXAI
+from .pillar_vfe import PillarVFE
+from .pillar_vfe_xai import PillarVFEXAI
 
 __all__ = {
     'VFETemplate': VFETemplate,

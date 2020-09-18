@@ -1,4 +1,5 @@
-from .base_bev_backbone import BaseBEVBackbone, BaseBEVBackboneXAI
+from .base_bev_backbone import BaseBEVBackbone
+from .base_bev_backbone_xai import BaseBEVBackboneXAI
 
 
 __all__ = {
