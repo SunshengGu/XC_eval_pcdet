@@ -17,7 +17,7 @@ import datetime
 class CADC_BEV:
     def __init__(self, dataset, repo_dir='/root/pcdet', scale_to_pseudoimg=False, class_name=['Car', 'Pedestrian', 'Cyclist'],
                 result_path='output/cadc_models/pointpillar/default/eval/epoch_4/val/default/result.pkl',
-                output_path = 'data/cadc/', background='black', width_pix = 2000):
+                output_path = 'data/cadc/', background='black', width_pix = 2000, cmap='jet', dpi_factor=20.0):
         self.repo_dir = repo_dir
         self.scale_to_pseudoimg = scale_to_pseudoimg
         self.class_name = class_name
@@ -26,6 +26,8 @@ class CADC_BEV:
         self.results = np.load(self.result_path, allow_pickle=True)
         self.background = background
         self.width_pix = width_pix
+        self.cmap = cmap
+        self.dpi_factor = dpi_factor
         now = datetime.datetime.now()
         dt_string = now.strftime("%b_%d_%Y_%H_%M_%S")
         output_path = output_path + '{}_bev_pred'.format(dt_string)
@@ -163,13 +165,13 @@ class CADC_BEV:
         pred_poly = [poly + offset for poly in pred_poly]
 
         # PLOT THE IMAGE
-        cmap = "jet"  # Color map to use
+        cmap = self.cmap  # Color map to use
         x_max = side_range[1] - side_range[0]
         y_max = fwd_range[1] - fwd_range[0]
         img_size_pix = self.width_pix  # image size in num of pixels
         if self.scale_to_pseudoimg:
             img_size_pix = 400
-        dpi = img_size_pix / 60.0  # Image resolution, dots per inch
+        dpi = img_size_pix / self.dpi_factor  # Image resolution, dots per inch
         fig, ax = plt.subplots(figsize=(img_size_pix / dpi, img_size_pix / dpi), dpi=dpi)
 
         for poly in gt_poly:  # plot the tracklets

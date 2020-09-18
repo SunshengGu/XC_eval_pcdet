@@ -17,7 +17,8 @@ import datetime
 class KITTI_BEV:
     def __init__(self, dataset, repo_dir='/root/pcdet', scale_to_pseudoimg=False, class_name=['Car', 'Pedestrian', 'Cyclist'],
                 result_path='output/kitti_models/pointpillar/default/eval/epoch_2/val/default/result.pkl',
-                output_path = 'data/kitti/', background='black', width_pix=432*5, height_pix=496*5):
+                output_path = 'data/kitti/', background='black', width_pix=432*5, height_pix=496*5, cmap='jet',
+                dpi_factor=20.0):
         self.repo_dir = repo_dir
         self.scale_to_pseudoimg = scale_to_pseudoimg
         self.class_name = class_name
@@ -27,6 +28,8 @@ class KITTI_BEV:
         self.background = background
         self.width_pix = width_pix
         self.height_pix = height_pix
+        self.cmap = cmap
+        self.dpi_factor = dpi_factor
         now = datetime.datetime.now()
         dt_string = now.strftime("%b_%d_%Y_%H_%M_%S")
         output_path = output_path + '{}_bev_pred'.format(dt_string)
@@ -211,13 +214,13 @@ class KITTI_BEV:
         pred_poly = [poly + offset for poly in pred_poly]
 
         # PLOT THE IMAGE
-        cmap = "jet"  # Color map to use
+        cmap = self.cmap  # Color map to use # 'jet' originally
         x_max = side_range[1] - side_range[0]
         y_max = fwd_range[1] - fwd_range[0]
         if self.scale_to_pseudoimg:
             self.width_pix = 432
             self.height_pix = 496
-        dpi = self.width_pix / 60.0  # Image resolution, dots per inch
+        dpi = self.width_pix / self.dpi_factor  # Image resolution, dots per inch
         fig, ax = plt.subplots(figsize=(self.height_pix / dpi, self.width_pix / dpi), dpi=dpi)
 
         for poly in gt_poly:  # plot the tracklets

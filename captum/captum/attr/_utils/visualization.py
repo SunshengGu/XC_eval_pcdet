@@ -50,6 +50,9 @@ def _normalize_scale(attr: ndarray, scale_factor: float):
 
 
 def _cumulative_sum_threshold(values: ndarray, percentile: Union[int, float]):
+    """
+    :return: the smallest cumulative sum exceeding the given percentile
+    """
     # given values should be non-negative
     assert percentile >= 0 and percentile <= 100, (
         "Percentile for thresholding must be " "between 0 and 100 inclusive."
@@ -61,43 +64,76 @@ def _cumulative_sum_threshold(values: ndarray, percentile: Union[int, float]):
 
 
 def _normalize_image_attr(
-    attr: ndarray, sign: str, outlier_perc: Union[int, float] = 2
+        attr: ndarray, sign: str, outlier_perc: Union[int, float] = 2
 ):
-    attr_combined = np.sum(attr, axis=2)
     # Choose appropriate signed values and rescale, removing given outlier percentage.
     if VisualizeSign[sign] == VisualizeSign.all:
+        attr_combined = np.sum(attr, axis=2)
         threshold = _cumulative_sum_threshold(np.abs(attr_combined), 100 - outlier_perc)
     elif VisualizeSign[sign] == VisualizeSign.positive:
-        attr_combined = (attr_combined > 0) * attr_combined
+        attr_combined = np.sum((attr > 0) * attr, axis=2)
         threshold = _cumulative_sum_threshold(attr_combined, 100 - outlier_perc)
     elif VisualizeSign[sign] == VisualizeSign.negative:
-        attr_combined = (attr_combined < 0) * attr_combined
+        attr_combined = np.sum((attr < 0) * attr, axis=2)
         threshold = -1 * _cumulative_sum_threshold(
             np.abs(attr_combined), 100 - outlier_perc
         )
     elif VisualizeSign[sign] == VisualizeSign.absolute_value:
-        attr_combined = np.abs(attr_combined)
+        '''
+        1. Sum up the negative and positive attributions
+        2. Turn the negative attributions in to absolute values
+        3. Then combine the positive and absolute negative attributions
+        4. This will avoid the canceling out effect
+        '''
+        attr_combined_neg = np.sum((attr < 0) * attr, axis=2)
+        attr_combined_pos = np.sum((attr > 0) * attr, axis=2)
+        attr_combined_neg_abs = np.abs(attr_combined_neg)
+        attr_combined = np.add(attr_combined_pos, attr_combined_neg_abs)
         threshold = _cumulative_sum_threshold(attr_combined, 100 - outlier_perc)
     else:
         raise AssertionError("Visualize Sign type is not valid.")
     return _normalize_scale(attr_combined, threshold)
 
 
+def _normalize_channel_attr(
+        attr: ndarray, sign: str, outlier_perc: Union[int, float] = 2
+):
+    """
+    Similar to `_normalize_image_attr`, but deals with just one channel
+    """
+    # Choose appropriate signed values and rescale, removing given outlier percentage.
+    if VisualizeSign[sign] == VisualizeSign.all:
+        threshold = _cumulative_sum_threshold(np.abs(attr), 100 - outlier_perc)
+    elif VisualizeSign[sign] == VisualizeSign.positive:
+        attr = (attr > 0) * attr
+        threshold = _cumulative_sum_threshold(attr, 100 - outlier_perc)
+    elif VisualizeSign[sign] == VisualizeSign.negative:
+        attr = (attr < 0) * attr
+        threshold = -1 * _cumulative_sum_threshold(
+            np.abs(attr), 100 - outlier_perc
+        )
+    elif VisualizeSign[sign] == VisualizeSign.absolute_value:
+        attr = np.abs(attr)
+        threshold = _cumulative_sum_threshold(attr, 100 - outlier_perc)
+    else:
+        raise AssertionError("Visualize Sign type is not valid.")
+    return _normalize_scale(attr, threshold)
+
+
 def visualize_image_attr(
-    attr: ndarray,
-    original_image: Union[None, ndarray] = None,
-    method: str = "heat_map",
-    sign: str = "absolute_value",
-    plt_fig_axis: Union[None, Tuple[figure, axis]] = None,
-    outlier_perc: Union[int, float] = 2,
-    cmap: Union[None, str] = None,
-    alpha_overlay: float = 0.5,
-    show_colorbar: bool = False,
-    title: Union[None, str] = None,
-    fig_size: Tuple[int, int] = (6, 6),
-    use_pyplot: bool = True,
-    gray_scale: bool = True,
-    upscale: bool = False
+        attr: ndarray,
+        original_image: Union[None, ndarray] = None,
+        method: str = "heat_map",
+        sign: str = "absolute_value",
+        plt_fig_axis: Union[None, Tuple[figure, axis]] = None,
+        outlier_perc: Union[int, float] = 2,
+        cmap: Union[None, str] = None,
+        alpha_overlay: float = 0.5,
+        show_colorbar: bool = False,
+        title: Union[None, str] = None,
+        fig_size: Tuple[int, int] = (6, 6),
+        use_pyplot: bool = True,
+        upscale: bool = False
 ):
     r"""
         Visualizes attribution for a given image by normalizing attribution values
@@ -186,9 +222,6 @@ def visualize_image_attr(
                         uses Matplotlib object oriented API and simply returns a
                         figure object without showing.
                         Default: True.
-            gray_scale (boolean, optional): If True, overlay attributions on the gray
-                        scale version of the original image. If False, just overlay
-                        attributions on the original image.
             upscale:    (boolean, optional): If True, need to upscale the attributions
                         to match input shape.
 
@@ -230,7 +263,7 @@ def visualize_image_attr(
             original_image = _prepare_image(original_image * 255)
     else:
         assert (
-            ImageVisualizationMethod[method] == ImageVisualizationMethod.heat_map
+                ImageVisualizationMethod[method] == ImageVisualizationMethod.heat_map
         ), "Original Image must be provided for any visualization other than heatmap."
 
     # Remove ticks and tick labels from plot.
@@ -247,7 +280,12 @@ def visualize_image_attr(
     else:
         # Choose appropriate signed attributions and normalize.
         # print('attr.shape: {}'.format(attr.shape)) # 64 channels
-        norm_attr = _normalize_image_attr(attr, sign, outlier_perc)
+        norm_attr = np.zeros(shape=(1, 1))  # initialize norm_attr
+        if len(attr.shape) == 3: # processing attributions for all channels
+            norm_attr = _normalize_image_attr(attr, sign, outlier_perc)
+        elif len(attr.shape) == 2:  # dealing with just one channel
+            # print('processing just one channel')
+            norm_attr = _normalize_channel_attr(attr, sign, outlier_perc)
         # print('type(norm_attr): {}'.format(type(norm_attr)))
         # print('norm_attr.shape: {}'.format(norm_attr.shape)) # just 1 channel
         if upscale:
@@ -272,15 +310,15 @@ def visualize_image_attr(
         else:
             raise AssertionError("Visualize Sign type is not valid.")
         cmap = cmap if cmap is not None else default_cmap
-
+        # print('using this color map: {}'.format(cmap))
         # Show appropriate image visualization.
         if ImageVisualizationMethod[method] == ImageVisualizationMethod.heat_map:
             heat_map = plt_axis.imshow(norm_attr, cmap=cmap, vmin=vmin, vmax=vmax)
         elif (
-            ImageVisualizationMethod[method]
-            == ImageVisualizationMethod.blended_heat_map
+                ImageVisualizationMethod[method]
+                == ImageVisualizationMethod.blended_heat_map
         ):
-            if original_image.shape[2] == 3 and (not gray_scale):
+            if original_image.shape[2] == 3:
                 # plt_fig.tight_layout(pad=0)
                 plt_axis.imshow(original_image)
                 heat_map = plt_axis.imshow(
@@ -337,14 +375,14 @@ def visualize_image_attr(
 
 
 def visualize_image_attr_multiple(
-    attr: ndarray,
-    original_image: Union[None, ndarray],
-    methods: List[str],
-    signs: List[str],
-    titles: Union[None, List[str]] = None,
-    fig_size: Tuple[int, int] = (8, 6),
-    use_pyplot: bool = True,
-    **kwargs: Any
+        attr: ndarray,
+        original_image: Union[None, ndarray],
+        methods: List[str],
+        signs: List[str],
+        titles: Union[None, List[str]] = None,
+        fig_size: Tuple[int, int] = (8, 6),
+        use_pyplot: bool = True,
+        **kwargs: Any
 ):
     r"""
         Visualizes attribution using multiple visualization methods displayed
@@ -460,15 +498,15 @@ class VisualizationDataRecord:
     ]
 
     def __init__(
-        self,
-        word_attributions,
-        pred_prob,
-        pred_class,
-        true_class,
-        attr_class,
-        attr_score,
-        raw_input,
-        convergence_score,
+            self,
+            word_attributions,
+            pred_prob,
+            pred_class,
+            true_class,
+            attr_class,
+            attr_score,
+            raw_input,
+            convergence_score,
     ):
         self.word_attributions = word_attributions
         self.pred_prob = pred_prob
@@ -531,7 +569,7 @@ def format_word_importances(words, importances):
 
 
 def visualize_text(
-    datarecords: Iterable[VisualizationDataRecord], legend: bool = True
+        datarecords: Iterable[VisualizationDataRecord], legend: bool = True
 ) -> None:
     assert HAS_IPYTHON, (
         "IPython must be available to visualize text. "

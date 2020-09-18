@@ -221,6 +221,7 @@ def calculate_iou(gt_boxes, pred_boxes):
     iou, gt_index = np.max(overlap, axis=0), np.argmax(overlap, axis=0)
     return iou, gt_index
 
+
 def scale_3d_array(orig_array, factor):
     '''
 
@@ -238,33 +239,45 @@ def scale_3d_array(orig_array, factor):
     new_array = np.dstack(new_layer_tuple)
     return new_array
 
+
 def main():
     '''
     important variables:
+        max_obj_cnt: The maximum number of objects in an image, right now set to 50
         batches_to_analyze: The number of batches for which explanations are generated
         method: Explanation method used.
+        attr_shown: What type of attributions are shown, can be 'absolute_value', 'positive', 'negative', or 'all'.
         high_rez: Whether to use higher resolution (in the case of CADC, this means 2000x2000 instead of 400x400)
         overlay_orig_bev: If True, overlay attributions onto the original point cloud BEV. If False, overlay
             attributions onto the 2D pseudoimage.
         mult_by_inputs: Whether to pointwise-multiply Integrated Gradients attributions with the input being explained
             (i.e., the 2D pseudoimage in the case of PointPillar).
-        gray_scale_overlay: Whether to convert the input image into gray scale. True if overlaying onto pseudoimage,
-            False if overlaying onto the original BEV.
+        channel_xai: Whether to generate channel-wise attribution heat map for the pseudoimage
+        gray_scale_overlay: Whether to convert the input image into gray scale.
         orig_bev_w: Width of the original BEV in # pixels. For CADC, width = height. Note that this HAS to be an
             integer multiple of pseudo_img_w.
         orig_bev_h: Height of the original BEV in # pixels. For CADC, width = height.
+        dpi_division_factor: Divide image dimension in pixels by this number to get dots per inch (dpi). Lower this
+            parameter to get higher dpi.
     :return:
     '''
     start_time = time.time()
-    batches_to_analyze = 10
+    max_obj_cnt = 50
+    batches_to_analyze = 4
     method = 'IG'
-    high_rez = True
+    attr_shown = 'positive'
+    high_rez = False
     overlay_orig_bev = True
-    mult_by_inputs = False
-    gray_scale_overlay = not overlay_orig_bev
+    mult_by_inputs = True
+    channel_xai = False
+    gray_scale_overlay = True
+    color_map = 'jet'
+    if gray_scale_overlay:
+        color_map = 'gray'
     scaling_factor = 5
     args, cfg, x_cfg = parse_config()
     dataset_name = cfg.DATA_CONFIG.DATASET
+    num_channels_viz = min(32, cfg.MODEL.MAP_TO_BEV.NUM_BEV_FEATURES)
     pseudo_img_w = 0
     pseudo_img_h = 0
     if dataset_name == 'CadcDataset':
@@ -275,6 +288,7 @@ def main():
         pseudo_img_h = 496
     orig_bev_w = pseudo_img_w * 5
     orig_bev_h = pseudo_img_h * 5
+    dpi_division_factor = 20.0
     use_anchor_idx = x_cfg.MODEL.POST_PROCESSING.OUTPUT_ANCHOR_BOXES
     if args.launcher == 'none':
         dist_test = False
@@ -343,9 +357,10 @@ def main():
     # else:
     #     print('\n has VFE')
     # # ********** debug message **************
-    cadc_bev = CADC_BEV(dataset=test_set, scale_to_pseudoimg=(not high_rez), background='black', width_pix=orig_bev_w)
+    cadc_bev = CADC_BEV(dataset=test_set, scale_to_pseudoimg=(not high_rez), background='black',
+                        width_pix=orig_bev_w, cmap=color_map, dpi_factor=dpi_division_factor)
     kitti_bev = KITTI_BEV(dataset=test_set, scale_to_pseudoimg=(not high_rez), background='black',
-                          width_pix=orig_bev_w, height_pix=orig_bev_h)
+                          width_pix=orig_bev_w, height_pix=orig_bev_h, cmap=color_map, dpi_factor=dpi_division_factor)
     print('\n \n building the 2d network')
     model2D = build_network(model_cfg=x_cfg.MODEL, num_class=len(x_cfg.CLASS_NAMES), dataset=test_set)
     print('\n \n building the full network')
@@ -392,23 +407,38 @@ def main():
     dt_string = now.strftime("%b_%d_%Y_%H_%M_%S")
     # get current working directory
     cwd = os.getcwd()
-    rez_string = 'SameResolutionAsPseudoimage'
+    rez_string = 'LowResolution'
     if high_rez:
-        rez_string = 'SameResolutionAsOriginalBEV'
+        rez_string = 'HighResolution'
     # create directory to store results just for this run, include the method in folder name
-    XAI_result_path = os.path.join(cwd, 'XAI_results/{}_{}_{}_{}'.format(dt_string, method, rez_string, dataset_name))
-    if method == "IG":
-        if mult_by_inputs:
-            XAI_result_path = os.path.join(cwd, 'XAI_results/{}_{}_{}_{}steps_{}_{}'.format(
-                dt_string, method, 'multiply_by_inputs', steps, rez_string, dataset_name))
-        else:
-            XAI_result_path = os.path.join(cwd, 'XAI_results/{}_{}_{}_{}steps_{}_{}'.format(
-                dt_string, method, 'no_multiply_by_inputs', steps, rez_string, dataset_name))
+    XAI_result_path = os.path.join(cwd, 'XAI_results/{}_{}_{}_{}batches'.format(
+        dt_string, method, dataset_name, batches_to_analyze))
+    # if method == "IG":
+    #     if mult_by_inputs:
+    #         XAI_result_path = os.path.join(cwd, 'XAI_results/{}_{}_{}_{}steps_{}_{}'.format(
+    #             dt_string, method, 'multiply_by_inputs', steps, rez_string, dataset_name))
+    #     else:
+    #         XAI_result_path = os.path.join(cwd, 'XAI_results/{}_{}_{}_{}steps_{}_{}'.format(
+    #             dt_string, method, 'no_multiply_by_inputs', steps, rez_string, dataset_name))
     print('\nXAI_result_path: {}'.format(XAI_result_path))
     XAI_res_path_str = str(XAI_result_path)
     os.mkdir(XAI_result_path)
     os.chmod(XAI_res_path_str, 0o777)
-
+    info_file = XAI_res_path_str + "/XAI_information.txt"
+    f = open(info_file, "w")
+    f.write('High Resolution: {}\n'.format(high_rez))
+    f.write('DPI Division Factor: {}\n'.format(dpi_division_factor))
+    f.write('Attributions Visualized: {}\n'.format(attr_shown))
+    if overlay_orig_bev:
+        f.write('Background Image: BEV of the original point cloud\n')
+    else:
+        f.write('Background Image: BEV of the PointPillar Pseudoimage\n')
+    if method == "IG":
+        f.write("IG # of Steps: {}\n".format(steps))
+        f.write("Multiply by Input: {}\n".format(mult_by_inputs))
+    f.write('Channel-wise Explanation: {}\n'.format(channel_xai))
+    f.close()
+    os.chmod(info_file, 0o777)
     for batch_num, batch_dict in enumerate(test_loader):
         XAI_batch_path_str = XAI_res_path_str + '/batch_{}'.format(batch_num)
         os.mkdir(XAI_batch_path_str)
@@ -454,7 +484,7 @@ def main():
         # target = torch.ones(4,50) # in config file, the max num of boxes is 500, I chose 50 instead
 
         # Separate TP and FP
-        score_thres, iou_thres = 0.5, 0.7
+        score_thres, iou_thres = 0.4, 0.5
         gt_infos = get_gt_infos(cfg, test_set)
         gt_dict = gt_infos[batch_num * args.batch_size:(batch_num + 1) * args.batch_size]
         conf_mat = []
@@ -480,6 +510,15 @@ def main():
             # print("len(conf_mat_frame): {}".format(len(conf_mat_frame)))
             # print('\n')
             # break
+        attributions = []  # a 2D dictionary that stores the gradients in this batch
+        # initialize attributions
+        for j in range(max_obj_cnt):  # the maximum number of objects in one image
+            new_list = []
+            for k in range(len(class_name_dict)):
+                new_list.append(torch.zeros(1))
+                # for i in range(batch_dict['batch_size']):
+                #     attributions[(j, k)][i] = None\
+            attributions.append(new_list)
 
         for i in range(batch_dict['batch_size']):  # iterate through each sample in the batch
             img_idx = batch_num * args.batch_size + i
@@ -502,18 +541,20 @@ def main():
                         if use_anchor_idx:
                             # if we are using anchor box outputs, need to use the indices in for anchor boxes
                             target = (batch_dict['anchor_selections'][i][j], k)
-                        grads = None
-                        sign = "absolute_value"
+                        sign = attr_shown
                         if method == 'Saliency':
-                            grads = copy.deepcopy(
-                                saliency2D.attribute(PseudoImage2D, target=target, additional_forward_args=batch_dict))
+                            if len(attributions[j][k].shape) == 1:  # compute attributions only when necessary
+                                attributions[j][k] = saliency2D.attribute(
+                                    PseudoImage2D, target=target, additional_forward_args=batch_dict)
                         if method == 'IG':
-                            grads = copy.deepcopy(ig2D.attribute(PseudoImage2D, baselines=PseudoImage2D * 0,
-                                                                 target=target, additional_forward_args=batch_dict,
-                                                                 n_steps=steps,
-                                                                 internal_batch_size=batch_dict['batch_size']))
-                            sign = "all"
-                        grad = np.transpose(grads[i].squeeze().cpu().detach().numpy(), (1, 2, 0))
+                            if len(attributions[j][k].shape) == 1:  # compute attributions only when necessary
+                                attributions[j][k] = ig2D.attribute(
+                                    PseudoImage2D, baselines=PseudoImage2D * 0, target=target,
+                                    additional_forward_args=batch_dict, n_steps=steps,
+                                    internal_batch_size=batch_dict['batch_size'])
+                            # sign = "all"
+                            # sign = "positive"
+                        grad = np.transpose(attributions[j][k][i].squeeze().cpu().detach().numpy(), (1, 2, 0))
                         # print('grad.shape: {}'.format(grad.shape))
                         # print('type(grad): {}'.format(type(grad)))
                         figure_size = (8, 6)
@@ -537,37 +578,54 @@ def main():
                             # need to horizontally flip the original bev image and rotate 90 degrees ccw to match location
                             # of explanations
                             bev_image_raw = np.flip(bev_fig_data, 0)
-                            bev_image = np.rot90(bev_image_raw, k=1, axes=(0,1))
-                            overlay = 0.1
+                            bev_image = np.rot90(bev_image_raw, k=1, axes=(0, 1))
+                            if not gray_scale_overlay:
+                                overlay = 0.2
                         # print('bev_image.shape after: {}'.format(bev_image.shape))
-
-                        grad_viz = viz.visualize_image_attr(grad, bev_image, method="blended_heat_map", sign=sign,
-                                                            show_colorbar=True, title="Overlaid {}".format(method),
-                                                            gray_scale=gray_scale_overlay, alpha_overlay=overlay,
-                                                            fig_size=figure_size, upscale=high_rez)
-
                         XAI_cls_path_str = XAI_batch_path_str + '/explanation_for_{}'.format(
                             class_name_dict[k])
                         if not os.path.exists(XAI_cls_path_str):
                             os.makedirs(XAI_cls_path_str)
                         os.chmod(XAI_cls_path_str, 0o777)
 
-                        XAI_sample_path_str = XAI_cls_path_str + '/sample_{}'.format(i)
-                        if not os.path.exists(XAI_sample_path_str):
-                            os.makedirs(XAI_sample_path_str)
-                        os.chmod(XAI_sample_path_str, 0o777)
+                        if channel_xai:  # generates channel-wise explanation
+                            for c in range(num_channels_viz):
+                                grad_viz = viz.visualize_image_attr(
+                                    grad[:, :, c], bev_image, method="blended_heat_map", sign=sign, show_colorbar=True,
+                                    title="Overlaid {}".format(method),
+                                    alpha_overlay=overlay, fig_size=figure_size, upscale=high_rez)
+                                XAI_sample_path_str = XAI_cls_path_str + '/sample_{}'.format(i)
+                                if not os.path.exists(XAI_sample_path_str):
+                                    os.makedirs(XAI_sample_path_str)
+                                os.chmod(XAI_sample_path_str, 0o777)
 
-                        XAI_box_relative_path_str = XAI_sample_path_str.split("tools/", 1)[1] +\
-                                                    '/box_{}_{}.png'.format(j, conf_mat[i][j])
-                        # print('XAI_box_path_str: {}'.format(XAI_box_path_str))
-                        grad_viz[0].savefig(XAI_box_relative_path_str, bbox_inches='tight', pad_inches=0.0)
-                        os.chmod(XAI_box_relative_path_str, 0o777)
-                        # print('box_{}_{}.png is saved in {}'.format(j,conf_mat[i][j],XAI_cls_path_str))
+                                XAI_box_relative_path_str = XAI_sample_path_str.split("tools/", 1)[1] + \
+                                                            '/box_{}_{}_channel_{}.png'.format(j, conf_mat[i][j], c)
+                                # print('XAI_box_path_str: {}'.format(XAI_box_path_str))
+                                grad_viz[0].savefig(XAI_box_relative_path_str, bbox_inches='tight', pad_inches=0.0)
+                                os.chmod(XAI_box_relative_path_str, 0o777)
+                        else:
+                            grad_viz = viz.visualize_image_attr(grad, bev_image, method="blended_heat_map", sign=sign,
+                                                                show_colorbar=True, title="Overlaid {}".format(method),
+                                                                alpha_overlay=overlay,
+                                                                fig_size=figure_size, upscale=high_rez)
+
+                            XAI_sample_path_str = XAI_cls_path_str + '/sample_{}'.format(i)
+                            if not os.path.exists(XAI_sample_path_str):
+                                os.makedirs(XAI_sample_path_str)
+                            os.chmod(XAI_sample_path_str, 0o777)
+
+                            XAI_box_relative_path_str = XAI_sample_path_str.split("tools/", 1)[1] + \
+                                                        '/box_{}_{}.png'.format(j, conf_mat[i][j])
+                            # print('XAI_box_path_str: {}'.format(XAI_box_path_str))
+                            grad_viz[0].savefig(XAI_box_relative_path_str, bbox_inches='tight', pad_inches=0.0)
+                            os.chmod(XAI_box_relative_path_str, 0o777)
+                            # print('box_{}_{}.png is saved in {}'.format(j,conf_mat[i][j],XAI_cls_path_str))
             # break # only processing one sample to save time
 
-        # if batch_num == batches_to_analyze:
-        #     break  # just process a limited number of batches
-        break
+        if batch_num == batches_to_analyze - 1:
+            break  # just process a limited number of batches
+        # break
         # just need one explanation for example
     print("--- {} seconds ---".format(time.time() - start_time))
 
