@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 from .vfe_template import VFETemplate
 
 
@@ -23,10 +24,20 @@ class PFNLayer(nn.Module):
         else:
             self.linear = nn.Linear(in_channels, out_channels, bias=True)
 
+        self.part = 50000
+
     def forward(self, inputs):
-        x = self.linear(inputs)
-        total_points, voxel_points, channels = x.shape
-        x = self.norm(x.view(-1, channels)).view(total_points, voxel_points, channels) if self.use_norm else x
+        if inputs.shape[0] > self.part:
+            # nn.Linear performs randomly when batch size is too large
+            num_parts = inputs.shape[0] // self.part
+            part_linear_out = [self.linear(inputs[num_part*self.part:(num_part+1)*self.part])
+                               for num_part in range(num_parts+1)]
+            x = torch.cat(part_linear_out, dim=0)
+        else:
+            x = self.linear(inputs)
+        torch.backends.cudnn.enabled = False
+        x = self.norm(x.permute(0, 2, 1)).permute(0, 2, 1) if self.use_norm else x
+        torch.backends.cudnn.enabled = True
         x = F.relu(x)
         x_max = torch.max(x, dim=1, keepdim=True)[0]
 

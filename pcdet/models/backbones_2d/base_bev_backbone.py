@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import torch.nn as nn
 
@@ -7,13 +8,20 @@ class BaseBEVBackbone(nn.Module):
         super().__init__()
         self.model_cfg = model_cfg
 
-        assert len(self.model_cfg.LAYER_NUMS) == len(self.model_cfg.LAYER_STRIDES) == \
-               len(self.model_cfg.NUM_FILTERS) == len(self.model_cfg.NUM_UPSAMPLE_FILTERS)
-        layer_nums = self.model_cfg.LAYER_NUMS
-        layer_strides = self.model_cfg.LAYER_STRIDES
-        num_filters = self.model_cfg.NUM_FILTERS
-        num_upsample_filters = self.model_cfg.NUM_UPSAMPLE_FILTERS
-        upsample_strides = self.model_cfg.UPSAMPLE_STRIDES
+        if self.model_cfg.get('LAYER_NUMS', None) is not None:
+            assert len(self.model_cfg.LAYER_NUMS) == len(self.model_cfg.LAYER_STRIDES) == len(self.model_cfg.NUM_FILTERS)
+            layer_nums = self.model_cfg.LAYER_NUMS
+            layer_strides = self.model_cfg.LAYER_STRIDES
+            num_filters = self.model_cfg.NUM_FILTERS
+        else:
+            layer_nums = layer_strides = num_filters = []
+
+        if self.model_cfg.get('UPSAMPLE_STRIDES', None) is not None:
+            assert len(self.model_cfg.UPSAMPLE_STRIDES) == len(self.model_cfg.NUM_UPSAMPLE_FILTERS)
+            num_upsample_filters = self.model_cfg.NUM_UPSAMPLE_FILTERS
+            upsample_strides = self.model_cfg.UPSAMPLE_STRIDES
+        else:
+            upsample_strides = num_upsample_filters = []
 
         num_levels = len(layer_nums)
         c_in_list = [input_channels, *num_filters[:-1]]
@@ -36,16 +44,29 @@ class BaseBEVBackbone(nn.Module):
                     nn.ReLU()
                 ])
             self.blocks.append(nn.Sequential(*cur_layers))
-
-            self.deblocks.append(nn.Sequential(
-                nn.ConvTranspose2d(
-                    num_filters[idx], num_upsample_filters[idx],
-                    upsample_strides[idx],
-                    stride=upsample_strides[idx], bias=False
-                ),
-                nn.BatchNorm2d(num_upsample_filters[idx], eps=1e-3, momentum=0.01),
-                nn.ReLU()
-            ))
+            if len(upsample_strides) > 0:
+                stride = upsample_strides[idx]
+                if stride >= 1:
+                    self.deblocks.append(nn.Sequential(
+                        nn.ConvTranspose2d(
+                            num_filters[idx], num_upsample_filters[idx],
+                            upsample_strides[idx],
+                            stride=upsample_strides[idx], bias=False
+                        ),
+                        nn.BatchNorm2d(num_upsample_filters[idx], eps=1e-3, momentum=0.01),
+                        nn.ReLU()
+                    ))
+                else:
+                    stride = np.round(1 / stride).astype(np.int)
+                    self.deblocks.append(nn.Sequential(
+                        nn.Conv2d(
+                            num_filters[idx], num_upsample_filters[idx],
+                            stride,
+                            stride=stride, bias=False
+                        ),
+                        nn.BatchNorm2d(num_upsample_filters[idx], eps=1e-3, momentum=0.01),
+                        nn.ReLU()
+                    ))
 
         c_in = sum(num_upsample_filters)
         if len(upsample_strides) > num_levels:
@@ -73,12 +94,16 @@ class BaseBEVBackbone(nn.Module):
 
             stride = int(spatial_features.shape[2] / x.shape[2])
             ret_dict['spatial_features_%dx' % stride] = x
-            ups.append(self.deblocks[i](x))
+            if len(self.deblocks) > 0:
+                ups.append(self.deblocks[i](x))
+            else:
+                ups.append(x)
 
         if len(ups) > 1:
             x = torch.cat(ups, dim=1)
-        else:
+        elif len(ups) == 1:
             x = ups[0]
+
         if len(self.deblocks) > len(self.blocks):
             x = self.deblocks[-1](x)
 

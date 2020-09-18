@@ -1,5 +1,6 @@
 import numpy as np
 import torch.nn as nn
+
 from .anchor_head_template import AnchorHeadTemplate
 
 
@@ -73,4 +74,3 @@ class AnchorHeadSingle(AnchorHeadTemplate):
             data_dict['cls_preds_normalized'] = False
 
         return data_dict
-
