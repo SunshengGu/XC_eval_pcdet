@@ -32,6 +32,7 @@ class CADC_BEV:
         dt_string = now.strftime("%b_%d_%Y_%H_%M_%S")
         output_path = output_path + '{}_bev_pred'.format(dt_string)
         self.output_path = os.path.join(repo_dir, output_path)
+        self.pred_poly = [] # store the predicted polygons
         if not os.path.exists(self.output_path):
             os.makedirs(self.output_path)
 
@@ -145,16 +146,16 @@ class CADC_BEV:
             h = cuboid['dimensions']['z']
             yaw = cuboid['yaw']
 
-            if (x < fwd_range[0] or x > fwd_range[1] or y < side_range[0] or y > side_range[1]):
-                continue  # out of bounds
+            # if (x < fwd_range[0] or x > fwd_range[1] or y < side_range[0] or y > side_range[1]):
+            #     continue  # out of bounds
 
             gt_poly.append(self.cuboid_to_bev(x, y, z, w, l, h, yaw))
-
+        # print('in visualization script: len(predictions): {}'.format(len(predictions)))
         for cuboid in predictions:
             x, y, z, w, l, h, yaw = cuboid
 
-            if (x < fwd_range[0] or x > fwd_range[1] or y < side_range[0] or y > side_range[1]):
-                continue  # out of bounds
+            # if (x < fwd_range[0] or x > fwd_range[1] or y < side_range[0] or y > side_range[1]):
+            #     continue  # out of bounds
 
             pred_poly.append(self.cuboid_to_bev(x, y, z, w, l, h, yaw))
 
@@ -163,7 +164,8 @@ class CADC_BEV:
 
         gt_poly = [poly + offset for poly in gt_poly]
         pred_poly = [poly + offset for poly in pred_poly]
-
+        self.pred_poly = pred_poly
+        # print('in visualization script: len(self.pred_poly): {}'.format(len(self.pred_poly)))
         # PLOT THE IMAGE
         cmap = self.cmap  # Color map to use
         x_max = side_range[1] - side_range[0]
@@ -199,12 +201,12 @@ class CADC_BEV:
         return fig
 
     def get_bev_image(self, frame_idx):
-        '''
+        """
 
         :param frame_idx:
         :return: bev_fig--Matplotlib.figure.Figure object
                  bev_fig_array--np.array containing data for this figure
-        '''
+        """
         result_frame = self.results[frame_idx]
 
         # TODO double check, this is either sample_idx or frame_id depending on
@@ -226,6 +228,9 @@ class CADC_BEV:
         annotations = self.dataset.get_label([date, run, frame])[int(frame)]
 
         point_count_threshold, distance_threshold, score_threshold = self.dataset.get_threshold()
+        # print('point_count_threshold: {}'.format(point_count_threshold))
+        # print('distance_threshold: {}'.format(distance_threshold))
+        # print('score_threshold: {}'.format(score_threshold))
         # filter gt
         gt = []
         for cuboid in annotations['cuboids']:
@@ -239,14 +244,15 @@ class CADC_BEV:
         annotations['cuboids'] = gt
 
         # filter prediction
-        predictions = []
-        for i in range(len(result_frame['boxes_lidar'])):
-            x, y, z = result_frame['location'][i][0], result_frame['location'][i][1], result_frame['location'][i][2]
-            distance = np.sqrt(np.square(x) + np.square(y) + np.square(z))
-            if result_frame['score'][i] >= score_threshold and distance < distance_threshold:
-                predictions.append(result_frame['boxes_lidar'][i])
+        predictions = result_frame['boxes_lidar']
+        # print("\nlen(result_frame['boxes_lidar']) in visualization script: {}".format(len(result_frame['boxes_lidar'])))
+        # for i in range(len(result_frame['boxes_lidar'])):
+        #     x, y, z = result_frame['location'][i][0], result_frame['location'][i][1], result_frame['location'][i][2]
+        #     distance = np.sqrt(np.square(x) + np.square(y) + np.square(z))
+        #     if result_frame['score'][i] >= score_threshold and distance < distance_threshold:
+        #         predictions.append(result_frame['boxes_lidar'][i])
 
-        print("Processing Sample: %s_%s_%s" % (date, run, frame))
+        print("\nProcessing Sample: %s_%s_%s" % (date, run, frame))
 
         bev_fig = self.draw_bev(lidar_data, annotations, predictions,
                              os.path.join(self.output_path, "%s_%s_%s.png" % (date, run, frame)))

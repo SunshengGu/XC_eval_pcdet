@@ -14,11 +14,13 @@ from easydict import EasyDict
 import time
 import datetime
 
+
 class KITTI_BEV:
-    def __init__(self, dataset, repo_dir='/root/pcdet', scale_to_pseudoimg=False, class_name=['Car', 'Pedestrian', 'Cyclist'],
-                result_path='output/kitti_models/pointpillar/default/eval/epoch_2/val/default/result.pkl',
-                output_path = 'data/kitti/', background='black', width_pix=432*5, height_pix=496*5, cmap='jet',
-                dpi_factor=20.0):
+    def __init__(self, dataset, repo_dir='/root/pcdet', scale_to_pseudoimg=False,
+                 class_name=['Car', 'Pedestrian', 'Cyclist'],
+                 result_path='output/kitti_models/pointpillar/default/eval/epoch_2/val/default/result.pkl',
+                 output_path='data/kitti/', background='black', width_pix=432 * 5, height_pix=496 * 5, cmap='jet',
+                 dpi_factor=20.0):
         self.repo_dir = repo_dir
         self.scale_to_pseudoimg = scale_to_pseudoimg
         self.class_name = class_name
@@ -30,6 +32,7 @@ class KITTI_BEV:
         self.height_pix = height_pix
         self.cmap = cmap
         self.dpi_factor = dpi_factor
+        self.pred_poly = []  # store the predicted polygons
         now = datetime.datetime.now()
         dt_string = now.strftime("%b_%d_%Y_%H_%M_%S")
         output_path = output_path + '{}_bev_pred'.format(dt_string)
@@ -76,6 +79,7 @@ class KITTI_BEV:
         # filter predictions
         box_preds = []
         # box_var_preds = []
+        print("len(result_frame['boxes_lidar']): {}".format(len(result_frame['boxes_lidar'])))
         for i in range(len(result_frame['boxes_lidar'])):
             # Rotate prediction
             result_frame['boxes_lidar'][i][6] += np.pi / 2
@@ -212,7 +216,8 @@ class KITTI_BEV:
 
         gt_poly = [poly + offset for poly in gt_poly]
         pred_poly = [poly + offset for poly in pred_poly]
-
+        self.pred_poly = pred_poly
+        # print('self.pred_poly: {}'.format(self.pred_poly))
         # PLOT THE IMAGE
         cmap = self.cmap  # Color map to use # 'jet' originally
         x_max = side_range[1] - side_range[0]
@@ -242,7 +247,7 @@ class KITTI_BEV:
         plt.ylim([0, y_max])
         size = fig.get_size_inches() * fig.dpi
         # print('bev image size: {}'.format(size))
-        plt.tight_layout(pad=0) # must have this line to ensure that image margin is zero
+        plt.tight_layout(pad=0)  # must have this line to ensure that image margin is zero
         fig.savefig(output_path, dpi=dpi, bbox_inches='tight', pad_inches=0.0)
         plt.close('all')
         return fig
@@ -271,7 +276,7 @@ class KITTI_BEV:
         print("Processing Sample: %s" % result_frame[unique_id])
 
         bev_fig = self.draw_bev(lidar_data, annotations, box_preds,
-                             os.path.join(self.output_path, "%s.png" % result_frame[unique_id]))
+                                os.path.join(self.output_path, "%s.png" % result_frame[unique_id]))
 
         bev_fig.canvas.draw()
         bev_fig_data = np.fromstring(bev_fig.canvas.tostring_rgb(), dtype=np.uint8, sep='')

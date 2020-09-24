@@ -338,12 +338,13 @@ class CadcDataset(DatasetTemplate):
             image_shape = batch_dict['image_shape'][batch_index]
             pred_boxes_camera = box_utils.boxes3d_lidar_to_kitti_camera(pred_boxes, calib)
 
-            # filter by score and distance
-            _, distance_threshold, score_threshold = filter_thresholds
-            index = filter_criteria(pred_scores, pred_boxes_camera[:,0:3], score_threshold, distance_threshold)
-            pred_scores, pred_boxes, pred_labels, pred_boxes_camera = \
-            pred_scores[index], pred_boxes[index], pred_labels[index], pred_boxes_camera[index]
-
+            # print('In cadc_dataset.py, before filtering, pred_boxes.shape[0]: {}'.format(pred_boxes.shape[0]))
+            # # filter by score and distance
+            # _, distance_threshold, score_threshold = filter_thresholds
+            # index = filter_criteria(pred_scores, pred_boxes_camera[:,0:3], score_threshold, distance_threshold)
+            # pred_scores, pred_boxes, pred_labels, pred_boxes_camera = \
+            # pred_scores[index], pred_boxes[index], pred_labels[index], pred_boxes_camera[index]
+            # print('In cadc_dataset.py, after filtering, pred_boxes.shape[0]: {}'.format(pred_boxes.shape[0]))
             pred_dict = get_template_prediction(pred_scores.shape[0])
             if pred_scores.shape[0] == 0:
                 return pred_dict

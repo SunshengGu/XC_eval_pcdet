@@ -7,6 +7,7 @@ import glob
 import re
 import datetime
 import argparse
+import math
 from pathlib import Path
 import torch.distributed as dist
 from pcdet.datasets import build_dataloader
@@ -23,6 +24,7 @@ from pcdet.datasets.kitti.kitti_object_eval_python.eval import d3_box_overlap
 
 # XAI related imports
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 import numpy as np
 
 import torch
@@ -240,8 +242,228 @@ def scale_3d_array(orig_array, factor):
     return new_array
 
 
+def get_dist(p1, p2):
+    """
+    :param p1: point 1 in xy plane
+    :param p2: point 2 in xy plane
+    :return: the distance between the points
+    """
+    dx = p2[0] - p1[0]
+    dy = p2[1] - p1[1]
+    return np.sqrt(dx * dx + dy * dy)
+
+
+def box_validation(box, box_vertices):
+    """
+    :param box: a bounding box of the form (x,y,z,l,w,h,theta)
+    :param box_vertices: vertices of the 2d box ((x1,y1), (x2,y1), (x2,y2) ,(x1,y2))
+    :return: boolean indicating if the box matches the vertices (to be implemented)
+    """
+    # print('edge lengths according to box: l: {} w: {}'.format(box[3], box[4]))
+    # print('type(box_vertices): {}'.format(type(box_vertices)))  # numpy array
+    # print('box_vertices: {}'.format(box_vertices))
+    # print('type(box): {}'.format(type(box)))  # numpy array
+    # print('box: {}'.format(box))
+    l1 = get_dist(box_vertices[0], box_vertices[1])
+    l2 = get_dist(box_vertices[1], box_vertices[2])
+    # l3 = get_dist(box_vertices[2], box_vertices[3])
+    # l4 = get_dist(box_vertices[3], box_vertices[0])
+    # print('edge lengths according to box_vertices: {}, {}, {}, {}'.format(l1, l2, l3, l4))
+    if (abs(box[3] - l1) < 0.00001 or abs(box[3] - l2) < 0.00001) and \
+            (abs(box[4] - l1) < 0.00001 or abs(box[4] - l2) < 0.00001):
+        # print('Match!')
+        return True
+    else:
+        # print('Mismatch!')
+        return False
+
+
+def box_preprocess(box_vertices):
+    """
+    :param box_vertices:
+    :return:
+        AB: one edge of the box in vector form
+        AD: another edge of the box in vector form
+        AB_dot_AB: scalar, dot product
+        AD_dot_AD: scalar, dot product
+    """
+    A = box_vertices[0]
+    B = box_vertices[1]
+    D = box_vertices[3]
+    AB, AD = np.zeros(2), np.zeros(2)
+    AB[0] = B[0] - A[0]
+    AB[1] = B[0] - A[1]
+    AD[0] = D[0] - A[0]
+    AD[1] = D[0] - A[1]
+    AB_dot_AB = np.dot(AB, AB)
+    AD_dot_AD = np.dot(AD, AD)
+    return AB, AD, AB_dot_AB, AD_dot_AD
+
+
+def in_box(A, y, x, AB, AD, AB_dot_AB, AD_dot_AD, margin=0.2):
+    """
+    reference: https://math.stackexchange.com/questions/190111/how-to-check-if-a-point-is-inside-a-rectangle
+    :param A: first vertex of the box
+    :param y: y coordinate of M
+    :param x: x coordinate of M
+    :return: If point M(y,x) is in the box
+    """
+    AM = np.zeros(2)
+    AM[0] = y - A[0]
+    AM[1] = x - A[1]
+    AM_dot_AB = np.dot(AM, AB)
+    if AM_dot_AB < 0 - margin or AM_dot_AB > AB_dot_AB + margin:
+        return False
+    AM_dot_AD = np.dot(AM, AD)
+    if AM_dot_AD < 0 - margin or AM_dot_AD > AD_dot_AD + margin:
+        return False
+    return True
+
+
+def transform_box_coord(H, W, box_vertices, dataset_name, high_rez=False, scaling_factor=1):
+    """
+    :param H: Desired height of image
+    :param W: Desired width of image
+    :param box_vertices:
+    :param dataset_name:
+    :param high_rez:
+    :param scaling_factor:
+    :return: transformed box_vertices
+    """
+    if high_rez:
+        H = H * scaling_factor
+        # W = W * scaling_factor
+    x_range, y_range = None, None
+    if dataset_name == 'CadcDataset':
+        # x_range = 100.0
+        y_range = 100.0
+    elif dataset_name == 'KittiDataset':
+        '''Note: the range for Kitti is different now'''
+        # x_range = 70.4
+        y_range = 80.0
+    new_scale = H / y_range
+    # print('H: {}'.format(H))
+    for vertex in box_vertices:
+        vertex[0] = vertex[0] * new_scale
+        vertex[0] = H - vertex[0]
+        vertex[1] = vertex[1] * new_scale
+    return box_vertices
+
+
+def get_box_scale(dataset_name):
+    """
+    Give a dataset_name, compute the conversion factor from meters to pixels
+    Matching the pointpillar 2d pseudoimage
+    :param dataset_name:
+    :return:
+    """
+    if dataset_name == 'CadcDataset':
+        return 400 / 100
+    if dataset_name == 'KittiDataset':
+        # TODO: verify Kitti's explanation map dimension
+        return 496 / 80
+
+
+def get_XQ(grad, box_vertices, dataset_name, high_rez=False, scaling_factor=1):
+    """
+    :param high_rez: Whether to upscale the resolution or use pseudoimage resolution
+    :param scaling_factor:
+    :param dataset_name:
+    :param grad: The attributions generated from 2D pseudoimage
+    :param box_vertices: The vertices of the predicted box
+    :return: Explanation Quality (XQ)
+    """
+    # print('box_vertices before transformation: {}'.format(box_vertices))
+    '''1) transform the box coordinates to match with grad dimensions'''
+    H, W = grad.shape[0], grad.shape[1]  # image height and width
+    box_vertices = transform_box_coord(H, W, box_vertices, dataset_name, high_rez, scaling_factor)
+    # print('box_vertices after transformation: {}'.format(box_vertices))
+    print('\ngrad.shape: {}'.format(grad.shape))
+    '''2) preprocess the box to get important parameters'''
+    AB, AD, AB_dot_AB, AD_dot_AD = box_preprocess(box_vertices)
+    box_w = get_dist(box_vertices[0], box_vertices[1])
+    box_l = get_dist(box_vertices[0], box_vertices[3])
+    box_scale = get_box_scale(dataset_name)
+    box_w = box_w * box_scale
+    box_l = box_l * box_scale
+
+    '''3) compute XQ'''
+    ignore_thresh = 0.0
+    margin = 0.3  # margin for the box
+    attr_in_box = 0
+    total_attr = 0
+    for i in range(grad.shape[0]):
+        for j in range(grad.shape[1]):
+            curr_sum = np.sum(grad[i][j])  # sum up attributions in all channels at this location
+            if curr_sum > ignore_thresh:  # ignore small attributions
+                total_attr += curr_sum
+            y = i
+            x = j
+            if high_rez:
+                y = i * scaling_factor
+                x = j * scaling_factor
+            if in_box(box_vertices[0], y, x, AB, AD, AB_dot_AB, AD_dot_AD, margin=margin):
+                if curr_sum > ignore_thresh:
+                    attr_in_box += curr_sum
+    # box area matching pseudoimage dimensions (i.e. grad)
+    box_area = (box_w + 2 * margin) * (box_l + 2 * margin)
+    avg_in_box_attr = attr_in_box / box_area
+    avg_attr = total_attr / (grad.shape[0] * grad.shape[1])
+    print("avg_attr: {}".format(avg_attr))
+    print("avg_in_box_attr: {}".format(avg_in_box_attr))
+    if total_attr == 0:
+        print("No attributions present!")
+        return -1
+    XQ = attr_in_box / total_attr
+    print("XQ: {}".format(XQ))
+    return attr_in_box / total_attr
+
+
+def flip_xy(box_vertices):
+    box_vertices_copy = box_vertices
+    for vertex in box_vertices_copy:
+        temp = vertex[0]
+        vertex[0] = vertex[1]
+        vertex[1] = temp
+    return box_vertices_copy
+
+
+def rotate(ox, oy, point, angle):
+    """
+    Reference: https://stackoverflow.com/questions/34372480/rotate-point-about-another-point-in-degrees-python
+    Rotate a point counterclockwise by a given angle around a given origin.
+    The angle should be given in radians.
+    """
+    px, py = point[0], point[1]
+    qx = ox + math.cos(angle) * (px - ox) - math.sin(angle) * (py - oy)
+    qy = oy + math.sin(angle) * (px - ox) + math.cos(angle) * (py - oy)
+    point[0], point[1] = qx, qy
+
+
+def rotate_and_flip(box_vertices, dataset_name, angle):
+    angle = angle * np.pi / 180.0  # convert to radian
+    box_vertices_copy = copy.deepcopy(box_vertices)
+    x_max = 0.0
+    y_max = 0.0
+    if dataset_name == 'CadcDataset':
+        x_max = 400.0
+        y_max = 400.0
+    if dataset_name == 'KittiDataset':
+        x_max = 496.0
+        y_max = 432.0
+    vert_center = y_max/2.0
+    horiz_center = x_max/2.0
+    for vertex in box_vertices_copy:
+        # first, rotate ccw by a certain degrees
+        rotate(vert_center, horiz_center, vertex, angle)
+        # then, flip about the vertical axis
+        '''Note: x is the vertical direction'''
+        vert_dist = vertex[1] - vert_center
+        vertex[1] = vert_center - vert_dist
+    return box_vertices_copy
+
 def main():
-    '''
+    """
     important variables:
         max_obj_cnt: The maximum number of objects in an image, right now set to 50
         batches_to_analyze: The number of batches for which explanations are generated
@@ -260,10 +482,10 @@ def main():
         dpi_division_factor: Divide image dimension in pixels by this number to get dots per inch (dpi). Lower this
             parameter to get higher dpi.
     :return:
-    '''
+    """
     start_time = time.time()
     max_obj_cnt = 50
-    batches_to_analyze = 4
+    batches_to_analyze = 1
     method = 'IG'
     attr_shown = 'positive'
     high_rez = False
@@ -331,17 +553,6 @@ def main():
 
     ckpt_dir = args.ckpt_dir if args.ckpt_dir is not None else output_dir / 'ckpt'
 
-    # Create dummy `dataset` object to pass necessary information to `build_network`.
-    # test_set = EasyDict({
-    #     'class_names': cfg.CLASS_NAMES,
-    #     'grid_size': cfg.GRID_SIZE,
-    #     'voxel_size': cfg.VOXEL_SIZE,
-    #     'point_cloud_range': cfg.POINT_CLOUD_RANGE,
-    #     'point_feature_encoder': {
-    #         'num_point_features': cfg.NUM_POINT_FEATURES
-    #     }
-    # })
-
     test_set, test_loader, sampler = build_dataloader(
         dataset_cfg=cfg.DATA_CONFIG,
         class_names=cfg.CLASS_NAMES,
@@ -350,13 +561,6 @@ def main():
     )
     print("grid size for 2D pseudoimage: {}".format(test_set.grid_size))
 
-    # # ********** debug message **************
-    # print('\n Checking if the 2d network has VFE')
-    # if x_cfg.MODEL.get('VFE', None) is None:
-    #     print('\n no VFE')
-    # else:
-    #     print('\n has VFE')
-    # # ********** debug message **************
     cadc_bev = CADC_BEV(dataset=test_set, scale_to_pseudoimg=(not high_rez), background='black',
                         width_pix=orig_bev_w, cmap=color_map, dpi_factor=dpi_division_factor)
     kitti_bev = KITTI_BEV(dataset=test_set, scale_to_pseudoimg=(not high_rez), background='black',
@@ -366,22 +570,6 @@ def main():
     print('\n \n building the full network')
     model = build_network(model_cfg=cfg.MODEL, num_class=len(cfg.CLASS_NAMES), dataset=test_set)
 
-    # # Comment out to just run XAI stuff
-    # with torch.no_grad():
-    #     if args.eval_all:
-    #         repeat_eval_ckpt(model, test_loader, args, eval_output_dir, logger, ckpt_dir, dist_test=dist_test)
-    #     else:
-    #         eval_single_ckpt(model, test_loader, args, eval_output_dir, logger, epoch_id, dist_test=dist_test)
-
-    # *****************
-    # start experimenting with saliency map
-    '''
-    TODO:
-    what is the input?      A certain point cloud with a specific index
-    what is the target?     A certain label with a specific index
-    what does np.transpose do for grads?
-    need to understand viz.visualize_image_attr better/
-    '''
     saliency2D = Saliency(model2D)
     saliency = Saliency(model)
     ig2D = IntegratedGradients(model2D, multiply_by_inputs=mult_by_inputs)
@@ -413,13 +601,7 @@ def main():
     # create directory to store results just for this run, include the method in folder name
     XAI_result_path = os.path.join(cwd, 'XAI_results/{}_{}_{}_{}batches'.format(
         dt_string, method, dataset_name, batches_to_analyze))
-    # if method == "IG":
-    #     if mult_by_inputs:
-    #         XAI_result_path = os.path.join(cwd, 'XAI_results/{}_{}_{}_{}steps_{}_{}'.format(
-    #             dt_string, method, 'multiply_by_inputs', steps, rez_string, dataset_name))
-    #     else:
-    #         XAI_result_path = os.path.join(cwd, 'XAI_results/{}_{}_{}_{}steps_{}_{}'.format(
-    #             dt_string, method, 'no_multiply_by_inputs', steps, rez_string, dataset_name))
+
     print('\nXAI_result_path: {}'.format(XAI_result_path))
     XAI_res_path_str = str(XAI_result_path)
     os.mkdir(XAI_result_path)
@@ -459,29 +641,8 @@ def main():
         # note: boxes_with_cls_scores contains class scores for each box identified
         # this is the pseudo image used as input for the 2D backbone
         PseudoImage2D = batch_dict['spatial_features']
-        # now, need one prediction, which serves as the target
-        DetectionHead = model.module_list[
-            3]  # note, the index 3 is specifically for pointpillar, can be other number for other models
-        BoxPrediction = DetectionHead.forward_ret_dict['cls_preds']
-        BoxGroundTruth = batch_dict['gt_boxes']
-        # TODO: need to somehow zero out all other predictions and keep just one (idea: single activated neuron)
-        # # need to understand better what the target meant in the original Captum example
-        # generate explanation for a single 2D pseudoimage at a time
-        # `target = 1`: attempting to generate
-        SinglePseudoImage2D = PseudoImage2D[0].unsqueeze(0)
-        # print('SinglePseudoImage2D dimensions: ' + str(SinglePseudoImage2D.shape))
-        # transform the original image to have shape H x W x C, where C means channels
         original_image = np.transpose(PseudoImage2D[0].cpu().detach().numpy(), (1, 2, 0))
         print('orginal_image data type: {}'.format(type(original_image)))
-        # print('original_image dimensions: ' + str(original_image.shape))
-        # print('\n \n strutcture of the 2D network:')
-        # print(model2D)
-        # print('\n \n structure of the full network: ')
-        # print(model)
-
-        # target dimensions: batch_size and maximum number of boxes per image
-        # 1 should correspond to the pedestrain class
-        # target = torch.ones(4,50) # in config file, the max num of boxes is 500, I chose 50 instead
 
         # Separate TP and FP
         score_thres, iou_thres = 0.4, 0.5
@@ -503,13 +664,6 @@ def main():
                 else:
                     conf_mat_frame.append('ignore')  # these boxes do not meet score thresh, ignore for now
             conf_mat.append(conf_mat_frame)
-            # print("sample id: {}".format(i))
-            # print("len(pred_dicts[i]['pred_scores']): {}".format(len(pred_dicts[i]['pred_scores'])))
-            # print("len(pred_dicts[i]['pred_labels']): {}".format(len(pred_dicts[i]['pred_labels'])))
-            # print('batch_dict[\'box_count\'][i]: {}'.format(batch_dict['box_count'][i]))
-            # print("len(conf_mat_frame): {}".format(len(conf_mat_frame)))
-            # print('\n')
-            # break
         attributions = []  # a 2D dictionary that stores the gradients in this batch
         # initialize attributions
         for j in range(max_obj_cnt):  # the maximum number of objects in one image
@@ -523,11 +677,24 @@ def main():
         for i in range(batch_dict['batch_size']):  # iterate through each sample in the batch
             img_idx = batch_num * args.batch_size + i
             bev_fig, bev_fig_data = None, None
+            pred_boxes_vertices = None
             if dataset_name == 'CadcDataset':
                 bev_fig, bev_fig_data = cadc_bev.get_bev_image(img_idx)
+                pred_boxes_vertices = cadc_bev.pred_poly
             elif dataset_name == 'KittiDataset':
                 bev_fig, bev_fig_data = kitti_bev.get_bev_image(img_idx)
+                pred_boxes_vertices = kitti_bev.pred_poly
             bev_image = np.transpose(PseudoImage2D[i].cpu().detach().numpy(), (1, 2, 0))
+            pred_boxes = pred_dicts[i]['pred_boxes'].cpu().numpy()
+            '''
+            format for pred_boxes[box_index]: x,y,z,l,w,h,theta, for both CADC and KITTI
+            format for pred_boxes_vertices[box_index]: ((x1,y1), ... ,(x4,y4))
+            '''
+            # print("pred_boxes.shape[0]: {} \n"
+            #       "len(pred_boxes_vertices): {}".format(pred_boxes.shape[0], len(pred_boxes_vertices)))
+            # print("\nbatch_dict['box_count'][i]: {} \n len(conf_mat[i]): {} \n pred_boxes.shape[0]: {} \n"
+            #       "len(pred_boxes_vertices): {}".format(
+            #     batch_dict['box_count'][i], len(conf_mat[i]), pred_boxes.shape[0], len(pred_boxes_vertices)))
             for k in range(3):  # iterate through the 3 classes
                 num_boxes = min(batch_dict['box_count'][i], len(conf_mat[i]))
                 for j in range(num_boxes):  # iterate through each box in this sample
@@ -535,12 +702,20 @@ def main():
                     # print('j: {}'.format(j))
                     # print('num_boxes: {}'.format(num_boxes))
                     # print('len(conf_mat[i]): {}'.format(len(conf_mat[i])))
+                    # print('pred_boxes.shape[0]: {}'.format(pred_boxes.shape[0]))
+                    # print('len(pred_boxes_vertices): {}'.format(len(pred_boxes_vertices)))
+                    # print('the index j: {}'.format(j))
+                    if not box_validation(pred_boxes[j], pred_boxes_vertices[j]):
+                        continue  # can't compute XQ if the boxes don't match
+                    box_w = pred_boxes[j][3]
+                    box_l = pred_boxes[j][4]
                     if k + 1 == pred_dicts[i]['pred_labels'][j] and conf_mat[i][j] != 'ignore':
                         # compute contribution for the positive class only, k+1 because PCDet labels start at 1
                         target = (j, k)  # i.e., generate reason as to why the j-th box is classified as the k-th class
+                        anchor_id = batch_dict['anchor_selections'][i][j]
                         if use_anchor_idx:
                             # if we are using anchor box outputs, need to use the indices in for anchor boxes
-                            target = (batch_dict['anchor_selections'][i][j], k)
+                            target = (anchor_id, k)
                         sign = attr_shown
                         if method == 'Saliency':
                             if len(attributions[j][k].shape) == 1:  # compute attributions only when necessary
@@ -555,8 +730,13 @@ def main():
                             # sign = "all"
                             # sign = "positive"
                         grad = np.transpose(attributions[j][k][i].squeeze().cpu().detach().numpy(), (1, 2, 0))
-                        # print('grad.shape: {}'.format(grad.shape))
-                        # print('type(grad): {}'.format(type(grad)))
+                        XQ = get_XQ(grad, pred_boxes_vertices[j], dataset_name, high_rez=high_rez,
+                                    scaling_factor=scaling_factor)
+                        # print("box vertices after scaling and horizontal flip: {}".format(pred_boxes_vertices[j]))
+                        box_explained = rotate_and_flip(pred_boxes_vertices[j], dataset_name, angle=270)
+                        # print("box vertices after vertical flip and rotating 90 deg cw: {}"
+                        #       .format(box_explained))
+                        # box_explained = pred_boxes_vertices[j]
                         figure_size = (8, 6)
                         if high_rez:
                             # upscale the attributions if we are using high resolution input bev
@@ -570,7 +750,7 @@ def main():
                             '''
                             # TODO: implement for kitti as well
                         # print('grad.shape: {}'.format(grad.shape))
-                        # print('type(grad): {}'.format(type(grad)))
+                        # print('type(grad): {}'.format(type(grad))) # numpy array
                         # print('bev_fig_data.shape: {}'.format(bev_fig_data.shape))
                         # print('bev_image.shape before: {}'.format(bev_image.shape))
                         overlay = 0.4
@@ -600,7 +780,8 @@ def main():
                                 os.chmod(XAI_sample_path_str, 0o777)
 
                                 XAI_box_relative_path_str = XAI_sample_path_str.split("tools/", 1)[1] + \
-                                                            '/box_{}_{}_channel_{}.png'.format(j, conf_mat[i][j], c)
+                                                            '/box_{}_{}_channel_{}_XQ_{}.png'.format(
+                                                                j, conf_mat[i][j], c, XQ)
                                 # print('XAI_box_path_str: {}'.format(XAI_box_path_str))
                                 grad_viz[0].savefig(XAI_box_relative_path_str, bbox_inches='tight', pad_inches=0.0)
                                 os.chmod(XAI_box_relative_path_str, 0o777)
@@ -616,12 +797,15 @@ def main():
                             os.chmod(XAI_sample_path_str, 0o777)
 
                             XAI_box_relative_path_str = XAI_sample_path_str.split("tools/", 1)[1] + \
-                                                        '/box_{}_{}.png'.format(j, conf_mat[i][j])
+                                                        '/box_{}_{}_XQ_{}.png'.format(j, conf_mat[i][j], XQ)
                             # print('XAI_box_path_str: {}'.format(XAI_box_path_str))
+                            polys = patches.Polygon(box_explained,
+                                                    closed=True, fill=False, edgecolor='y', linewidth=1)
+                            grad_viz[1].add_patch(polys)
                             grad_viz[0].savefig(XAI_box_relative_path_str, bbox_inches='tight', pad_inches=0.0)
                             os.chmod(XAI_box_relative_path_str, 0o777)
                             # print('box_{}_{}.png is saved in {}'.format(j,conf_mat[i][j],XAI_cls_path_str))
-            # break # only processing one sample to save time
+            break  # only processing one sample to save time
 
         if batch_num == batches_to_analyze - 1:
             break  # just process a limited number of batches

@@ -5,12 +5,15 @@ from .pointpillar import PointPillar
 from .pv_rcnn import PVRCNN
 from .second_net import SECONDNet
 
+from .pointpillarxai import PointPillarXAI
+
 __all__ = {
     'Detector3DTemplate': Detector3DTemplate,
     'SECONDNet': SECONDNet,
     'PartA2Net': PartA2Net,
     'PVRCNN': PVRCNN,
     'PointPillar': PointPillar,
+    'PointPillarXAI': PointPillarXAI,
     'PointRCNN': PointRCNN
 }
 

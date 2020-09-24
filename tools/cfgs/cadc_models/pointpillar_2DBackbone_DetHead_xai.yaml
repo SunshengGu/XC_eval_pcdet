@@ -1,4 +1,4 @@
-CLASS_NAMES: ['Car', 'Pedestrian', 'Cyclist']
+CLASS_NAMES: ['Car', 'Pedestrian', 'Truck']
 
 DATA_CONFIG:
     _BASE_CONFIG_: cfgs/dataset_configs/cadc_dataset.yaml

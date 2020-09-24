@@ -22,7 +22,7 @@ class Detector3DTemplate(nn.Module):
 
         self.module_topology = [
             'vfe', 'backbone_3d', 'map_to_bev_module', 'pfe',
-            'backbone_2d', 'dense_head',  'point_head', 'roi_head'
+            'backbone_2d', 'dense_head', 'point_head', 'roi_head'
         ]
 
     @property
@@ -330,10 +330,11 @@ class Detector3DTemplate(nn.Module):
         recall_dict = {}
         pred_dicts = []
         boxes_with_cls_scores = []
+        # boxes_params = []
         anchor_selections = []
-        batch_dict['box_count'] = {} # store the number of boxes for each image in the sample
-        output_anchor = post_process_cfg.OUTPUT_ANCHOR_BOXES # indicates if we output anchor boxes
-        anchor_scores = [] # store class scores for individual anchor boxes
+        batch_dict['box_count'] = {}  # store the number of boxes for each image in the sample
+        output_anchor = post_process_cfg.OUTPUT_ANCHOR_BOXES  # indicates if we output anchor boxes
+        anchor_scores = []  # store class scores for individual anchor boxes
         # max_box_ind = 0 # index of the input in the batch with most number of boxes
         max_num_boxes = 50
         for index in range(batch_size):
@@ -380,19 +381,20 @@ class Detector3DTemplate(nn.Module):
                 # print('label_preds data type: ' + str(type(label_preds)))
                 # question: why add 1 to each element of label_preds?
                 # because class labels are 1,2,3 instead of 0,1,2?
-                label_preds = batch_dict['roi_labels'][index] if batch_dict.get('has_class_labels', False) else label_preds + 1
+                label_preds = batch_dict['roi_labels'][index] if batch_dict.get('has_class_labels',
+                                                                                False) else label_preds + 1
                 if batch_dict.get('has_class_labels', False):
                     print('\n no key named \'has_class_labels\' in batch_dict')
                 # print('\n shape of label_preds after: ' + str(label_preds.shape))
 
-                selected, selected_scores = class_agnostic_nms(
+                selected, selected_scores = model_nms_utils.class_agnostic_nms(
                     box_scores=cls_preds, box_preds=box_preds,
                     nms_config=post_process_cfg.NMS_CONFIG,
                     score_thresh=post_process_cfg.SCORE_THRESH
                 )
                 anchor_selections.append(selected)
 
-                if post_process_cfg.OUTPUT_RAW_SCORE: # no need to worry about this, false by default
+                if post_process_cfg.OUTPUT_RAW_SCORE:  # no need to worry about this, false by default
                     max_cls_preds, _ = torch.max(src_cls_preds, dim=-1)
                     selected_scores = max_cls_preds[selected]
 
@@ -424,6 +426,7 @@ class Detector3DTemplate(nn.Module):
             # print('src_cls_pred[selected] data type: ' + str(type(src_cls_preds[selected])))
             # print('src_cls_pred[selected] shape: ' + str(src_cls_preds[selected].shape))
             boxes_with_cls_scores.append(src_cls_preds[selected])
+            # boxes_params.append(src_box_preds[selected])
         batch_dict['pred_dicts'] = pred_dicts
         batch_dict['recall_dict'] = recall_dict
         batch_dict['anchor_selections'] = anchor_selections
@@ -443,13 +446,13 @@ class Detector3DTemplate(nn.Module):
             elif boxes_with_cls_scores[i].shape[0] < max_num_boxes:
                 # less than max_num_boxes boxes detected
                 padding_size = max_num_boxes - boxes_with_cls_scores[i].shape[0]
-                padding = torch.zeros(padding_size,3)
-                padding = padding.float().cuda() # load `padding` to GPU
-                new_output = torch.cat((boxes_with_cls_scores[i],padding), 0)
-                boxes_with_cls_scores[i] = new_output
+                padding = torch.zeros(padding_size, 3)
+                padding = padding.float().cuda()  # load `padding` to GPU
+                boxes_with_cls_scores[i] = torch.cat((boxes_with_cls_scores[i], padding), 0)
             else:
                 continue
         boxes_with_cls_scores = torch.stack(boxes_with_cls_scores)
+        # boxes_params = torch.stack(boxes_params)
         # print('\n finishing the post_processing() function')
         return boxes_with_cls_scores
 
