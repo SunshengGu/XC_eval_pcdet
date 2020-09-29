@@ -312,16 +312,19 @@ def in_box(A, y, x, AB, AD, AB_dot_AB, AD_dot_AD, margin=0.2):
     AM[0] = y - A[0]
     AM[1] = x - A[1]
     AM_dot_AB = np.dot(AM, AB)
-    if AM_dot_AB < 0 - margin or AM_dot_AB > AB_dot_AB + margin:
+    AB_len = math.sqrt(AB_dot_AB)
+    if AM_dot_AB < 0 - margin * AB_len or AM_dot_AB > AB_dot_AB + margin * AB_len:
         return False
     AM_dot_AD = np.dot(AM, AD)
-    if AM_dot_AD < 0 - margin or AM_dot_AD > AD_dot_AD + margin:
+    AD_len = math.sqrt(AD_dot_AD)
+    if AM_dot_AD < 0 - margin * AD_len or AM_dot_AD > AD_dot_AD + margin * AD_len:
         return False
     return True
 
 
 def transform_box_coord(H, W, box_vertices, dataset_name, high_rez=False, scaling_factor=1):
     """
+    Transform box_vertices to match the coordinate system of the attributions
     :param H: Desired height of image
     :param W: Desired width of image
     :param box_vertices:
@@ -364,8 +367,10 @@ def get_box_scale(dataset_name):
         return 496 / 80
 
 
-def get_XQ(grad, box_vertices, dataset_name, high_rez=False, scaling_factor=1):
+def get_XQ(grad, box_vertices, dataset_name, box_w, box_l, high_rez=False, scaling_factor=1, margin=1.0):
     """
+    :param margin: Margin for the bounding box. e.g., if margin = 1, then attributions within one pixel distance
+        to the box boundary are counted as in box.
     :param high_rez: Whether to upscale the resolution or use pseudoimage resolution
     :param scaling_factor:
     :param dataset_name:
@@ -381,15 +386,15 @@ def get_XQ(grad, box_vertices, dataset_name, high_rez=False, scaling_factor=1):
     print('\ngrad.shape: {}'.format(grad.shape))
     '''2) preprocess the box to get important parameters'''
     AB, AD, AB_dot_AB, AD_dot_AD = box_preprocess(box_vertices)
-    box_w = get_dist(box_vertices[0], box_vertices[1])
-    box_l = get_dist(box_vertices[0], box_vertices[3])
+    # box_w = get_dist(box_vertices[0], box_vertices[1])
+    # box_l = get_dist(box_vertices[0], box_vertices[3])
     box_scale = get_box_scale(dataset_name)
     box_w = box_w * box_scale
     box_l = box_l * box_scale
 
     '''3) compute XQ'''
     ignore_thresh = 0.0
-    margin = 0.3  # margin for the box
+    # margin = 2  # margin for the box
     attr_in_box = 0
     total_attr = 0
     for i in range(grad.shape[0]):
@@ -420,7 +425,7 @@ def get_XQ(grad, box_vertices, dataset_name, high_rez=False, scaling_factor=1):
 
 
 def flip_xy(box_vertices):
-    box_vertices_copy = box_vertices
+    box_vertices_copy = copy.deepcopy(box_vertices)
     for vertex in box_vertices_copy:
         temp = vertex[0]
         vertex[0] = vertex[1]
@@ -476,6 +481,7 @@ def main():
             (i.e., the 2D pseudoimage in the case of PointPillar).
         channel_xai: Whether to generate channel-wise attribution heat map for the pseudoimage
         gray_scale_overlay: Whether to convert the input image into gray scale.
+        box_margin: Margin for the bounding boxes in number of pixels
         orig_bev_w: Width of the original BEV in # pixels. For CADC, width = height. Note that this HAS to be an
             integer multiple of pseudo_img_w.
         orig_bev_h: Height of the original BEV in # pixels. For CADC, width = height.
@@ -484,7 +490,7 @@ def main():
     :return:
     """
     start_time = time.time()
-    max_obj_cnt = 50
+    max_obj_cnt = 30
     batches_to_analyze = 1
     method = 'IG'
     attr_shown = 'positive'
@@ -494,6 +500,7 @@ def main():
     channel_xai = False
     gray_scale_overlay = True
     color_map = 'jet'
+    box_margin = 5.0
     if gray_scale_overlay:
         color_map = 'gray'
     scaling_factor = 5
@@ -520,6 +527,8 @@ def main():
         )
         dist_test = True
 
+    cls_score_list = []
+    XQ_list = []
     output_dir = cfg.ROOT_DIR / 'output' / cfg.EXP_GROUP_PATH / cfg.TAG / args.extra_tag
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -584,11 +593,13 @@ def main():
     model.cuda()
     model.eval()
 
-    class_name_dict = {
-        0: 'car',
-        1: 'pedestrian',
-        2: 'cyclist'
-    }
+    # class_name_dict = {
+    #     0: 'car',
+    #     1: 'pedestrian',
+    #     2: 'cyclist'
+    # }
+    class_name_list = cfg.CLASS_NAMES
+
 
     # get the date and time to create a folder for the specific time when this script is run
     now = datetime.datetime.now()
@@ -611,6 +622,7 @@ def main():
     f.write('High Resolution: {}\n'.format(high_rez))
     f.write('DPI Division Factor: {}\n'.format(dpi_division_factor))
     f.write('Attributions Visualized: {}\n'.format(attr_shown))
+    f.write('Bounding box margin: {}\n'.format(box_margin))
     if overlay_orig_bev:
         f.write('Background Image: BEV of the original point cloud\n')
     else:
@@ -619,7 +631,7 @@ def main():
         f.write("IG # of Steps: {}\n".format(steps))
         f.write("Multiply by Input: {}\n".format(mult_by_inputs))
     f.write('Channel-wise Explanation: {}\n'.format(channel_xai))
-    f.close()
+    f.write('Recording XQ values: \n')
     os.chmod(info_file, 0o777)
     for batch_num, batch_dict in enumerate(test_loader):
         XAI_batch_path_str = XAI_res_path_str + '/batch_{}'.format(batch_num)
@@ -645,7 +657,8 @@ def main():
         print('orginal_image data type: {}'.format(type(original_image)))
 
         # Separate TP and FP
-        score_thres, iou_thres = 0.4, 0.5
+        # TODO: get thresh from config file
+        score_thres, iou_thres = 0.1, 0.5
         gt_infos = get_gt_infos(cfg, test_set)
         gt_dict = gt_infos[batch_num * args.batch_size:(batch_num + 1) * args.batch_size]
         conf_mat = []
@@ -654,11 +667,18 @@ def main():
             pred_boxes = pred_dicts[i]['pred_boxes'].cpu().numpy()
             iou, gt_index = calculate_iou(gt_dict[i]['boxes'], pred_boxes)
             for j in range(len(pred_dicts[i]['pred_scores'])):  # j is prediction box id in the i-th image
-                if pred_dicts[i]['pred_scores'][j].cpu().numpy() >= score_thres:
-                    adjusted_pred_boxes_labels = pred_dicts[i]['pred_labels'][j].cpu().numpy() - 1
-                    if iou[j] >= iou_thres and gt_dict[i]['labels'][gt_index[j]] == class_name_dict[
-                        adjusted_pred_boxes_labels]:
+                curr_pred_score = pred_dicts[i]['pred_scores'][j].cpu().numpy()
+                print("curr_pred_score: {}".format(curr_pred_score))
+                if curr_pred_score >= score_thres:
+                    adjusted_pred_boxes_label = pred_dicts[i]['pred_labels'][j].cpu().numpy() - 1
+                    print('adjusted_pred_boxes_label: {}'.format(adjusted_pred_boxes_label))
+                    print('ground truth label: {}'.format(gt_dict[i]['labels'][gt_index[j]]))
+                    if iou[j] >= iou_thres:
+                        print('this prediction box exceeds IOU threshold!')
+                    if iou[j] >= iou_thres and gt_dict[i]['labels'][gt_index[j]] == class_name_list[
+                        adjusted_pred_boxes_label]:
                         conf_mat_frame.append('TP')
+                        print('we have a true positive!')
                     else:
                         conf_mat_frame.append('FP')
                 else:
@@ -668,7 +688,7 @@ def main():
         # initialize attributions
         for j in range(max_obj_cnt):  # the maximum number of objects in one image
             new_list = []
-            for k in range(len(class_name_dict)):
+            for k in range(len(class_name_list)):
                 new_list.append(torch.zeros(1))
                 # for i in range(batch_dict['batch_size']):
                 #     attributions[(j, k)][i] = None\
@@ -686,6 +706,7 @@ def main():
                 pred_boxes_vertices = kitti_bev.pred_poly
             bev_image = np.transpose(PseudoImage2D[i].cpu().detach().numpy(), (1, 2, 0))
             pred_boxes = pred_dicts[i]['pred_boxes'].cpu().numpy()
+            pred_scores = pred_dicts[i]['pred_scores'].cpu().numpy()
             '''
             format for pred_boxes[box_index]: x,y,z,l,w,h,theta, for both CADC and KITTI
             format for pred_boxes_vertices[box_index]: ((x1,y1), ... ,(x4,y4))
@@ -696,19 +717,14 @@ def main():
             #       "len(pred_boxes_vertices): {}".format(
             #     batch_dict['box_count'][i], len(conf_mat[i]), pred_boxes.shape[0], len(pred_boxes_vertices)))
             for k in range(3):  # iterate through the 3 classes
-                num_boxes = min(batch_dict['box_count'][i], len(conf_mat[i]))
+                num_boxes = min(batch_dict['box_count'][i], len(conf_mat[i]), max_obj_cnt)
                 for j in range(num_boxes):  # iterate through each box in this sample
-                    # print('i: {}'.format(i))
-                    # print('j: {}'.format(j))
-                    # print('num_boxes: {}'.format(num_boxes))
-                    # print('len(conf_mat[i]): {}'.format(len(conf_mat[i])))
-                    # print('pred_boxes.shape[0]: {}'.format(pred_boxes.shape[0]))
-                    # print('len(pred_boxes_vertices): {}'.format(len(pred_boxes_vertices)))
-                    # print('the index j: {}'.format(j))
                     if not box_validation(pred_boxes[j], pred_boxes_vertices[j]):
                         continue  # can't compute XQ if the boxes don't match
                     box_w = pred_boxes[j][3]
                     box_l = pred_boxes[j][4]
+                    # print("image: {} box: {} class:{}".format(i, j, class_name_dict[k]))
+                    # print("box vertices: {}".format(pred_boxes_vertices[j]*4))
                     if k + 1 == pred_dicts[i]['pred_labels'][j] and conf_mat[i][j] != 'ignore':
                         # compute contribution for the positive class only, k+1 because PCDet labels start at 1
                         target = (j, k)  # i.e., generate reason as to why the j-th box is classified as the k-th class
@@ -730,10 +746,13 @@ def main():
                             # sign = "all"
                             # sign = "positive"
                         grad = np.transpose(attributions[j][k][i].squeeze().cpu().detach().numpy(), (1, 2, 0))
-                        XQ = get_XQ(grad, pred_boxes_vertices[j], dataset_name, high_rez=high_rez,
-                                    scaling_factor=scaling_factor)
+                        XQ = get_XQ(grad, pred_boxes_vertices[j], dataset_name, box_w, box_l, high_rez=high_rez,
+                                    scaling_factor=scaling_factor, margin=box_margin)
+                        XQ_list.append(XQ)
+                        cls_score_list.append(pred_scores[j])
                         # print("box vertices after scaling and horizontal flip: {}".format(pred_boxes_vertices[j]))
-                        box_explained = rotate_and_flip(pred_boxes_vertices[j], dataset_name, angle=270)
+                        # box_explained = rotate_and_flip(pred_boxes_vertices[j], dataset_name, angle=270)
+                        box_explained = flip_xy(pred_boxes_vertices[j])
                         # print("box vertices after vertical flip and rotating 90 deg cw: {}"
                         #       .format(box_explained))
                         # box_explained = pred_boxes_vertices[j]
@@ -763,7 +782,7 @@ def main():
                                 overlay = 0.2
                         # print('bev_image.shape after: {}'.format(bev_image.shape))
                         XAI_cls_path_str = XAI_batch_path_str + '/explanation_for_{}'.format(
-                            class_name_dict[k])
+                            class_name_list[k])
                         if not os.path.exists(XAI_cls_path_str):
                             os.makedirs(XAI_cls_path_str)
                         os.chmod(XAI_cls_path_str, 0o777)
@@ -799,10 +818,12 @@ def main():
                             XAI_box_relative_path_str = XAI_sample_path_str.split("tools/", 1)[1] + \
                                                         '/box_{}_{}_XQ_{}.png'.format(j, conf_mat[i][j], XQ)
                             # print('XAI_box_path_str: {}'.format(XAI_box_path_str))
+                            f.write('{}\n'.format(XQ))
                             polys = patches.Polygon(box_explained,
                                                     closed=True, fill=False, edgecolor='y', linewidth=1)
                             grad_viz[1].add_patch(polys)
                             grad_viz[0].savefig(XAI_box_relative_path_str, bbox_inches='tight', pad_inches=0.0)
+                            plt.close('all')
                             os.chmod(XAI_box_relative_path_str, 0o777)
                             # print('box_{}_{}.png is saved in {}'.format(j,conf_mat[i][j],XAI_cls_path_str))
             break  # only processing one sample to save time
@@ -811,6 +832,12 @@ def main():
             break  # just process a limited number of batches
         # break
         # just need one explanation for example
+    f.close()
+    plt.scatter(cls_score_list, XQ_list)
+    plt.xlabel('Class Scores')
+    plt.ylabel('XQ_of_prediction_boxes')
+    plt.savefig("{}/XQ_class_score.png".format(XAI_result_path))
+    plt.close()
     print("--- {} seconds ---".format(time.time() - start_time))
 
 

@@ -308,7 +308,7 @@ class Detector3DTemplate(nn.Module):
 
         return pred_dicts, recall_dict
 
-    def post_processing_xai(self, tensor_values, batch_dict):
+    def post_processing_xai(self, tensor_values, batch_dict, box_limit=30):
         """
         Args:
             batch_dict:
@@ -319,6 +319,7 @@ class Detector3DTemplate(nn.Module):
                 batch_index: optional (N1+N2+...)
                 roi_labels: (B, num_rois)  1 .. num_classes
         Returns:
+        :param box_limit:
         :param batch_dict:
         :param tensor_values:
 
@@ -336,7 +337,7 @@ class Detector3DTemplate(nn.Module):
         output_anchor = post_process_cfg.OUTPUT_ANCHOR_BOXES  # indicates if we output anchor boxes
         anchor_scores = []  # store class scores for individual anchor boxes
         # max_box_ind = 0 # index of the input in the batch with most number of boxes
-        max_num_boxes = 50
+        max_num_boxes = box_limit
         for index in range(batch_size):
             # the 'None' here just means return None if key not found
             if batch_dict.get('batch_index', None) is not None:
