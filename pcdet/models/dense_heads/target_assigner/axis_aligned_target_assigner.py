@@ -36,8 +36,9 @@ class AxisAlignedTargetAssigner(object):
     def assign_targets(self, all_anchors, gt_boxes_with_classes):
         """
         Args:
-            all_anchors: [(N, 7), ...]
-            gt_boxes: (B, M, 8)
+            all_anchors: [(N, 7), ...], all anchors in an image?
+                This variable's first dimension should be 3 (anchors for 3 classes)
+            gt_boxes: (B, M, 8), all gt_boxes in a batch?
         Returns:
 
         """

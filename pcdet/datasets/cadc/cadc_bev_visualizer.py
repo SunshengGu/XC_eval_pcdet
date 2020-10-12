@@ -33,6 +33,9 @@ class CADC_BEV:
         output_path = output_path + '{}_bev_pred'.format(dt_string)
         self.output_path = os.path.join(repo_dir, output_path)
         self.pred_poly = [] # store the predicted polygons
+        self.pred_loc = []
+        self.gt_poly = []   # store the ground truth polygons
+        self.gt_loc = []    # store the gt box locations
         if not os.path.exists(self.output_path):
             os.makedirs(self.output_path)
 
@@ -136,6 +139,8 @@ class CADC_BEV:
         y_img = [i - fwd_range[0] for i in y_img]
         gt_poly = []
         pred_poly = []
+        gt_loc = []
+        pred_loc = []
 
         for cuboid in annotations['cuboids']:
             x = cuboid['position']['x']
@@ -148,7 +153,7 @@ class CADC_BEV:
 
             # if (x < fwd_range[0] or x > fwd_range[1] or y < side_range[0] or y > side_range[1]):
             #     continue  # out of bounds
-
+            gt_loc.append(np.array([x, y]))
             gt_poly.append(self.cuboid_to_bev(x, y, z, w, l, h, yaw))
         # print('in visualization script: len(predictions): {}'.format(len(predictions)))
         for cuboid in predictions:
@@ -158,13 +163,19 @@ class CADC_BEV:
             #     continue  # out of bounds
 
             pred_poly.append(self.cuboid_to_bev(x, y, z, w, l, h, yaw))
+            pred_loc.append(np.array([x, y]))
 
         # Transform all polygons so 0,0 is the minimum
         offset = np.array([[-side_range[0], -fwd_range[0]]] * 4)
 
         gt_poly = [poly + offset for poly in gt_poly]
         pred_poly = [poly + offset for poly in pred_poly]
+        gt_loc = [loc + offset[0] for loc in gt_loc]
         self.pred_poly = pred_poly
+        self.gt_poly = gt_poly
+        self.gt_loc = gt_loc
+        self.pred_loc = pred_loc
+
         # print('in visualization script: len(self.pred_poly): {}'.format(len(self.pred_poly)))
         # PLOT THE IMAGE
         cmap = self.cmap  # Color map to use

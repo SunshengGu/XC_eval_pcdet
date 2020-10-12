@@ -331,11 +331,13 @@ class Detector3DTemplate(nn.Module):
         recall_dict = {}
         pred_dicts = []
         boxes_with_cls_scores = []
+        # all_anchor_boxes = []
         # boxes_params = []
         anchor_selections = []
         batch_dict['box_count'] = {}  # store the number of boxes for each image in the sample
         output_anchor = post_process_cfg.OUTPUT_ANCHOR_BOXES  # indicates if we output anchor boxes
         anchor_scores = []  # store class scores for individual anchor boxes
+        anchor_boxes = []
         # max_box_ind = 0 # index of the input in the batch with most number of boxes
         max_num_boxes = box_limit
         for index in range(batch_size):
@@ -360,7 +362,9 @@ class Detector3DTemplate(nn.Module):
 
             src_cls_preds = cls_preds
             src_box_preds = box_preds
+            # print("src_box_preds.shape: {}".format(src_box_preds.shape))
             anchor_scores.append(src_cls_preds)
+            anchor_boxes.append(src_box_preds)
             # print('src_box_preds.shape before nms: {}'.format(src_box_preds.shape))
             # print('src_cls_preds.shape before nms: {}'.format(src_cls_preds.shape))
             # the second dimension of cls_preds should be the same as the number of classes
@@ -436,6 +440,7 @@ class Detector3DTemplate(nn.Module):
 
         if output_anchor:
             anchor_scores = torch.stack(anchor_scores)
+            batch_dict['anchor_boxes'] = anchor_boxes
             return anchor_scores
 
         # pad each output in the batch to match dimensions with the maximum length output

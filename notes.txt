@@ -117,7 +117,7 @@ Train command (note: the --cfg_file arg has to start with the `cfg` folder or el
 - cadc: python train.py --cfg_file cfgs/cadc_models/pointpillar.yaml --batch_size 4 --epochs 4
 
 Test command:
-- kitti: python test.py --cfg_file cfgs/kitti_models/pointpillar.yaml --batch_size 4 --ckpt ~/pcdet/output/kitti_models/pointpillar/default/ckpt/checkpoint_epoch_2.pth
+- kitti: python test.py --cfg_file cfgs/kitti_models/pointpillar.yaml --batch_size 4 --ckpt ~/pcdet/output/kitti_models/pointpillar/default/ckpt/pointpillar_7728.pth
 - deformable pvrcnn: python test.py --cfg_file cfgs/kitti_models/def_pv_rcnn.yaml --batch_size 4 --ckpt /pt/Deformable-PV-RCNN/OpenPCDet/output/def_pv_rcnn/def_pv_rcnn_all.pth
 - cadc: python test.py --cfg_file cfgs/cadc_models/pointpillar.yaml --batch_size 4 --ckpt ~/pcdet/output/cadc_models/pointpillar/default/ckpt/checkpoint_epoch_4.pth
 
@@ -126,9 +126,9 @@ Test with 2 GPUs:
     --cfg_file ~/pcdet/tools/cfgs/kitti_models/pointpillar.yaml --batch_size 4 --ckpt ~/pcdet/output/kitti_models/pointpillar/default/ckpt/checkpoint_epoch_2.pth
 
 XAI command:
-- kitti, old (before decoupling): python XAI.py --cfg_file cfgs/kitti_models/pointpillar.yaml --explained_cfg_file ~/pcdet/tools/cfgs/kitti_models/pointpillar_2DBackbone_DetHead.yaml --batch_size 4 --ckpt ~/pcdet/output/kitti_models/pointpillar/default/ckpt/checkpoint_epoch_2.pth
-- kitti, new (after decoupling): python XAI.py --cfg_file cfgs/kitti_models/pointpillar_xai.yaml --explained_cfg_file cfgs/kitti_models/pointpillar_2DBackbone_DetHead_xai.yaml --batch_size 4 --ckpt ~/pcdet/output/kitti_models/pointpillar/default/ckpt/checkpoint_epoch_2.pth
-- cadc, new (after decoupling): python XAI.py --cfg_file cfgs/cadc_models/pointpillar_xai.yaml --explained_cfg_file cfgs/cadc_models/pointpillar_2DBackbone_DetHead_xai.yaml --batch_size 4 --ckpt ~/pcdet/output/cadc_models/pointpillar/default/ckpt/checkpoint_epoch_4.pth
+- kitti, old (before decoupling): python XAI.py --cfg_file cfgs/kitti_models/pointpillar.yaml --explained_cfg_file ~/pcdet/tools/cfgs/kitti_models/pointpillar_2DBackbone_DetHead.yaml --batch_size 1 --ckpt ~/pcdet/output/kitti_models/pointpillar/default/ckpt/pointpillar_7728.pth
+- kitti, new (after decoupling): python XAI.py --cfg_file cfgs/kitti_models/pointpillar_xai.yaml --explained_cfg_file cfgs/kitti_models/pointpillar_2DBackbone_DetHead_xai.yaml --batch_size 1 --ckpt ~/pcdet/output/kitti_models/pointpillar/default/ckpt/pointpillar_7728.pth
+- cadc, new (after decoupling): python XAI.py --cfg_file cfgs/cadc_models/pointpillar_xai.yaml --explained_cfg_file cfgs/cadc_models/pointpillar_2DBackbone_DetHead_xai.yaml --batch_size 1 --ckpt ~/pcdet/output/cadc_models/pointpillar/default/ckpt/checkpoint_epoch_4.pth
 
 XAI with 2 GPUs:
 - bash scripts/dist_explain.sh 2 \
