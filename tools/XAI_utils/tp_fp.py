@@ -1,5 +1,6 @@
 import numpy as np
 import csv
+# import matplotlib.pyplot as plt
 
 
 def get_gt_infos(cfg, dataset):
@@ -43,15 +44,23 @@ def get_gt_infos(cfg, dataset):
     return gt_infos
 
 
-def write_to_csv(file_name, field_name, data_1, data_2, data_3):
+def list_selection(input_list, selections):
+    new_list = []
+    for ind in selections:
+        new_list.append(input_list[ind])
+    return new_list
+
+
+def write_to_csv(file_name, field_name, data_1, data_2, data_3, data_4):
     with open(file_name, 'w', newline='') as csvfile:
         writer = csv.DictWriter(csvfile, delimiter=',', fieldnames=field_name)
         name1 = field_name[0]
         name2 = field_name[1]
         name3 = field_name[2]
+        name4 = field_name[3]
         writer.writeheader()
         for i in range(len(data_1)):
-            writer.writerow({name1 : data_1[i], name2 : data_2[i], name3 : data_3[i]})
+            writer.writerow({name1: data_1[i], name2: data_2[i], name3: data_3[i], name4: data_4[i]})
 
 
 if __name__ == '__main__':

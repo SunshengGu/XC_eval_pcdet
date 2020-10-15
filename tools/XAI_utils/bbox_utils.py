@@ -287,5 +287,40 @@ def bboxes3d_nearest_bev_iou(boxes_a, boxes_b):
     return boxes_iou_normal(boxes_bev_a, boxes_bev_b)
 
 
+def get_box_center(vertices):
+    y_center = np.mean(vertices[:, 0])
+    x_center = np.mean(vertices[:, 1])
+    return y_center, x_center
+
+
+def find_anchor_index(dataset_name, y, x):
+    """
+    Given y and x coordinate of the center of an anchor box,
+    find the index for that anchor
+    :param dataset_name:
+    :param y:
+    :param x:
+    :return:
+    """
+    if dataset_name == 'KittiDataset':
+        H_grid = 248
+        W_grid = 1296
+        H_step = 80 / H_grid
+        W_step = 69.12 / W_grid
+        row_id = math.floor(y / H_step)
+        col_id = math.floor(x / W_step)
+        anchor_id = row_id * W_grid + col_id
+        return anchor_id
+    elif dataset_name == 'CadcDataset':
+        H_grid = 200
+        W_grid = 1200
+        H_step = 100 / H_grid
+        W_step = 100 / W_grid
+        row_id = math.floor(y / H_step)
+        col_id = math.floor(x / W_step)
+        anchor_id = row_id * W_grid + col_id
+        return anchor_id
+
+
 if __name__ == '__main__':
     pass

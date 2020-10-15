@@ -17,7 +17,7 @@ import datetime
 class CADC_BEV:
     def __init__(self, dataset, repo_dir='/root/pcdet', scale_to_pseudoimg=False, class_name=['Car', 'Pedestrian', 'Cyclist'],
                 result_path='output/cadc_models/pointpillar/default/eval/epoch_4/val/default/result.pkl',
-                output_path = 'data/cadc/', background='black', width_pix = 2000, cmap='jet', dpi_factor=20.0):
+                output_path = 'data/cadc/', background='black', scale=5, cmap='jet', dpi_factor=20.0):
         self.repo_dir = repo_dir
         self.scale_to_pseudoimg = scale_to_pseudoimg
         self.class_name = class_name
@@ -25,7 +25,7 @@ class CADC_BEV:
         self.dataset = dataset
         self.results = np.load(self.result_path, allow_pickle=True)
         self.background = background
-        self.width_pix = width_pix
+        self.width_pix = 400 * scale
         self.cmap = cmap
         self.dpi_factor = dpi_factor
         now = datetime.datetime.now()
