@@ -5,6 +5,7 @@ from tensorboardX import SummaryWriter
 import time
 import glob
 import re
+import h5py
 import datetime
 import argparse
 import csv
@@ -246,7 +247,7 @@ def main():
     batches_to_analyze = 1
     method = 'IG'
     attr_shown = 'positive'
-    high_rez = False
+    high_rez = True
     overlay_orig_bev = True
     mult_by_inputs = True
     channel_xai = False
@@ -256,7 +257,7 @@ def main():
     box_margin = 5.0
     if gray_scale_overlay:
         color_map = 'gray'
-    scaling_factor = 3
+    scaling_factor = 5
     args, cfg, x_cfg = parse_config()
     dataset_name = cfg.DATA_CONFIG.DATASET
     num_channels_viz = min(32, cfg.MODEL.MAP_TO_BEV.NUM_BEV_FEATURES)
@@ -271,6 +272,8 @@ def main():
         pseudo_img_w = 432
         pseudo_img_h = 496
         total_anchors = 321408
+    attr_shape = (0, pseudo_img_h, pseudo_img_w)
+    max_shape = (None, pseudo_img_h, pseudo_img_w)
     orig_bev_w = pseudo_img_w * 5
     orig_bev_h = pseudo_img_h * 5
     dpi_division_factor = 20.0
@@ -373,27 +376,44 @@ def main():
     # create directory to store results just for this run, include the method in folder name
     XAI_result_path = os.path.join(cwd, 'XAI_results/{}_{}_{}_{}batches'.format(
         dt_string, method, dataset_name, batches_to_analyze))
+    XAI_attr_path = os.path.join(cwd, 'XAI_attributions/{}_{}_{}_{}batches'.format(
+        dt_string, method, dataset_name, batches_to_analyze))
 
     print('\nXAI_result_path: {}'.format(XAI_result_path))
     XAI_res_path_str = str(XAI_result_path)
     os.mkdir(XAI_result_path)
     os.chmod(XAI_res_path_str, 0o777)
+    XAI_attr_path_str = str(XAI_attr_path)
+    os.mkdir(XAI_attr_path)
+    os.chmod(XAI_attr_path_str, 0o777)
     info_file = XAI_res_path_str + "/XAI_information.txt"
     f = open(info_file, "w")
     f.write('High Resolution: {}\n'.format(high_rez))
     f.write('DPI Division Factor: {}\n'.format(dpi_division_factor))
     f.write('Attributions Visualized: {}\n'.format(attr_shown))
     f.write('Bounding box margin: {}\n'.format(box_margin))
+    info_file_2 = XAI_attr_path_str + "/XAI_information.txt"
+    f2 = open(info_file_2, "w")
+    f2.write('High Resolution: {}\n'.format(high_rez))
+    f2.write('DPI Division Factor: {}\n'.format(dpi_division_factor))
+    f2.write('Attributions Visualized: {}\n'.format(attr_shown))
+    f2.write('Bounding box margin: {}\n'.format(box_margin))
     if overlay_orig_bev:
         f.write('Background Image: BEV of the original point cloud\n')
+        f2.write('Background Image: BEV of the original point cloud\n')
     else:
         f.write('Background Image: BEV of the PointPillar Pseudoimage\n')
+        f2.write('Background Image: BEV of the PointPillar Pseudoimage\n')
     if method == "IG":
         f.write("IG # of Steps: {}\n".format(steps))
         f.write("Multiply by Input: {}\n".format(mult_by_inputs))
+        f2.write("IG # of Steps: {}\n".format(steps))
+        f2.write("Multiply by Input: {}\n".format(mult_by_inputs))
     f.write('Channel-wise Explanation: {}\n'.format(channel_xai))
+    f2.write('Channel-wise Explanation: {}\n'.format(channel_xai))
     f.write('Recording XQ values: \n')
     os.chmod(info_file, 0o777)
+    os.chmod(info_file_2, 0o777)
     try:
         for batch_num, batch_dict in enumerate(test_loader):
             print("\nbatch_num: {}\n".format(batch_num))
@@ -403,6 +423,9 @@ def main():
             XAI_batch_path_str = XAI_res_path_str + '/batch_{}'.format(batch_num)
             os.mkdir(XAI_batch_path_str)
             os.chmod(XAI_batch_path_str, 0o777)
+            XAI_attr_batch_path_str = XAI_attr_path_str + '/batch_{}'.format(batch_num)
+            os.mkdir(XAI_attr_batch_path_str)
+            os.chmod(XAI_attr_batch_path_str, 0o777)
             # run the forward pass once to generate outputs and intermediate representations
             dummy_tensor = 0
             load_data_to_gpu(batch_dict)  # this function is designed for dict, don't use for other data types!
@@ -436,6 +459,7 @@ def main():
             conf_mat = []
             missed_boxes = []
             missed_boxes_plotted = []
+            batch_pred_scores = []
 
             # for i in range(args.batch_size):
             #     anchor_box_loc_file = XAI_res_path_str + "/anchors_{}.csv".format(i)
@@ -462,6 +486,8 @@ def main():
                 iou, gt_index = calculate_bev_iou(gt_dict[i]['boxes'], pred_boxes)
                 missed_gt_index = find_missing_gt(gt_dict[i], pred_boxes, iou_unmatching_thresholds)
                 missed_boxes.append(missed_gt_index)
+                sample_pred_scores = pred_dicts[i]['pred_scores'].cpu().numpy()
+                batch_pred_scores.append(sample_pred_scores)
                 for j in range(len(pred_dicts[i]['pred_scores'])):  # j is prediction box id in the i-th image
                     gt_cls = gt_dict[i]['labels'][gt_index[j]]
                     iou_thresh_2d = iou_unmatching_thresholds[gt_cls]
@@ -520,9 +546,46 @@ def main():
                 box_cnt_list.append(len(conf_mat[i]))
                 box_cnt_list.append(max_obj_cnt)
                 box_cnt_list.append(len(batch_dict['anchor_selections'][i]))
+
+                XAI_sample_path_str = XAI_batch_path_str + '/sample_{}'.format(i)
+                # if not os.path.exists(XAI_sample_path_str):
+                os.makedirs(XAI_sample_path_str)
+                os.chmod(XAI_sample_path_str, 0o777)
+
+                XAI_attr_sample_path_str = XAI_attr_batch_path_str + '/sample_{}'.format(i)
+                # if not os.path.exists(XAI_attr_sample_path_str):
+                os.makedirs(XAI_attr_sample_path_str)
+                os.chmod(XAI_attr_sample_path_str, 0o777)
+
                 for k in range(3):  # iterate through the 3 classes
                     num_boxes = min(box_cnt_list) - 1
                     print('num_boxes: {}'.format(num_boxes))
+                    XAI_cls_path_str = XAI_sample_path_str + '/explanation_for_{}'.format(
+                        class_name_list[k])
+                    XAI_attr_cls_path_str = XAI_attr_sample_path_str + '/explanation_for_{}'.format(
+                        class_name_list[k])
+                    # if not os.path.exists(XAI_cls_path_str):
+                    os.makedirs(XAI_cls_path_str)
+                    os.chmod(XAI_cls_path_str, 0o777)
+                    # if not os.path.exists(XAI_attr_cls_path_str):
+                    os.makedirs(XAI_attr_cls_path_str)
+                    os.chmod(XAI_attr_cls_path_str, 0o777)
+
+                    # initialize the attributions files
+                    attr_file = h5py.File(
+                        XAI_attr_cls_path_str + '/attr_for_{}.hdf5'.format(class_name_list[k]), 'w')
+                    pos_attr_values = attr_file.create_dataset(
+                        "pos_attr", attr_shape, maxshape=max_shape, dtype="float32", chunks=True)
+                    neg_attr_values = attr_file.create_dataset(
+                        "neg_attr", attr_shape, maxshape=max_shape, dtype="float32", chunks=True)
+                    stored_pred_boxes = attr_file.create_dataset(
+                        "pred_boxes", (0, 4, 2), maxshape=(None, 4, 2), dtype="float32", chunks=True)
+                    # encode box types with numbers: 0-FP, 1-TP
+                    boxes_type = attr_file.create_dataset(
+                        "box_type", (0), maxshape=(None), dtype="uint8", chunks=True)
+                    pred_boxes_location = attr_file.create_dataset(
+                        "pred_boxes_loc", (0, 2), maxshape=(None, 2), dtype="float32", chunks=True)
+
                     for j in range(num_boxes):  # iterate through each box in this sample
                         if not box_validation(pred_boxes[j], pred_boxes_vertices[j], dataset_name):
                             continue  # can't compute XQ if the boxes don't match
@@ -539,22 +602,12 @@ def main():
                         box_x = pred_boxes_loc[j][0]
                         box_y = pred_boxes_loc[j][1]
                         dist_to_ego = np.sqrt(box_x * box_x + box_y * box_y)
-                        # print('\nindex i: {}  index j: {}'.format(i, j))
-                        # print("\nbatch_dict['box_count'][i]: {} \n len(conf_mat[i]): {} \n pred_boxes.shape[0]: {} \n"
-                        #       "len(pred_boxes_vertices): {} \n len(batch_dict['anchor_selections'][i]): {}".format(
-                        #     batch_dict['box_count'][i], len(conf_mat[i]), pred_boxes.shape[0], len(pred_boxes_vertices),
-                        #     len(batch_dict['anchor_selections'][i])))
-                        # print("image: {} box: {} class:{}".format(i, j, class_name_dict[k]))
+
                         if k + 1 == pred_dicts[i]['pred_labels'][j] and conf_mat[i][j] != 'ignore':
                             # compute contribution for the positive class only, k+1 because PCDet labels start at 1
                             target = (j, k)  # i.e., generate reason as to why the j-th box is classified as the k-th class
                             anchor_id = batch_dict['anchor_selections'][i][j]
-                            # zoomed_pred_box = pred_boxes_vertices[j] * 4
-                            # y_center, x_center = get_box_center(zoomed_pred_box)
-                            # print("\npred box vertices: {}".format(zoomed_pred_box))
-                            # print("pred box center: ({}, {})".format(y_center, x_center))
-                            # print("anchor id for the pred box: {}".format(anchor_id))
-                            # print("pred box class: {}\n".format(class_name_list[k]))
+
                             if use_anchor_idx:
                                 # if we are using anchor box outputs, need to use the indices in for anchor boxes
                                 target = (anchor_id, k)
@@ -572,7 +625,23 @@ def main():
                                 # sign = "all"
                                 # sign = "positive"
                             grad = np.transpose(attributions[j][k][i].squeeze().cpu().detach().numpy(), (1, 2, 0))
-                            # print('grad.shape: {}'.format(grad.shape))
+
+                            pos_grad = np.sum((grad > 0) * grad, axis=2)
+                            neg_grad = np.sum((grad < 0) * grad, axis=2)
+                            # print('pos_grad.shape: {}'.format(pos_grad.shape))
+
+                            new_size = attr_file["pos_attr"].shape[0] + 1
+                            attr_file["pos_attr"].resize(new_size, axis=0)
+                            attr_file["neg_attr"].resize(new_size, axis=0)
+                            attr_file["pred_boxes"].resize(new_size, axis=0)
+                            attr_file["box_type"].resize(new_size, axis=0)
+                            attr_file["pred_boxes_loc"].resize(new_size, axis=0)
+
+                            attr_file["pos_attr"][new_size-1] = pos_grad
+                            attr_file["neg_attr"][new_size - 1] = neg_grad
+                            attr_file["pred_boxes"][new_size-1] = pred_boxes_vertices[j]
+                            attr_file["pred_boxes_loc"][new_size - 1] = pred_boxes_loc[j]
+
                             XQ = get_sum_XQ(grad, pred_boxes_vertices[j], dataset_name, box_w, box_l, sign,
                                             high_rez=high_rez, scaling_factor=scaling_factor, margin=box_margin)
                             XQ_list.append(XQ)
@@ -585,11 +654,13 @@ def main():
                                 TP_score_list.append(pred_scores[j])
                                 TP_dist_list.append(dist_to_ego)
                                 TP_label_list.append(k)
+                                attr_file["box_type"][new_size-1] = 1
                             elif conf_mat[i][j] == 'FP':
                                 FP_XQ_list.append(XQ)
                                 FP_score_list.append(pred_scores[j])
                                 FP_dist_list.append(dist_to_ego)
                                 FP_label_list.append(k)
+                                attr_file["box_type"][new_size - 1] = 0
                             box_explained = flip_xy(pred_boxes_vertices[j])
                             figure_size = (8, 6)
                             # figure_size = (24, 18)
@@ -610,14 +681,10 @@ def main():
                                 bev_image = np.rot90(bev_image_raw, k=1, axes=(0, 1))
                                 if not gray_scale_overlay:
                                     overlay = 0.2
-                            # print('bev_image.shape after: {}'.format(bev_image.shape))
-                            XAI_cls_path_str = XAI_batch_path_str + '/explanation_for_{}'.format(
-                                class_name_list[k])
-                            if not os.path.exists(XAI_cls_path_str):
-                                os.makedirs(XAI_cls_path_str)
-                            os.chmod(XAI_cls_path_str, 0o777)
+
 
                             if channel_xai:  # generates channel-wise explanation
+                                # TODO: this part needs fixing
                                 for c in range(num_channels_viz):
                                     grad_viz = viz.visualize_image_attr(
                                         grad[:, :, c], bev_image, method="blended_heat_map", sign=sign, show_colorbar=True,
@@ -639,15 +706,7 @@ def main():
                                                                     show_colorbar=True, title="Overlaid {}".format(method),
                                                                     alpha_overlay=overlay,
                                                                     fig_size=figure_size, upscale=high_rez)
-
-                                XAI_sample_path_str = XAI_cls_path_str + '/sample_{}'.format(i)
-                                if not os.path.exists(XAI_sample_path_str):
-                                    os.makedirs(XAI_sample_path_str)
-                                os.chmod(XAI_sample_path_str, 0o777)
-
-                                # pred_label = class_name_list[pred_dicts[i]['pred_labels'][j].cpu().numpy() - 1]
-                                # pred_score = pred_dicts[i]['pred_scores'][j].cpu().numpy()
-                                XAI_box_relative_path_str = XAI_sample_path_str.split("tools/", 1)[1] + \
+                                XAI_box_relative_path_str = XAI_cls_path_str.split("tools/", 1)[1] + \
                                                             '/box_{}_{}_XQ_{}.png'.format(
                                                                 j, conf_mat[i][j], XQ)
                                 # print('XAI_box_path_str: {}'.format(XAI_box_path_str))
@@ -660,6 +719,7 @@ def main():
                                                         closed=True, fill=False, edgecolor='y', linewidth=1)
                                 grad_viz[1].add_patch(polys)
                                 grad_viz[0].savefig(XAI_box_relative_path_str, bbox_inches='tight', pad_inches=0.0)
+
                                 if not missed_boxes_plotted[k] and len(missed_boxes[i]) > 0:
                                     missed_boxes_plotted[k] = True
                                     print('len(gt_boxes_vertices): {}'.format(len(gt_boxes_vertices)))
@@ -690,11 +750,11 @@ def main():
                                             anchor_ind = find_anchor_index(dataset_name, missed_box_loc[1],
                                                                            missed_box_loc[0])
                                             print('the anchor index is: {}'.format(anchor_ind))
-                                            lower_bound = max(anchor_ind - 3, 0)
+                                            lower_bound = max(anchor_ind - 4, 0)
                                             upper_bound = min(total_anchors, anchor_ind + 4)
                                             matched_anchor_vertices = None
                                             max_iou = 0
-                                            experiment = True
+                                            experiment = False
                                             if experiment:
                                                 box_gpu = batch_dict['anchor_boxes'][i][anchor_ind]
                                                 box = box_gpu.cpu().detach().numpy()
@@ -724,35 +784,46 @@ def main():
                                                 viz_poly = patches.Polygon(
                                                     viz_vertices, closed=True, fill=False, edgecolor='m', linewidth=1)
                                                 grad_viz[1].add_patch(viz_poly)
-                                            # for ind in range(lower_bound, upper_bound, 1):
-                                            #     print('the anchor index to search: {}'.format(ind))
-                                            #     box_gpu = batch_dict['anchor_boxes'][i][ind]
-                                            #     box = box_gpu.cpu().detach().numpy()
-                                            #     box_expand = np.expand_dims(box, axis=0)
-                                            #     anchor_vertices = kitti_bev.cuboid_to_bev(box[0], box[1], box[2], box[3],
-                                            #                                               box[4], box[5], box[6])
-                                            #     gt_box = gt_dict[i]['boxes'][index]
-                                            #     gt_box_expand = np.expand_dims(gt_box, axis=0)
-                                            #     curr_iou, _ = calculate_bev_iou(gt_box_expand, box_expand)
-                                            #     print('iou between the missed gt box and the corresponding anchor: {}'
-                                            #           .format(curr_iou))
-                                            #     if curr_iou[0] > max_iou:
-                                            #         matched_anchor_vertices = anchor_vertices
-                                            #         max_iou = curr_iou[0]
-                                            # if matched_anchor_vertices is not None:
-                                            #     matched_anchor_vertices = transform_box_coord(
-                                            #         grad.shape[0], grad.shape[1], matched_anchor_vertices, dataset_name,
-                                            #         high_rez, scaling_factor)
-                                            #     matched_anchor_vertices = flip_xy(matched_anchor_vertices)
-                                            #     matched_anchor_polys = patches.Polygon(
-                                            #         matched_anchor_vertices, closed=True, fill=False, edgecolor='m', linewidth=1)
-                                            #     grad_viz[1].add_patch(matched_anchor_polys)
-                                    XAI_missed_boxes_str = XAI_sample_path_str.split("tools/", 1)[1] + \
+                                            for ind in range(lower_bound, upper_bound, 1):
+                                                print('the anchor index to search: {}'.format(ind))
+                                                box_gpu = batch_dict['anchor_boxes'][i][ind]
+                                                box = box_gpu.cpu().detach().numpy()
+                                                box_expand = np.expand_dims(box, axis=0)
+                                                anchor_vertices = kitti_bev.cuboid_to_bev(box[0], box[1], box[2], box[3],
+                                                                                          box[4], box[5], box[6])
+                                                if dataset_name == 'CadcDataset':
+                                                    for vert_ind in range(len(anchor_vertices)):
+                                                        anchor_vertices[vert_ind][0] += 50
+                                                        anchor_vertices[vert_ind][1] += 50
+                                                elif dataset_name == 'KittiDataset':
+                                                    for vert_ind in range(len(anchor_vertices)):
+                                                        # TODO: need to confirm the correctness of this
+                                                        # anchor_vertices[vert_ind][0] += 50
+                                                        anchor_vertices[vert_ind][1] += 39.68
+                                                gt_box = gt_dict[i]['boxes'][index]
+                                                gt_box_expand = np.expand_dims(gt_box, axis=0)
+                                                curr_iou, _ = calculate_bev_iou(gt_box_expand, box_expand)
+                                                print('iou between the missed gt box and the corresponding anchor: {}'
+                                                      .format(curr_iou))
+                                                if curr_iou[0] > max_iou:
+                                                    matched_anchor_vertices = anchor_vertices
+                                                    max_iou = curr_iou[0]
+                                            if matched_anchor_vertices is not None:
+                                                matched_anchor_vertices = transform_box_coord(
+                                                    grad.shape[0], grad.shape[1], matched_anchor_vertices, dataset_name,
+                                                    high_rez, scaling_factor)
+                                                matched_anchor_vertices = flip_xy(matched_anchor_vertices)
+                                                matched_anchor_polys = patches.Polygon(
+                                                    matched_anchor_vertices, closed=True, fill=False, edgecolor='m', linewidth=1)
+                                                grad_viz[1].add_patch(matched_anchor_polys)
+                                    XAI_missed_boxes_str = XAI_cls_path_str.split("tools/", 1)[1] + \
                                                            '/missed_gt_boxes.png'
                                     grad_viz[0].savefig(XAI_missed_boxes_str, bbox_inches='tight', pad_inches=0.0)
                                 plt.close('all')
                                 os.chmod(XAI_box_relative_path_str, 0o777)
                                 # print('box_{}_{}.png is saved in {}'.format(j,conf_mat[i][j],XAI_cls_path_str))
+                    pos_attr_file.close()
+                    neg_attr_file.close()
             #     break  # only processing one sample to save time
             #
             if batch_num == batches_to_analyze - 1:
