@@ -6,6 +6,7 @@ import matplotlib.patches as patches
 import os
 from pcdet.datasets.kitti.kitti_dataset import KittiDataset
 from math import pi, cos, sin
+import copy
 
 import yaml
 from pathlib import Path
@@ -20,7 +21,7 @@ class KITTI_BEV:
                  class_name=['Car', 'Pedestrian', 'Cyclist'],
                  result_path='output/kitti_models/pointpillar/default/eval/epoch_2/val/default/result.pkl',
                  output_path='data/kitti/', background='black', scale=5, cmap='jet',
-                 dpi_factor=20.0):
+                 dpi_factor=20.0, margin=0.0):
         self.repo_dir = repo_dir
         self.scale_to_pseudoimg = scale_to_pseudoimg
         self.class_name = class_name
@@ -33,6 +34,7 @@ class KITTI_BEV:
         self.cmap = cmap
         self.dpi_factor = dpi_factor
         self.pred_poly = []  # store the predicted polygons
+        self.pred_poly_expand = [] # predicted polygons with paddings
         self.pred_loc = []
         self.gt_poly = []    # store the ground truth polygons
         self.gt_loc = []     # store the gt box locations
@@ -40,6 +42,7 @@ class KITTI_BEV:
         dt_string = now.strftime("%b_%d_%Y_%H_%M_%S")
         output_path = output_path + '{}_bev_pred'.format(dt_string)
         self.output_path = os.path.join(repo_dir, output_path)
+        self.margin = margin
         if not os.path.exists(self.output_path):
             os.makedirs(self.output_path)
 
@@ -191,6 +194,7 @@ class KITTI_BEV:
         y_img = [i - fwd_range[0] for i in y_img]
         gt_poly = []
         pred_poly = []
+        pred_poly_expand = []
         gt_loc = []
         pred_loc = []
 
@@ -210,6 +214,10 @@ class KITTI_BEV:
 
         for cuboid in predictions:
             x, y, z, w, l, h, yaw = cuboid
+            if self.margin != 0.0:
+                w_big = w + 2 * self.margin
+                l_big = l + 2 * self.margin
+                pred_poly_expand.append(self.cuboid_to_bev(x, y, z, w_big, l_big, h, yaw))
 
             # if (x < fwd_range[0] or x > fwd_range[1] or y < side_range[0] or y > side_range[1]):
             #     continue  # out of bounds
@@ -222,8 +230,13 @@ class KITTI_BEV:
 
         gt_poly = [poly + offset for poly in gt_poly]
         pred_poly = [poly + offset for poly in pred_poly]
+        pred_poly_expand = [poly + offset for poly in pred_poly_expand]
         gt_loc = [loc + offset[0] for loc in gt_loc]
         self.pred_poly = pred_poly
+        if self.margin==0.0:
+            self.pred_poly_expand = pred_poly
+        else:
+            self.pred_poly_expand = pred_poly_expand
         self.gt_poly = gt_poly
         self.gt_loc = gt_loc
         self.pred_loc = pred_loc

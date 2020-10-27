@@ -244,8 +244,9 @@ def main():
     box_cnt = 0
     start_time = time.time()
     max_obj_cnt = 50
-    batches_to_analyze = 1
+    batches_to_analyze = 7
     method = 'IG'
+    ignore_thresh = 0
     attr_shown = 'positive'
     high_rez = True
     overlay_orig_bev = True
@@ -254,7 +255,7 @@ def main():
     gray_scale_overlay = True
     plot_class_wise = False
     color_map = 'jet'
-    box_margin = 5.0
+    box_margin = 0
     if gray_scale_overlay:
         color_map = 'gray'
     scaling_factor = 5
@@ -417,8 +418,8 @@ def main():
     try:
         for batch_num, batch_dict in enumerate(test_loader):
             print("\nbatch_num: {}\n".format(batch_num))
-            # if batch_num != 25:
-            #     continue
+            if batch_num != 6:
+                continue
             # print('\nlen(batch_dict): {}\n'.format(len(batch_dict)))
             XAI_batch_path_str = XAI_res_path_str + '/batch_{}'.format(batch_num)
             os.mkdir(XAI_batch_path_str)
@@ -461,22 +462,6 @@ def main():
             missed_boxes_plotted = []
             batch_pred_scores = []
 
-            # for i in range(args.batch_size):
-            #     anchor_box_loc_file = XAI_res_path_str + "/anchors_{}.csv".format(i)
-            #     with open(anchor_box_loc_file, 'w', newline='') as csvfile:
-            #         field_name = ['box_id', 'x', 'y']
-            #         writer = csv.DictWriter(csvfile, delimiter=',', fieldnames=field_name)
-            #         writer.writeheader()
-            #         boxes = batch_dict['anchor_boxes'][i].cpu().numpy()
-            #         anchor_cnt = 0
-            #         if dataset_name == 'CadcDataset':
-            #             anchor_cnt = int(400 * 400 * 1.5)
-            #         elif dataset_name == 'KittiDataset':
-            #             anchor_cnt = int(496 * 432 * 1.5)
-            #         for j in range(0, len(boxes), 1):
-            #             x = boxes[j][0]
-            #             y = boxes[j][1]
-            #             writer.writerow({field_name[0]: j, field_name[1]: x, field_name[2]: y})
             for i in range(args.batch_size):  # i is input image id in the batch
                 missed_boxes_plotted = []
                 for c in range(len(class_name_list)):
@@ -486,8 +471,8 @@ def main():
                 iou, gt_index = calculate_bev_iou(gt_dict[i]['boxes'], pred_boxes)
                 missed_gt_index = find_missing_gt(gt_dict[i], pred_boxes, iou_unmatching_thresholds)
                 missed_boxes.append(missed_gt_index)
-                sample_pred_scores = pred_dicts[i]['pred_scores'].cpu().numpy()
-                batch_pred_scores.append(sample_pred_scores)
+                # sample_pred_scores = pred_dicts[i]['pred_scores'].cpu().numpy()
+                # batch_pred_scores.append(sample_pred_scores)
                 for j in range(len(pred_dicts[i]['pred_scores'])):  # j is prediction box id in the i-th image
                     gt_cls = gt_dict[i]['labels'][gt_index[j]]
                     iou_thresh_2d = iou_unmatching_thresholds[gt_cls]
@@ -516,11 +501,13 @@ def main():
                 img_idx = batch_num * args.batch_size + i
                 bev_fig, bev_fig_data = None, None
                 pred_boxes_vertices = None
+                padded_pred_boxes_vertices = None
                 gt_boxes_vertices = None
                 gt_boxes_loc = None
                 pred_boxes_loc = None
                 total_attr = 0              # total amount of attributions in a box
                 if dataset_name == 'CadcDataset':
+                    #TODO: implement box padding for Cadc
                     bev_fig, bev_fig_data = cadc_bev.get_bev_image(img_idx)
                     pred_boxes_vertices = cadc_bev.pred_poly
                     gt_boxes_vertices = cadc_bev.gt_poly
@@ -529,6 +516,7 @@ def main():
                 elif dataset_name == 'KittiDataset':
                     bev_fig, bev_fig_data = kitti_bev.get_bev_image(img_idx)
                     pred_boxes_vertices = kitti_bev.pred_poly
+                    padded_pred_boxes_vertices = kitti_bev.pred_poly_expand
                     gt_boxes_vertices = kitti_bev.gt_poly
                     gt_boxes_loc = kitti_bev.gt_loc
                     pred_boxes_loc = kitti_bev.pred_loc
@@ -580,13 +568,20 @@ def main():
                         "neg_attr", attr_shape, maxshape=max_shape, dtype="float32", chunks=True)
                     stored_pred_boxes = attr_file.create_dataset(
                         "pred_boxes", (0, 4, 2), maxshape=(None, 4, 2), dtype="float32", chunks=True)
+                    expanded_boxes = attr_file.create_dataset(
+                        "pred_boxes_expand", (0, 4, 2), maxshape=(None, 4, 2), dtype="float32", chunks=True)
                     # encode box types with numbers: 0-FP, 1-TP
                     boxes_type = attr_file.create_dataset(
-                        "box_type", (0), maxshape=(None), dtype="uint8", chunks=True)
+                        "box_type", (0, 1), maxshape=(None, 1), dtype="uint8", chunks=True)
                     pred_boxes_location = attr_file.create_dataset(
                         "pred_boxes_loc", (0, 2), maxshape=(None, 2), dtype="float32", chunks=True)
+                    pred_boxes_score = attr_file.create_dataset(
+                        "box_score", (0, 1), maxshape=(None, 1), dtype="float32", chunks=True)
 
                     for j in range(num_boxes):  # iterate through each box in this sample
+                        # if j != 26:
+                        #     # save time for debugging
+                        #     break
                         if not box_validation(pred_boxes[j], pred_boxes_vertices[j], dataset_name):
                             continue  # can't compute XQ if the boxes don't match
                         '''
@@ -626,24 +621,45 @@ def main():
                                 # sign = "positive"
                             grad = np.transpose(attributions[j][k][i].squeeze().cpu().detach().numpy(), (1, 2, 0))
 
-                            pos_grad = np.sum((grad > 0) * grad, axis=2)
-                            neg_grad = np.sum((grad < 0) * grad, axis=2)
-                            # print('pos_grad.shape: {}'.format(pos_grad.shape))
+                            # pos_grad = np.sum(np.where(grad < 0, 0, grad), axis=2)
+                            # neg_grad = np.sum(-1 * np.where(grad > 0, 0, grad), axis=2)
+                            pos_grad = np.sum((grad>0)*grad, axis=2)
+                            neg_grad = np.sum(-1*(grad<0)*grad, axis=2)
+                            pos_grad_copy = copy.deepcopy(pos_grad)
+                            neg_grad_copy = copy.deepcopy(neg_grad)
+                            print("grad.shape: {}".format(grad.shape))
+                            print('pos_grad.shape: {}'.format(pos_grad.shape))
+                            box_type = None
+                            if conf_mat[i][j] == 'TP':
+                                box_type = 1
+                            elif conf_mat[i][j] == 'FP':
+                                box_type = 0
 
                             new_size = attr_file["pos_attr"].shape[0] + 1
                             attr_file["pos_attr"].resize(new_size, axis=0)
                             attr_file["neg_attr"].resize(new_size, axis=0)
                             attr_file["pred_boxes"].resize(new_size, axis=0)
+                            attr_file["pred_boxes_expand"].resize(new_size, axis=0)
                             attr_file["box_type"].resize(new_size, axis=0)
                             attr_file["pred_boxes_loc"].resize(new_size, axis=0)
+                            attr_file["box_score"].resize(new_size, axis=0)
 
-                            attr_file["pos_attr"][new_size-1] = pos_grad
+                            attr_file["pos_attr"][new_size - 1] = pos_grad
                             attr_file["neg_attr"][new_size - 1] = neg_grad
-                            attr_file["pred_boxes"][new_size-1] = pred_boxes_vertices[j]
+                            attr_file["pred_boxes"][new_size - 1] = pred_boxes_vertices[j]
+                            attr_file["pred_boxes_expand"][new_size - 1] = padded_pred_boxes_vertices[j]
+                            attr_file["box_type"][new_size - 1] = box_type
                             attr_file["pred_boxes_loc"][new_size - 1] = pred_boxes_loc[j]
+                            attr_file["box_score"][new_size - 1] = pred_scores[j]
 
-                            XQ = get_sum_XQ(grad, pred_boxes_vertices[j], dataset_name, box_w, box_l, sign,
-                                            high_rez=high_rez, scaling_factor=scaling_factor, margin=box_margin)
+                            print("attr_file[\"pos_attr\"].shape: {}".format(attr_file["pos_attr"].shape))
+
+                            # XQ = get_sum_XQ(grad, pred_boxes_vertices[j], dataset_name, box_w, box_l, sign,
+                            #                 high_rez=high_rez, scaling_factor=scaling_factor, margin=box_margin)
+                            grad_copy = pos_grad_copy if attr_shown=="positive" else neg_grad_copy
+                            XQ = get_sum_XQ_analytics(pos_grad, neg_grad, padded_pred_boxes_vertices[j], dataset_name,
+                                                      sign, ignore_thresh=ignore_thresh, high_rez=high_rez, box_l=box_l, box_w=box_w,
+                                                      scaling_factor=scaling_factor, margin=box_margin, grad_copy=grad_copy)
                             XQ_list.append(XQ)
                             cls_score_list.append(pred_scores[j])
                             dist_list.append(dist_to_ego)
@@ -709,8 +725,19 @@ def main():
                                 XAI_box_relative_path_str = XAI_cls_path_str.split("tools/", 1)[1] + \
                                                             '/box_{}_{}_XQ_{}.png'.format(
                                                                 j, conf_mat[i][j], XQ)
+                                XAI_attr_path_str = XAI_cls_path_str + \
+                                                            '/box_{}_{}_XQ_{}.csv'.format(
+                                                                j, conf_mat[i][j], XQ)
+                                verts = copy.deepcopy(pred_boxes_vertices[j])
+                                if high_rez:
+                                    verts = verts/scaling_factor
+                                write_attr_to_csv(XAI_attr_path_str, grad_copy, verts)
+                                # if attr_shown == "positive":
+                                #     write_attr_to_csv(XAI_attr_path_str, pos_grad, verts)
+                                # elif attr_shown == "negative":
+                                #     write_attr_to_csv(XAI_attr_path_str, neg_grad, verts)
                                 # print('XAI_box_path_str: {}'.format(XAI_box_path_str))
-                                f.write('{}\n'.format(XQ))
+                                # f.write('{}\n'.format(XQ))
                                 # if high_rez:
                                 #     box_explained = box_explained * 3
                                 # box_explained = box_explained * 1.5
@@ -822,8 +849,7 @@ def main():
                                 plt.close('all')
                                 os.chmod(XAI_box_relative_path_str, 0o777)
                                 # print('box_{}_{}.png is saved in {}'.format(j,conf_mat[i][j],XAI_cls_path_str))
-                    pos_attr_file.close()
-                    neg_attr_file.close()
+                    attr_file.close()
             #     break  # only processing one sample to save time
             #
             if batch_num == batches_to_analyze - 1:

@@ -11,6 +11,7 @@ import argparse
 import csv
 import math
 from pathlib import Path
+from scipy.stats import gaussian_kde
 import torch.distributed as dist
 from pcdet.datasets import build_dataloader
 from pcdet.models import build_network
@@ -105,6 +106,7 @@ def find_missing_gt(gt_dict, pred_boxes, iou_unmatching_thresholds):
 def main():
     """
     important variables:
+        ignore_thresh_list: a list of ignore thresholds to try for XQ calculations
         max_obj_cnt: The maximum number of objects in an image, right now set to 50
         batches_to_analyze: The number of batches for which explanations are generated
         method: Explanation method used.
@@ -125,18 +127,21 @@ def main():
             parameter to get higher dpi.
     :return:
     """
+    XAI_sum = True
+    XAI_cnt = not XAI_sum
+    ignore_thresh_list = [0.1, 0.2, 0.3]
     box_cnt = 0
     start_time = time.time()
     max_obj_cnt = 50
     batches_to_analyze = 1
     method = 'IG'
-    attr_shown = 'positive'
+    attr_shown = 'negative'
     high_rez = True
     overlay_orig_bev = True
     mult_by_inputs = True
     channel_xai = False
     gray_scale_overlay = True
-    plot_class_wise = False
+    plot_class_wise = True
     color_map = 'jet'
     box_margin = 5.0
     if gray_scale_overlay:
@@ -163,18 +168,6 @@ def main():
     dpi_division_factor = 20.0
     steps = 24
 
-    cls_score_list = []
-    dist_list = []  # stores distance to ego vehicle
-    label_list = []
-    TP_score_list = []
-    TP_XQ_list = []
-    TP_dist_list = []
-    TP_label_list = []
-    FP_score_list = []
-    FP_XQ_list = []
-    FP_dist_list = []
-    FP_label_list = []
-    XQ_list = []
     output_dir = cfg.ROOT_DIR / 'output' / cfg.EXP_GROUP_PATH / cfg.TAG / args.extra_tag
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -232,6 +225,11 @@ def main():
     f.write('Recording XQ values: \n')
     os.chmod(info_file, 0o777)
 
+    if XAI_sum:
+        f.write('Analyze XQ by: sum\n')
+    else:
+        f.write('Analyze XQ by: count\n')
+
     label_dict = None # maps class name to label
     if dataset_name == 'KittiDataset':
         label_dict = {"Car": 0, "Pedestrian": 1, "Cyclist": 2}
@@ -239,167 +237,230 @@ def main():
         label_dict = {"Car": 0, "Pedestrian": 1, "Truck": 2}
 
     try:
-        for root, dirs, files in os.walk(XAI_attr_path):
-            print('processing files: ')
-            for name in files:
-                print(os.path.join(root, name))
-                if name.endwith(".h5df"):
-                    # read in the file
-                    label = 255
-                    sign = None
+        for ignore_thresh in ignore_thresh_list:
+            cls_score_list = []
+            dist_list = []  # stores distance to ego vehicle
+            label_list = []
+            TP_score_list = []
+            TP_XQ_list = []
+            TP_dist_list = []
+            TP_label_list = []
+            FP_score_list = []
+            FP_XQ_list = []
+            FP_dist_list = []
+            FP_label_list = []
+            XQ_list = []
+            for root, dirs, files in os.walk(XAI_attr_path):
+                print('processing files: ')
+                for name in files:
+                    print(os.path.join(root, name))
+                    if name.endswith(".hdf5"):
+                        # read in the file
+                        label = 255
+                        sign = None
 
-                    if "Car" in name:
-                        label = label_dict["Car"]
-                    elif "Pedestrian" in name:
-                        label = label_dict["Pedestrian"]
-                    elif "Cyclist" in name:
-                        label = label_dict["Cyclist"]
-                    elif "Truck" in name:
-                        label = label_dict["Truck"]
+                        if "Car" in name:
+                            label = label_dict["Car"]
+                        elif "Pedestrian" in name:
+                            label = label_dict["Pedestrian"]
+                        elif "Cyclist" in name:
+                            label = label_dict["Cyclist"]
+                        elif "Truck" in name:
+                            label = label_dict["Truck"]
 
-                    if "negative" in name:
-                        sign = "negative"
-                    elif "positive" in name:
-                        sign = "positive"
-                    attr_data_file = h5py.File(os.path.join(root, name), 'r')
-                    pred_boxes = attr_data_file["pred_boxes"]
-                    pos_attr = attr_data_file["pos_attr"]
-                    neg_attr = attr_data_file["neg_attr"]
-                    boxes_type = attr_data_file["box_type"]
-                    pred_boxes_loc = attr_data_file["pred_boxes_loc"]
-                    # need to process this data file
-                    for j in range(len(pred_boxes)):
-                        box_w = pred_boxes[j][3]
-                        box_l = pred_boxes[j][4]
-                        box_x = pred_boxes_loc[j][0]
-                        box_y = pred_boxes_loc[j][1]
-                        dist_to_ego = np.sqrt(box_x * box_x + box_y * box_y)
-                        XQ = get_sum_XQ_analytics(pos_attr[j], neg_attr[j], pred_boxes[j], dataset_name,
-                                                  box_w, box_l, sign, high_rez=high_rez,
-                                                  scaling_factor=scaling_factor, margin=box_margin)
-                        XQ_list.append(XQ)
-                        cls_score_list.append(pred_scores[j])
-                        dist_list.append(dist_to_ego)
-                        label_list.append(label)
-                        box_cnt += 1
-                        if boxes_type[j] == 'TP':
-                            TP_XQ_list.append(XQ)
-                            TP_score_list.append(pred_scores[j])
-                            TP_dist_list.append(dist_to_ego)
-                            TP_label_list.append(label)
-                        elif boxes_type[j] == 'FP':
-                            FP_XQ_list.append(XQ)
-                            FP_score_list.append(pred_scores[j])
-                            FP_dist_list.append(dist_to_ego)
-                            FP_label_list.append(label)
-            print('processing dirs: ')
-            for name in dirs:
-                print(os.path.join(root, name))
+                        sign = attr_shown
+                        # if "negative" in name:
+                        #     sign = "negative"
+                        # elif "positive" in name:
+                        #     sign = "positive"
+                        with h5py.File(os.path.join(root, name), 'r') as attr_data_file:
+                            # pred_boxes = attr_data_file["pred_boxes"][()]
+                            # pos_attr = attr_data_file["pos_attr"][()]
+                            # neg_attr = attr_data_file["neg_attr"][()]
+                            # boxes_type = attr_data_file["box_type"][()]
+                            # pred_boxes_loc = attr_data_file["pred_boxes_loc"][()]
+                            # pred_scores = attr_data_file["box_score"][()]
+                            pred_boxes = attr_data_file["pred_boxes"]
+                            pos_attr = attr_data_file["pos_attr"]
+                            neg_attr = attr_data_file["neg_attr"]
+                            boxes_type = attr_data_file["box_type"]
+                            pred_boxes_loc = attr_data_file["pred_boxes_loc"]
+                            pred_scores = attr_data_file["box_score"]
 
+                            for j in range(len(pred_boxes)):
+                                print("box id is: {}".format(j))
+                                box_x = pred_boxes_loc[j][0]
+                                box_y = pred_boxes_loc[j][1]
+                                dist_to_ego = np.sqrt(box_x * box_x + box_y * box_y)
+                                XQ = 0
+                                if XAI_sum:
+                                    XQ = get_sum_XQ_analytics(pos_attr[j], neg_attr[j], pred_boxes[j], dataset_name,
+                                                              sign, ignore_thresh, high_rez=high_rez,
+                                                              scaling_factor=scaling_factor, margin=box_margin)
+                                if XAI_cnt:
+                                    XQ = get_cnt_XQ_analytics(pos_attr[j], neg_attr[j], pred_boxes[j], dataset_name,
+                                                              sign, ignore_thresh, high_rez=high_rez,
+                                                              scaling_factor=scaling_factor, margin=box_margin)
+                                XQ_list.append(XQ)
+                                cls_score_list.append(pred_scores[j][0])
+                                dist_list.append(dist_to_ego)
+                                label_list.append(label)
+                                box_cnt += 1
+                                if boxes_type[j] == 1: # 1 is TP
+                                    TP_XQ_list.append(XQ)
+                                    TP_score_list.append(pred_scores[j][0])
+                                    TP_dist_list.append(dist_to_ego)
+                                    TP_label_list.append(label)
+                                elif boxes_type[j] == 0: # 0 is FP
+                                    FP_XQ_list.append(XQ)
+                                    FP_score_list.append(pred_scores[j][0])
+                                    FP_dist_list.append(dist_to_ego)
+                                    FP_label_list.append(label)
+                print('processing dirs: ')
+                for name in dirs:
+                    print(os.path.join(root, name))
+            f.write("total number of boxes analyzed: {}".format(box_cnt))
+
+            print("final processing!")
+
+            # plotting
+            all_xq = XAI_res_path_str + "/all_xq_thresh{}.csv".format(ignore_thresh)
+            tp_xq = XAI_res_path_str + "/tp_xq_thresh{}.csv".format(ignore_thresh)
+            fp_xq = XAI_res_path_str + "/fp_xq_thresh{}.csv".format(ignore_thresh)
+            fnames = ['class_score', 'XQ', 'dist_to_ego', 'class_label']
+            write_to_csv(all_xq, fnames, cls_score_list, XQ_list, dist_list, label_list)
+            write_to_csv(tp_xq, fnames, TP_score_list, TP_XQ_list, TP_dist_list, TP_label_list)
+            write_to_csv(fp_xq, fnames, FP_score_list, FP_XQ_list, FP_dist_list, FP_label_list)
+
+            fig, axs = plt.subplots(3, figsize=(10, 20))
+            cls_score_arr = np.array(cls_score_list)
+            XQ_arr = np.array(XQ_list)
+            cls_n_XQ = np.vstack([cls_score_arr, XQ_arr])
+            z_all = gaussian_kde(cls_n_XQ)(cls_n_XQ)
+            idx = z_all.argsort()
+            x, y, z = cls_score_arr[idx], XQ_arr[idx], z_all[idx]
+            axs[0].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
+            axs[0].set_title('All Boxes')
+
+            TP_score_arr = np.array(TP_score_list)
+            TP_XQ_arr = np.array(TP_XQ_list)
+            TP_cls_n_XQ = np.vstack([TP_score_arr, TP_XQ_arr])
+            z_all = gaussian_kde(TP_cls_n_XQ)(TP_cls_n_XQ)
+            idx = z_all.argsort()
+            x, y, z = TP_score_arr[idx], TP_XQ_arr[idx], z_all[idx]
+            axs[1].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
+            axs[1].set_title('TP Boxes')
+
+            FP_score_arr = np.array(FP_score_list)
+            FP_XQ_arr = np.array(FP_XQ_list)
+            FP_cls_n_XQ = np.vstack([FP_score_arr, FP_XQ_arr])
+            z_all = gaussian_kde(FP_cls_n_XQ)(FP_cls_n_XQ)
+            idx = z_all.argsort()
+            x, y, z = FP_score_arr[idx], FP_XQ_arr[idx], z_all[idx]
+            axs[2].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
+            axs[2].set_title('FP Boxes')
+            for ax in axs:
+                ax.set(xlabel='class scores', ylabel='XQ')
+            plt.savefig("{}/XQ_class_score_density_thresh{}.png".format(XAI_result_path, ignore_thresh))
+            plt.close()
+
+            fig, axs = plt.subplots(3, figsize=(10, 20))
+            axs[0].hist(XQ_list, bins=20)
+            axs[0].set_title('All Boxes')
+            axs[1].hist(TP_XQ_list, bins=20)
+            axs[1].set_title('TP Boxes')
+            axs[2].hist(FP_XQ_list, bins=20)
+            axs[2].set_title('FP Boxes')
+            for ax in axs:
+                ax.set(xlabel='XQ', ylabel='box_count')
+            plt.savefig("{}/pred_box_XQ_histograms_thresh{}.png".format(XAI_result_path, ignore_thresh))
+            plt.close()
+
+            fig, axs = plt.subplots(3, figsize=(10, 20))
+            dist_arr = np.array(dist_list)
+            dist_n_XQ = np.vstack([dist_arr, XQ_arr])
+            z_all = gaussian_kde(dist_n_XQ)(dist_n_XQ)
+            idx = z_all.argsort()
+            x, y, z = dist_arr[idx], XQ_arr[idx], z_all[idx]
+            axs[0].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
+            axs[0].set_title('All Boxes')
+
+            TP_dist_arr = np.array(TP_dist_list)
+            TP_dist_n_XQ = np.vstack([TP_dist_arr, TP_XQ_arr])
+            z_all = gaussian_kde(TP_dist_n_XQ)(TP_dist_n_XQ)
+            idx = z_all.argsort()
+            x, y, z = TP_dist_arr[idx], TP_XQ_arr[idx], z_all[idx]
+            axs[1].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
+            axs[1].set_title('TP Boxes')
+
+            FP_dist_arr = np.array(FP_dist_list)
+            FP_dist_n_XQ = np.vstack([FP_dist_arr, FP_XQ_arr])
+            z_all = gaussian_kde(FP_dist_n_XQ)(FP_dist_n_XQ)
+            idx = z_all.argsort()
+            x, y, z = FP_dist_arr[idx], FP_XQ_arr[idx], z_all[idx]
+            axs[2].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
+            axs[2].set_title('FP Boxes')
+            for ax in axs:
+                ax.set(xlabel='distance to ego', ylabel='XQ')
+            plt.savefig("{}/XQ_distance_to_ego_thresh{}.png".format(XAI_result_path, ignore_thresh))
+            plt.close()
+
+            if plot_class_wise:
+                # generate 3 plots for each class
+                for i in range(len(class_name_list)):
+                    class_name = class_name_list[i]
+                    selected = [j for j in range(len(label_list)) if label_list[j] == i]
+                    selected_TP = [j for j in range(len(TP_label_list)) if TP_label_list[j] == i]
+                    selected_FP = [j for j in range(len(FP_label_list)) if FP_label_list[j] == i]
+                    cls_score_list_i = list_selection(cls_score_list, selected)
+                    XQ_list_i = list_selection(XQ_list, selected)
+                    dist_list_i = list_selection(dist_list, selected)
+                    TP_score_list_i = list_selection(TP_score_list, selected_TP)
+                    TP_XQ_list_i = list_selection(TP_XQ_list, selected_TP)
+                    TP_dist_list_i = list_selection(TP_dist_list, selected_TP)
+                    FP_score_list_i = list_selection(FP_score_list, selected_FP)
+                    FP_XQ_list_i = list_selection(FP_XQ_list, selected_FP)
+                    FP_dist_list_i = list_selection(FP_dist_list, selected_FP)
+
+                    fig, axs = plt.subplots(3, figsize=(10, 20))
+                    axs[0].scatter(cls_score_list_i, XQ_list_i)
+                    axs[0].set_title('All Boxes')
+                    axs[1].scatter(TP_score_list_i, TP_XQ_list_i)
+                    axs[1].set_title('TP Boxes')
+                    axs[2].scatter(FP_score_list_i, FP_XQ_list_i)
+                    axs[2].set_title('FP Boxes')
+                    for ax in axs:
+                        ax.set(xlabel='class scores', ylabel='XQ')
+                    plt.savefig("{}/XQ_class_score_{}_thresh{}.png".format(XAI_result_path, class_name, ignore_thresh))
+                    plt.close()
+
+                    fig, axs = plt.subplots(3, figsize=(10, 20))
+                    axs[0].hist(XQ_list_i, bins=20)
+                    axs[0].set_title('All Boxes')
+                    axs[1].hist(TP_XQ_list_i, bins=20)
+                    axs[1].set_title('TP Boxes')
+                    axs[2].hist(FP_XQ_list_i, bins=20)
+                    axs[2].set_title('FP Boxes')
+                    for ax in axs:
+                        ax.set(xlabel='XQ', ylabel='box_count')
+                    plt.savefig("{}/pred_box_XQ_histograms_{}_thresh{}.png".format(
+                        XAI_result_path, class_name, ignore_thresh))
+                    plt.close()
+
+                    fig, axs = plt.subplots(3, figsize=(10, 20))
+                    axs[0].scatter(dist_list_i, XQ_list_i)
+                    axs[0].set_title('All Boxes')
+                    axs[1].scatter(TP_dist_list_i, TP_XQ_list_i)
+                    axs[1].set_title('TP Boxes')
+                    axs[2].scatter(FP_dist_list_i, FP_XQ_list_i)
+                    axs[2].set_title('FP Boxes')
+                    for ax in axs:
+                        ax.set(xlabel='distance to ego', ylabel='XQ')
+                    plt.savefig("{}/XQ_distance_to_ego_{}_thresh{}.png".format(
+                        XAI_result_path, class_name, ignore_thresh))
+                    plt.close()
     finally:
-        f.write("total number of boxes analyzed: {}".format(box_cnt))
         f.close()
-
-        print("final processing!")
-
-        # plotting
-        all_xq = XAI_res_path_str + "/all_xq.csv"
-        tp_xq = XAI_res_path_str + "/tp_xq.csv"
-        fp_xq = XAI_res_path_str + "/fp_xq.csv"
-        fnames = ['class_score', 'XQ', 'dist_to_ego', 'class_label']
-        write_to_csv(all_xq, fnames, cls_score_list, XQ_list, dist_list, label_list)
-        write_to_csv(tp_xq, fnames, TP_score_list, TP_XQ_list, TP_dist_list, TP_label_list)
-        write_to_csv(fp_xq, fnames, FP_score_list, FP_XQ_list, FP_dist_list, FP_label_list)
-
-        fig, axs = plt.subplots(3, figsize=(10, 20))
-        axs[0].scatter(cls_score_list, XQ_list)
-        axs[0].set_title('All Boxes')
-        axs[1].scatter(TP_score_list, TP_XQ_list)
-        axs[1].set_title('TP Boxes')
-        axs[2].scatter(FP_score_list, FP_XQ_list)
-        axs[2].set_title('FP Boxes')
-        for ax in axs:
-            ax.set(xlabel='class scores', ylabel='XQ')
-        plt.savefig("{}/XQ_class_score.png".format(XAI_result_path))
-        plt.close()
-
-        fig, axs = plt.subplots(3, figsize=(10, 20))
-        axs[0].hist(XQ_list, bins=20)
-        axs[0].set_title('All Boxes')
-        axs[1].hist(TP_XQ_list, bins=20)
-        axs[1].set_title('TP Boxes')
-        axs[2].hist(FP_XQ_list, bins=20)
-        axs[2].set_title('FP Boxes')
-        for ax in axs:
-            ax.set(xlabel='XQ', ylabel='box_count')
-        plt.savefig("{}/pred_box_XQ_histograms.png".format(XAI_result_path))
-        plt.close()
-
-        fig, axs = plt.subplots(3, figsize=(10, 20))
-        axs[0].scatter(dist_list, XQ_list)
-        axs[0].set_title('All Boxes')
-        axs[1].scatter(TP_dist_list, TP_XQ_list)
-        axs[1].set_title('TP Boxes')
-        axs[2].scatter(FP_dist_list, FP_XQ_list)
-        axs[2].set_title('FP Boxes')
-        for ax in axs:
-            ax.set(xlabel='distance to ego', ylabel='XQ')
-        plt.savefig("{}/XQ_distance_to_ego.png".format(XAI_result_path))
-        plt.close()
-
-        if plot_class_wise:
-            # generate 3 plots for each class
-            for i in range(len(class_name_list)):
-                class_name = class_name_list[i]
-                selected = [j for j in range(len(label_list)) if label_list[j] == i]
-                selected_TP = [j for j in range(len(TP_label_list)) if TP_label_list[j] == i]
-                selected_FP = [j for j in range(len(FP_label_list)) if FP_label_list[j] == i]
-                cls_score_list_i = list_selection(cls_score_list, selected)
-                XQ_list_i = list_selection(XQ_list, selected)
-                dist_list_i = list_selection(dist_list, selected)
-                TP_score_list_i = list_selection(TP_score_list, selected_TP)
-                TP_XQ_list_i = list_selection(TP_XQ_list, selected_TP)
-                TP_dist_list_i = list_selection(TP_dist_list, selected_TP)
-                FP_score_list_i = list_selection(FP_score_list, selected_FP)
-                FP_XQ_list_i = list_selection(FP_XQ_list, selected_FP)
-                FP_dist_list_i = list_selection(FP_dist_list, selected_FP)
-
-                fig, axs = plt.subplots(3, figsize=(10, 20))
-                axs[0].scatter(cls_score_list_i, XQ_list_i)
-                axs[0].set_title('All Boxes')
-                axs[1].scatter(TP_score_list_i, TP_XQ_list_i)
-                axs[1].set_title('TP Boxes')
-                axs[2].scatter(FP_score_list_i, FP_XQ_list_i)
-                axs[2].set_title('FP Boxes')
-                for ax in axs:
-                    ax.set(xlabel='class scores', ylabel='XQ')
-                plt.savefig("{}/XQ_class_score_{}.png".format(XAI_result_path, class_name))
-                plt.close()
-
-                fig, axs = plt.subplots(3, figsize=(10, 20))
-                axs[0].hist(XQ_list_i, bins=20)
-                axs[0].set_title('All Boxes')
-                axs[1].hist(TP_XQ_list_i, bins=20)
-                axs[1].set_title('TP Boxes')
-                axs[2].hist(FP_XQ_list_i, bins=20)
-                axs[2].set_title('FP Boxes')
-                for ax in axs:
-                    ax.set(xlabel='XQ', ylabel='box_count')
-                plt.savefig("{}/pred_box_XQ_histograms_{}.png".format(XAI_result_path, class_name))
-                plt.close()
-
-                fig, axs = plt.subplots(3, figsize=(10, 20))
-                axs[0].scatter(dist_list_i, XQ_list_i)
-                axs[0].set_title('All Boxes')
-                axs[1].scatter(TP_dist_list_i, TP_XQ_list_i)
-                axs[1].set_title('TP Boxes')
-                axs[2].scatter(FP_dist_list_i, FP_XQ_list_i)
-                axs[2].set_title('FP Boxes')
-                for ax in axs:
-                    ax.set(xlabel='distance to ego', ylabel='XQ')
-                plt.savefig("{}/XQ_distance_to_ego_{}.png".format(XAI_result_path, class_name))
-                plt.close()
-
         print("{} boxes analyzed".format(box_cnt))
         print("--- {} seconds ---".format(time.time() - start_time))
 

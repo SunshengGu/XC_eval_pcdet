@@ -63,5 +63,24 @@ def write_to_csv(file_name, field_name, data_1, data_2, data_3, data_4):
             writer.writerow({name1: data_1[i], name2: data_2[i], name3: data_3[i], name4: data_4[i]})
 
 
+def write_attr_to_csv(file_name, grad, box_vertices):
+    with open(file_name, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile, delimiter=',')
+        if len(grad.shape)==3 and grad.shape[2]==64:
+            pos_grad = np.sum((grad > 0) * grad, axis=2)
+            neg_grad = np.sum((grad > 0) * grad, axis=2)
+            for row in pos_grad:
+                writer.writerow(row)
+            for vert in box_vertices:
+                writer.writerow(vert)
+            for row in neg_grad:
+                writer.writerow(row)
+        else:
+            for row in grad:
+                writer.writerow(row)
+            for vert in box_vertices:
+                writer.writerow(vert)
+
+
 if __name__ == '__main__':
     pass

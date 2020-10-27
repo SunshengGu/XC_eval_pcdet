@@ -70,9 +70,9 @@ def box_preprocess(box_vertices):
     D = box_vertices[3]
     AB, AD = np.zeros(2), np.zeros(2)
     AB[0] = B[0] - A[0]
-    AB[1] = B[0] - A[1]
+    AB[1] = B[1] - A[1]
     AD[0] = D[0] - A[0]
-    AD[1] = D[0] - A[1]
+    AD[1] = D[1] - A[1]
     AB_dot_AB = np.dot(AB, AB)
     AD_dot_AD = np.dot(AD, AD)
     return AB, AD, AB_dot_AB, AD_dot_AD
