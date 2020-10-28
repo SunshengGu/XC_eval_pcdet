@@ -127,7 +127,8 @@ def main():
             parameter to get higher dpi.
     :return:
     """
-    XAI_sum = True
+    use_margin = True
+    XAI_sum = False
     XAI_cnt = not XAI_sum
     ignore_thresh_list = [0.1, 0.2, 0.3]
     box_cnt = 0
@@ -143,7 +144,7 @@ def main():
     gray_scale_overlay = True
     plot_class_wise = True
     color_map = 'jet'
-    box_margin = 5.0
+    box_margin = 0.2
     if gray_scale_overlay:
         color_map = 'gray'
     scaling_factor = 5
@@ -280,13 +281,17 @@ def main():
                             # boxes_type = attr_data_file["box_type"][()]
                             # pred_boxes_loc = attr_data_file["pred_boxes_loc"][()]
                             # pred_scores = attr_data_file["box_score"][()]
-                            pred_boxes = attr_data_file["pred_boxes"]
+                            prediction_boxes = attr_data_file["pred_boxes"]
+                            expanded_pred_boxes = attr_data_file["pred_boxes_expand"]
                             pos_attr = attr_data_file["pos_attr"]
                             neg_attr = attr_data_file["neg_attr"]
                             boxes_type = attr_data_file["box_type"]
                             pred_boxes_loc = attr_data_file["pred_boxes_loc"]
                             pred_scores = attr_data_file["box_score"]
 
+                            pred_boxes = prediction_boxes
+                            if use_margin:
+                                pred_boxes = expanded_pred_boxes
                             for j in range(len(pred_boxes)):
                                 print("box id is: {}".format(j))
                                 box_x = pred_boxes_loc[j][0]
@@ -296,11 +301,11 @@ def main():
                                 if XAI_sum:
                                     XQ = get_sum_XQ_analytics(pos_attr[j], neg_attr[j], pred_boxes[j], dataset_name,
                                                               sign, ignore_thresh, high_rez=high_rez,
-                                                              scaling_factor=scaling_factor, margin=box_margin)
+                                                              scaling_factor=scaling_factor)
                                 if XAI_cnt:
                                     XQ = get_cnt_XQ_analytics(pos_attr[j], neg_attr[j], pred_boxes[j], dataset_name,
                                                               sign, ignore_thresh, high_rez=high_rez,
-                                                              scaling_factor=scaling_factor, margin=box_margin)
+                                                              scaling_factor=scaling_factor)
                                 XQ_list.append(XQ)
                                 cls_score_list.append(pred_scores[j][0])
                                 dist_list.append(dist_to_ego)

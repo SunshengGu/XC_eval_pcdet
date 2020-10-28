@@ -78,7 +78,7 @@ def box_preprocess(box_vertices):
     return AB, AD, AB_dot_AB, AD_dot_AD
 
 
-def in_box(A, y, x, AB, AD, AB_dot_AB, AD_dot_AD, margin=0.2):
+def in_box(A, y, x, AB, AD, AB_dot_AB, AD_dot_AD):
     """
     reference: https://math.stackexchange.com/questions/190111/how-to-check-if-a-point-is-inside-a-rectangle
     :param A: first vertex of the box
@@ -91,11 +91,11 @@ def in_box(A, y, x, AB, AD, AB_dot_AB, AD_dot_AD, margin=0.2):
     AM[1] = x - A[1]
     AM_dot_AB = np.dot(AM, AB)
     AB_len = math.sqrt(AB_dot_AB)
-    if AM_dot_AB < 0 - margin * AB_len or AM_dot_AB > AB_dot_AB + margin * AB_len:
+    if AM_dot_AB < 0 or AM_dot_AB > AB_dot_AB:
         return False
     AM_dot_AD = np.dot(AM, AD)
     AD_len = math.sqrt(AD_dot_AD)
-    if AM_dot_AD < 0 - margin * AD_len or AM_dot_AD > AD_dot_AD + margin * AD_len:
+    if AM_dot_AD < 0 or AM_dot_AD > AD_dot_AD:
         return False
     return True
 

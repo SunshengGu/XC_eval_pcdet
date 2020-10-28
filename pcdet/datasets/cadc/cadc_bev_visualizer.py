@@ -17,7 +17,7 @@ import datetime
 class CADC_BEV:
     def __init__(self, dataset, repo_dir='/root/pcdet', scale_to_pseudoimg=False, class_name=['Car', 'Pedestrian', 'Cyclist'],
                 result_path='output/cadc_models/pointpillar/default/eval/epoch_4/val/default/result.pkl',
-                output_path = 'data/cadc/', background='black', scale=5, cmap='jet', dpi_factor=20.0):
+                output_path = 'data/cadc/', background='black', scale=5, cmap='jet', dpi_factor=20.0, margin=0.0):
         self.repo_dir = repo_dir
         self.scale_to_pseudoimg = scale_to_pseudoimg
         self.class_name = class_name
@@ -33,9 +33,11 @@ class CADC_BEV:
         output_path = output_path + '{}_bev_pred'.format(dt_string)
         self.output_path = os.path.join(repo_dir, output_path)
         self.pred_poly = [] # store the predicted polygons
+        self.pred_poly_expand = []  # store the expanded predicted polygons
         self.pred_loc = []
         self.gt_poly = []   # store the ground truth polygons
         self.gt_loc = []    # store the gt box locations
+        self.margin = margin
         if not os.path.exists(self.output_path):
             os.makedirs(self.output_path)
 
@@ -139,6 +141,7 @@ class CADC_BEV:
         y_img = [i - fwd_range[0] for i in y_img]
         gt_poly = []
         pred_poly = []
+        pred_poly_expand = []
         gt_loc = []
         pred_loc = []
 
@@ -158,6 +161,10 @@ class CADC_BEV:
         # print('in visualization script: len(predictions): {}'.format(len(predictions)))
         for cuboid in predictions:
             x, y, z, w, l, h, yaw = cuboid
+            if self.margin != 0.0:
+                w_big = w + 2 * self.margin
+                l_big = l + 2 * self.margin
+                pred_poly_expand.append(self.cuboid_to_bev(x, y, z, w_big, l_big, h, yaw))
 
             # if (x < fwd_range[0] or x > fwd_range[1] or y < side_range[0] or y > side_range[1]):
             #     continue  # out of bounds
@@ -170,8 +177,13 @@ class CADC_BEV:
 
         gt_poly = [poly + offset for poly in gt_poly]
         pred_poly = [poly + offset for poly in pred_poly]
+        pred_poly_expand = [poly + offset for poly in pred_poly_expand]
         gt_loc = [loc + offset[0] for loc in gt_loc]
         self.pred_poly = pred_poly
+        if self.margin==0.0:
+            self.pred_poly_expand = pred_poly
+        else:
+            self.pred_poly_expand = pred_poly_expand
         self.gt_poly = gt_poly
         self.gt_loc = gt_loc
         self.pred_loc = pred_loc

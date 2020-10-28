@@ -221,6 +221,7 @@ def find_missing_gt(gt_dict, pred_boxes, iou_unmatching_thresholds):
 def main():
     """
     important variables:
+        FN_analysis: indicates if we are doing FN analysis
         max_obj_cnt: The maximum number of objects in an image, right now set to 50
         batches_to_analyze: The number of batches for which explanations are generated
         method: Explanation method used.
@@ -233,7 +234,7 @@ def main():
         channel_xai: Whether to generate channel-wise attribution heat map for the pseudoimage
         gray_scale_overlay: Whether to convert the input image into gray scale.
         plot_class_wise: Whether to generate plots for each class.
-        box_margin: Margin for the bounding boxes in number of pixels
+        box_margin: Margin for the bounding boxes in meters
         orig_bev_w: Width of the original BEV in # pixels. For CADC, width = height. Note that this HAS to be an
             integer multiple of pseudo_img_w.
         orig_bev_h: Height of the original BEV in # pixels. For CADC, width = height.
@@ -241,12 +242,15 @@ def main():
             parameter to get higher dpi.
     :return:
     """
+    FN_analysis = False
     box_cnt = 0
     start_time = time.time()
     max_obj_cnt = 50
-    batches_to_analyze = 7
+    batches_to_analyze = 500
     method = 'IG'
     ignore_thresh = 0
+    verify_box = False
+    attr_to_csv = False
     attr_shown = 'positive'
     high_rez = True
     overlay_orig_bev = True
@@ -255,10 +259,10 @@ def main():
     gray_scale_overlay = True
     plot_class_wise = False
     color_map = 'jet'
-    box_margin = 0
+    box_margin = 0.2
     if gray_scale_overlay:
         color_map = 'gray'
-    scaling_factor = 5
+    scaling_factor = 5.0
     args, cfg, x_cfg = parse_config()
     dataset_name = cfg.DATA_CONFIG.DATASET
     num_channels_viz = min(32, cfg.MODEL.MAP_TO_BEV.NUM_BEV_FEATURES)
@@ -341,10 +345,10 @@ def main():
     print("grid size for 2D pseudoimage: {}".format(test_set.grid_size))
 
     cadc_bev = CADC_BEV(dataset=test_set, scale_to_pseudoimg=(not high_rez), background='black',
-                        scale=scaling_factor, cmap=color_map, dpi_factor=dpi_division_factor)
+                        scale=scaling_factor, cmap=color_map, dpi_factor=dpi_division_factor, margin=box_margin)
     kitti_bev = KITTI_BEV(dataset=test_set, scale_to_pseudoimg=(not high_rez), background='black',
                           result_path='output/kitti_models/pointpillar/default/eval/epoch_7728/val/default/result.pkl',
-                          scale=scaling_factor, cmap=color_map, dpi_factor=dpi_division_factor)
+                          scale=scaling_factor, cmap=color_map, dpi_factor=dpi_division_factor, margin=box_margin)
     print('\n \n building the 2d network')
     model2D = build_network(model_cfg=x_cfg.MODEL, num_class=len(x_cfg.CLASS_NAMES), dataset=test_set)
     print('\n \n building the full network')
@@ -417,9 +421,11 @@ def main():
     os.chmod(info_file_2, 0o777)
     try:
         for batch_num, batch_dict in enumerate(test_loader):
+            if batch_num == batches_to_analyze:
+                break  # just process a limited number of batches
             print("\nbatch_num: {}\n".format(batch_num))
-            if batch_num != 6:
-                continue
+            # if batch_num != 5:
+            #     continue
             # print('\nlen(batch_dict): {}\n'.format(len(batch_dict)))
             XAI_batch_path_str = XAI_res_path_str + '/batch_{}'.format(batch_num)
             os.mkdir(XAI_batch_path_str)
@@ -510,6 +516,7 @@ def main():
                     #TODO: implement box padding for Cadc
                     bev_fig, bev_fig_data = cadc_bev.get_bev_image(img_idx)
                     pred_boxes_vertices = cadc_bev.pred_poly
+                    padded_pred_boxes_vertices = cadc_bev.pred_poly_expand
                     gt_boxes_vertices = cadc_bev.gt_poly
                     gt_boxes_loc = cadc_bev.gt_loc
                     pred_boxes_loc = cadc_bev.pred_loc
@@ -547,7 +554,7 @@ def main():
 
                 for k in range(3):  # iterate through the 3 classes
                     num_boxes = min(box_cnt_list) - 1
-                    print('num_boxes: {}'.format(num_boxes))
+                    # print('num_boxes: {}'.format(num_boxes))
                     XAI_cls_path_str = XAI_sample_path_str + '/explanation_for_{}'.format(
                         class_name_list[k])
                     XAI_attr_cls_path_str = XAI_attr_sample_path_str + '/explanation_for_{}'.format(
@@ -579,7 +586,7 @@ def main():
                         "box_score", (0, 1), maxshape=(None, 1), dtype="float32", chunks=True)
 
                     for j in range(num_boxes):  # iterate through each box in this sample
-                        # if j != 26:
+                        # if j > 5:
                         #     # save time for debugging
                         #     break
                         if not box_validation(pred_boxes[j], pred_boxes_vertices[j], dataset_name):
@@ -627,8 +634,6 @@ def main():
                             neg_grad = np.sum(-1*(grad<0)*grad, axis=2)
                             pos_grad_copy = copy.deepcopy(pos_grad)
                             neg_grad_copy = copy.deepcopy(neg_grad)
-                            print("grad.shape: {}".format(grad.shape))
-                            print('pos_grad.shape: {}'.format(pos_grad.shape))
                             box_type = None
                             if conf_mat[i][j] == 'TP':
                                 box_type = 1
@@ -652,14 +657,13 @@ def main():
                             attr_file["pred_boxes_loc"][new_size - 1] = pred_boxes_loc[j]
                             attr_file["box_score"][new_size - 1] = pred_scores[j]
 
-                            print("attr_file[\"pos_attr\"].shape: {}".format(attr_file["pos_attr"].shape))
-
                             # XQ = get_sum_XQ(grad, pred_boxes_vertices[j], dataset_name, box_w, box_l, sign,
                             #                 high_rez=high_rez, scaling_factor=scaling_factor, margin=box_margin)
                             grad_copy = pos_grad_copy if attr_shown=="positive" else neg_grad_copy
+                            # print("pred_boxes_vertices[j] prior to transformation: {}".format(pred_boxes_vertices[j]))
                             XQ = get_sum_XQ_analytics(pos_grad, neg_grad, padded_pred_boxes_vertices[j], dataset_name,
-                                                      sign, ignore_thresh=ignore_thresh, high_rez=high_rez, box_l=box_l, box_w=box_w,
-                                                      scaling_factor=scaling_factor, margin=box_margin, grad_copy=grad_copy)
+                                                      sign, ignore_thresh=ignore_thresh, high_rez=high_rez,
+                                                      scaling_factor=scaling_factor, grad_copy=grad_copy)
                             XQ_list.append(XQ)
                             cls_score_list.append(pred_scores[j])
                             dist_list.append(dist_to_ego)
@@ -677,7 +681,7 @@ def main():
                                 FP_dist_list.append(dist_to_ego)
                                 FP_label_list.append(k)
                                 attr_file["box_type"][new_size - 1] = 0
-                            box_explained = flip_xy(pred_boxes_vertices[j])
+                            box_explained = flip_xy(padded_pred_boxes_vertices[j])
                             figure_size = (8, 6)
                             # figure_size = (24, 18)
                             if high_rez:
@@ -725,137 +729,133 @@ def main():
                                 XAI_box_relative_path_str = XAI_cls_path_str.split("tools/", 1)[1] + \
                                                             '/box_{}_{}_XQ_{}.png'.format(
                                                                 j, conf_mat[i][j], XQ)
-                                XAI_attr_path_str = XAI_cls_path_str + \
+                                XAI_attr_csv_str = XAI_cls_path_str + \
                                                             '/box_{}_{}_XQ_{}.csv'.format(
                                                                 j, conf_mat[i][j], XQ)
-                                verts = copy.deepcopy(pred_boxes_vertices[j])
+                                verts = copy.deepcopy(padded_pred_boxes_vertices[j])
                                 if high_rez:
                                     verts = verts/scaling_factor
-                                write_attr_to_csv(XAI_attr_path_str, grad_copy, verts)
-                                # if attr_shown == "positive":
-                                #     write_attr_to_csv(XAI_attr_path_str, pos_grad, verts)
-                                # elif attr_shown == "negative":
-                                #     write_attr_to_csv(XAI_attr_path_str, neg_grad, verts)
-                                # print('XAI_box_path_str: {}'.format(XAI_box_path_str))
-                                # f.write('{}\n'.format(XQ))
+                                if attr_to_csv:
+                                    if verify_box:
+                                        write_attr_to_csv(XAI_attr_csv_str, grad_copy, verts)
+                                    else:
+                                        if attr_shown == "positive":
+                                            write_attr_to_csv(XAI_attr_csv_str, pos_grad, verts)
+                                        elif attr_shown == "negative":
+                                            write_attr_to_csv(XAI_attr_csv_str, neg_grad, verts)
                                 # if high_rez:
                                 #     box_explained = box_explained * 3
                                 # box_explained = box_explained * 1.5
-                                print("\nbox_explained: {}\n".format(box_explained))
+                                # print("\nbox_explained: {}\n".format(box_explained))
                                 polys = patches.Polygon(box_explained,
                                                         closed=True, fill=False, edgecolor='y', linewidth=1)
                                 grad_viz[1].add_patch(polys)
                                 grad_viz[0].savefig(XAI_box_relative_path_str, bbox_inches='tight', pad_inches=0.0)
 
-                                if not missed_boxes_plotted[k] and len(missed_boxes[i]) > 0:
-                                    missed_boxes_plotted[k] = True
-                                    print('len(gt_boxes_vertices): {}'.format(len(gt_boxes_vertices)))
-                                    print('missed_boxes[i]: {}'.format(missed_boxes[i]))
-                                    for index in missed_boxes[i]:
-                                        if index >= len(gt_boxes_vertices):
-                                            break
+                                if FN_analysis:
+                                    if not missed_boxes_plotted[k] and len(missed_boxes[i]) > 0:
+                                        missed_boxes_plotted[k] = True
+                                        # print('len(gt_boxes_vertices): {}'.format(len(gt_boxes_vertices)))
+                                        # print('missed_boxes[i]: {}'.format(missed_boxes[i]))
+                                        for index in missed_boxes[i]:
+                                            if index >= len(gt_boxes_vertices):
+                                                break
 
-                                        # obtain the missed gt box
-                                        missed_box = gt_boxes_vertices[index]
-                                        box_vertices = transform_box_coord(grad.shape[0], grad.shape[1], missed_box,
-                                                                           dataset_name, high_rez, scaling_factor)
-                                        box_vertices = flip_xy(box_vertices)
-                                        # print("\nthe missed gt box: {}\n".format(missed_box))
-                                        missed_ploys = patches.Polygon(box_vertices,
-                                                                       closed=True, fill=False, edgecolor='c', linewidth=1)
-                                        grad_viz[1].add_patch(missed_ploys)
+                                            # obtain the missed gt box
+                                            missed_box = gt_boxes_vertices[index]
+                                            box_vertices = transform_box_coord(grad.shape[0], grad.shape[1], missed_box,
+                                                                               dataset_name, high_rez, scaling_factor)
+                                            box_vertices = flip_xy(box_vertices)
+                                            # print("\nthe missed gt box: {}\n".format(missed_box))
+                                            missed_ploys = patches.Polygon(box_vertices,
+                                                                           closed=True, fill=False, edgecolor='c', linewidth=1)
+                                            grad_viz[1].add_patch(missed_ploys)
 
-                                        if len(missed_box) != 0:
-                                            print("\nfinding anchor boxes matching the missed gt boxes")
-                                            # obtain the anchor box matching that gt_box
-                                            # this is valid in (x, y), and in meters, with upper left as (0,0)
-                                            missed_box_loc = gt_boxes_loc[index]
-                                            print('missed_box_loc: {}'.format(missed_box_loc))
-                                            # y, x = transform_point_coord(grad.shape[0], grad.shape[1], missed_box_loc,
-                                            #                                    dataset_name, high_rez, scaling_factor)
-                                            # print('transformed box location (y,x): ({}, {})'.format(y, x))
-                                            anchor_ind = find_anchor_index(dataset_name, missed_box_loc[1],
-                                                                           missed_box_loc[0])
-                                            print('the anchor index is: {}'.format(anchor_ind))
-                                            lower_bound = max(anchor_ind - 4, 0)
-                                            upper_bound = min(total_anchors, anchor_ind + 4)
-                                            matched_anchor_vertices = None
-                                            max_iou = 0
-                                            experiment = False
-                                            if experiment:
-                                                box_gpu = batch_dict['anchor_boxes'][i][anchor_ind]
-                                                box = box_gpu.cpu().detach().numpy()
-                                                print("\nthe FN anchor that we want to visualize: {}\n".
-                                                      format(box))
-                                                box_expand = np.expand_dims(box, axis=0)
-                                                anchor_vertices = kitti_bev.cuboid_to_bev(box[0], box[1], box[2], box[3],
-                                                                                          box[4], box[5], box[6])
-                                                if dataset_name == 'CadcDataset':
-                                                    for vert_ind in range(len(anchor_vertices)):
-                                                        anchor_vertices[vert_ind][0] += 50
-                                                        anchor_vertices[vert_ind][1] += 50
-                                                elif dataset_name == 'KittiDataset':
-                                                    for vert_ind in range(len(anchor_vertices)):
-                                                        # TODO: need to confirm the correctness of this
-                                                        # anchor_vertices[vert_ind][0] += 50
-                                                        anchor_vertices[vert_ind][1] += 39.68
+                                            if len(missed_box) != 0:
+                                                print("\nfinding anchor boxes matching the missed gt boxes")
+                                                # obtain the anchor box matching that gt_box
+                                                # this is valid in (x, y), and in meters, with upper left as (0,0)
+                                                missed_box_loc = gt_boxes_loc[index]
+                                                print('missed_box_loc: {}'.format(missed_box_loc))
+                                                # y, x = transform_point_coord(grad.shape[0], grad.shape[1], missed_box_loc,
+                                                #                                    dataset_name, high_rez, scaling_factor)
+                                                # print('transformed box location (y,x): ({}, {})'.format(y, x))
+                                                anchor_ind = find_anchor_index(dataset_name, missed_box_loc[1],
+                                                                               missed_box_loc[0])
+                                                print('the anchor index is: {}'.format(anchor_ind))
+                                                lower_bound = max(anchor_ind - 4, 0)
+                                                upper_bound = min(total_anchors, anchor_ind + 4)
+                                                matched_anchor_vertices = None
+                                                max_iou = 0
+                                                experiment = False
+                                                if experiment:
+                                                    box_gpu = batch_dict['anchor_boxes'][i][anchor_ind]
+                                                    box = box_gpu.cpu().detach().numpy()
+                                                    print("\nthe FN anchor that we want to visualize: {}\n".
+                                                          format(box))
+                                                    box_expand = np.expand_dims(box, axis=0)
+                                                    anchor_vertices = kitti_bev.cuboid_to_bev(box[0], box[1], box[2], box[3],
+                                                                                              box[4], box[5], box[6])
+                                                    if dataset_name == 'CadcDataset':
+                                                        for vert_ind in range(len(anchor_vertices)):
+                                                            anchor_vertices[vert_ind][0] += 50
+                                                            anchor_vertices[vert_ind][1] += 50
+                                                    elif dataset_name == 'KittiDataset':
+                                                        for vert_ind in range(len(anchor_vertices)):
+                                                            # TODO: need to confirm the correctness of this
+                                                            # anchor_vertices[vert_ind][0] += 50
+                                                            anchor_vertices[vert_ind][1] += 39.68
 
-                                                print("\nthe FN anchor_vertices: {}\n".format(anchor_vertices))
-                                                viz_vertices = transform_box_coord(
-                                                    grad.shape[0], grad.shape[1], anchor_vertices, dataset_name,
-                                                    high_rez, scaling_factor
-                                                )
-                                                print("\nthe FN anchor_vertices scaled: {}\n".format(viz_vertices))
-                                                viz_vertices = flip_xy(viz_vertices)
-                                                # print("\nthe FN box with flipped vertices: {}\n".format(viz_vertices))
-                                                viz_poly = patches.Polygon(
-                                                    viz_vertices, closed=True, fill=False, edgecolor='m', linewidth=1)
-                                                grad_viz[1].add_patch(viz_poly)
-                                            for ind in range(lower_bound, upper_bound, 1):
-                                                print('the anchor index to search: {}'.format(ind))
-                                                box_gpu = batch_dict['anchor_boxes'][i][ind]
-                                                box = box_gpu.cpu().detach().numpy()
-                                                box_expand = np.expand_dims(box, axis=0)
-                                                anchor_vertices = kitti_bev.cuboid_to_bev(box[0], box[1], box[2], box[3],
-                                                                                          box[4], box[5], box[6])
-                                                if dataset_name == 'CadcDataset':
-                                                    for vert_ind in range(len(anchor_vertices)):
-                                                        anchor_vertices[vert_ind][0] += 50
-                                                        anchor_vertices[vert_ind][1] += 50
-                                                elif dataset_name == 'KittiDataset':
-                                                    for vert_ind in range(len(anchor_vertices)):
-                                                        # TODO: need to confirm the correctness of this
-                                                        # anchor_vertices[vert_ind][0] += 50
-                                                        anchor_vertices[vert_ind][1] += 39.68
-                                                gt_box = gt_dict[i]['boxes'][index]
-                                                gt_box_expand = np.expand_dims(gt_box, axis=0)
-                                                curr_iou, _ = calculate_bev_iou(gt_box_expand, box_expand)
-                                                print('iou between the missed gt box and the corresponding anchor: {}'
-                                                      .format(curr_iou))
-                                                if curr_iou[0] > max_iou:
-                                                    matched_anchor_vertices = anchor_vertices
-                                                    max_iou = curr_iou[0]
-                                            if matched_anchor_vertices is not None:
-                                                matched_anchor_vertices = transform_box_coord(
-                                                    grad.shape[0], grad.shape[1], matched_anchor_vertices, dataset_name,
-                                                    high_rez, scaling_factor)
-                                                matched_anchor_vertices = flip_xy(matched_anchor_vertices)
-                                                matched_anchor_polys = patches.Polygon(
-                                                    matched_anchor_vertices, closed=True, fill=False, edgecolor='m', linewidth=1)
-                                                grad_viz[1].add_patch(matched_anchor_polys)
-                                    XAI_missed_boxes_str = XAI_cls_path_str.split("tools/", 1)[1] + \
-                                                           '/missed_gt_boxes.png'
-                                    grad_viz[0].savefig(XAI_missed_boxes_str, bbox_inches='tight', pad_inches=0.0)
+                                                    print("\nthe FN anchor_vertices: {}\n".format(anchor_vertices))
+                                                    viz_vertices = transform_box_coord(
+                                                        grad.shape[0], grad.shape[1], anchor_vertices, dataset_name,
+                                                        high_rez, scaling_factor
+                                                    )
+                                                    print("\nthe FN anchor_vertices scaled: {}\n".format(viz_vertices))
+                                                    viz_vertices = flip_xy(viz_vertices)
+                                                    # print("\nthe FN box with flipped vertices: {}\n".format(viz_vertices))
+                                                    viz_poly = patches.Polygon(
+                                                        viz_vertices, closed=True, fill=False, edgecolor='m', linewidth=1)
+                                                    grad_viz[1].add_patch(viz_poly)
+                                                for ind in range(lower_bound, upper_bound, 1):
+                                                    print('the anchor index to search: {}'.format(ind))
+                                                    box_gpu = batch_dict['anchor_boxes'][i][ind]
+                                                    box = box_gpu.cpu().detach().numpy()
+                                                    box_expand = np.expand_dims(box, axis=0)
+                                                    anchor_vertices = kitti_bev.cuboid_to_bev(box[0], box[1], box[2], box[3],
+                                                                                              box[4], box[5], box[6])
+                                                    if dataset_name == 'CadcDataset':
+                                                        for vert_ind in range(len(anchor_vertices)):
+                                                            anchor_vertices[vert_ind][0] += 50
+                                                            anchor_vertices[vert_ind][1] += 50
+                                                    elif dataset_name == 'KittiDataset':
+                                                        for vert_ind in range(len(anchor_vertices)):
+                                                            # TODO: need to confirm the correctness of this
+                                                            # anchor_vertices[vert_ind][0] += 50
+                                                            anchor_vertices[vert_ind][1] += 39.68
+                                                    gt_box = gt_dict[i]['boxes'][index]
+                                                    gt_box_expand = np.expand_dims(gt_box, axis=0)
+                                                    curr_iou, _ = calculate_bev_iou(gt_box_expand, box_expand)
+                                                    print('iou between the missed gt box and the corresponding anchor: {}'
+                                                          .format(curr_iou))
+                                                    if curr_iou[0] > max_iou:
+                                                        matched_anchor_vertices = anchor_vertices
+                                                        max_iou = curr_iou[0]
+                                                if matched_anchor_vertices is not None:
+                                                    matched_anchor_vertices = transform_box_coord(
+                                                        grad.shape[0], grad.shape[1], matched_anchor_vertices, dataset_name,
+                                                        high_rez, scaling_factor)
+                                                    matched_anchor_vertices = flip_xy(matched_anchor_vertices)
+                                                    matched_anchor_polys = patches.Polygon(
+                                                        matched_anchor_vertices, closed=True, fill=False, edgecolor='m', linewidth=1)
+                                                    grad_viz[1].add_patch(matched_anchor_polys)
+                                        XAI_missed_boxes_str = XAI_cls_path_str.split("tools/", 1)[1] + \
+                                                               '/missed_gt_boxes.png'
+                                        grad_viz[0].savefig(XAI_missed_boxes_str, bbox_inches='tight', pad_inches=0.0)
                                 plt.close('all')
                                 os.chmod(XAI_box_relative_path_str, 0o777)
                                 # print('box_{}_{}.png is saved in {}'.format(j,conf_mat[i][j],XAI_cls_path_str))
                     attr_file.close()
-            #     break  # only processing one sample to save time
-            #
-            if batch_num == batches_to_analyze - 1:
-                break  # just process a limited number of batches
-            # # break
-            # # just need one explanation for example
     finally:
         f.write("total number of boxes analyzed: {}".format(box_cnt))
         f.close()
