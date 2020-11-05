@@ -43,6 +43,7 @@ class KITTI_BEV:
         output_path = output_path + '{}_bev_pred'.format(dt_string)
         self.output_path = os.path.join(repo_dir, output_path)
         self.margin = margin
+        self.lidar_data = None
         if not os.path.exists(self.output_path):
             os.makedirs(self.output_path)
 
@@ -291,14 +292,23 @@ class KITTI_BEV:
             print('frame has no id')
             return None
 
-        lidar_data = self.dataset.get_lidar(result_frame[unique_id])
+        # The following lines are for retaining lidar points information for point count later
+        # ************************* start ************************** #
+        lidar_points = self.dataset.get_lidar(result_frame[unique_id])
+        calib = self.dataset.get_calib(result_frame[unique_id])
+        pts_rect = calib.lidar_to_rect(lidar_points[:, 0:3])
+        img_shape = self.dataset.get_image_shape(result_frame[unique_id])
+        fov_flag = self.dataset.get_fov_flag(pts_rect, img_shape, calib)
+        pts_fov = lidar_points[fov_flag]
+        self.lidar_data = pts_fov
+        # ************************* end ************************** #
         annotations = self.load_gt_anns(result_frame, unique_id)
         box_preds = self.get_preds(result_frame)
         scores = result_frame['score']
 
         print("Processing Sample: %s" % result_frame[unique_id])
 
-        bev_fig = self.draw_bev(lidar_data, annotations, box_preds,
+        bev_fig = self.draw_bev(lidar_points, annotations, box_preds,
                                 os.path.join(self.output_path, "%s.png" % result_frame[unique_id]))
 
         bev_fig.canvas.draw()

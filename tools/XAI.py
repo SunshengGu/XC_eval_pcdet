@@ -242,11 +242,11 @@ def main():
             parameter to get higher dpi.
     :return:
     """
-    FN_analysis = False
+    FN_analysis = True
     box_cnt = 0
     start_time = time.time()
     max_obj_cnt = 50
-    batches_to_analyze = 500
+    batches_to_analyze = 1
     method = 'IG'
     ignore_thresh = 0
     verify_box = False
@@ -552,6 +552,9 @@ def main():
                 os.makedirs(XAI_attr_sample_path_str)
                 os.chmod(XAI_attr_sample_path_str, 0o777)
 
+                # generating corners for counting points in box
+                pred_boxes_corners = box_utils.boxes_to_corners_3d(pred_boxes)
+
                 for k in range(3):  # iterate through the 3 classes
                     num_boxes = min(box_cnt_list) - 1
                     # print('num_boxes: {}'.format(num_boxes))
@@ -584,6 +587,8 @@ def main():
                         "pred_boxes_loc", (0, 2), maxshape=(None, 2), dtype="float32", chunks=True)
                     pred_boxes_score = attr_file.create_dataset(
                         "box_score", (0, 1), maxshape=(None, 1), dtype="float32", chunks=True)
+                    pred_box_points = attr_file.create_dataset(
+                        "points_in_box", (0, 1), maxshape=(None, 1), dtype="int32", chunks=True)
 
                     for j in range(num_boxes):  # iterate through each box in this sample
                         # if j > 5:
@@ -640,6 +645,14 @@ def main():
                             elif conf_mat[i][j] == 'FP':
                                 box_type = 0
 
+                            # TODO: get the points
+                            points = None
+                            if dataset_name=="KittiDataset":
+                                points = kitti_bev.lidar_data
+                            elif dataset_name=="CadcDataset":
+                                points = cadc_bev.lidar_data
+                            points_flag = box_utils.in_hull(points[:, 0:3], pred_boxes_corners[j])
+                            num_pts = points_flag.sum()
                             new_size = attr_file["pos_attr"].shape[0] + 1
                             attr_file["pos_attr"].resize(new_size, axis=0)
                             attr_file["neg_attr"].resize(new_size, axis=0)
@@ -648,6 +661,7 @@ def main():
                             attr_file["box_type"].resize(new_size, axis=0)
                             attr_file["pred_boxes_loc"].resize(new_size, axis=0)
                             attr_file["box_score"].resize(new_size, axis=0)
+                            attr_file["points_in_box"].resize(new_size, axis=0)
 
                             attr_file["pos_attr"][new_size - 1] = pos_grad
                             attr_file["neg_attr"][new_size - 1] = neg_grad
@@ -656,6 +670,7 @@ def main():
                             attr_file["box_type"][new_size - 1] = box_type
                             attr_file["pred_boxes_loc"][new_size - 1] = pred_boxes_loc[j]
                             attr_file["box_score"][new_size - 1] = pred_scores[j]
+                            attr_file["points_in_box"][new_size - 1] = num_pts
 
                             # XQ = get_sum_XQ(grad, pred_boxes_vertices[j], dataset_name, box_w, box_l, sign,
                             #                 high_rez=high_rez, scaling_factor=scaling_factor, margin=box_margin)
@@ -727,8 +742,8 @@ def main():
                                                                     alpha_overlay=overlay,
                                                                     fig_size=figure_size, upscale=high_rez)
                                 XAI_box_relative_path_str = XAI_cls_path_str.split("tools/", 1)[1] + \
-                                                            '/box_{}_{}_XQ_{}.png'.format(
-                                                                j, conf_mat[i][j], XQ)
+                                                            '/box_{}_{}_XQ_{}_points_{}.png'.format(
+                                                                j, conf_mat[i][j], XQ, num_pts)
                                 XAI_attr_csv_str = XAI_cls_path_str + \
                                                             '/box_{}_{}_XQ_{}.csv'.format(
                                                                 j, conf_mat[i][j], XQ)
@@ -743,10 +758,6 @@ def main():
                                             write_attr_to_csv(XAI_attr_csv_str, pos_grad, verts)
                                         elif attr_shown == "negative":
                                             write_attr_to_csv(XAI_attr_csv_str, neg_grad, verts)
-                                # if high_rez:
-                                #     box_explained = box_explained * 3
-                                # box_explained = box_explained * 1.5
-                                # print("\nbox_explained: {}\n".format(box_explained))
                                 polys = patches.Polygon(box_explained,
                                                         closed=True, fill=False, edgecolor='y', linewidth=1)
                                 grad_viz[1].add_patch(polys)

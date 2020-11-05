@@ -38,6 +38,7 @@ class CADC_BEV:
         self.gt_poly = []   # store the ground truth polygons
         self.gt_loc = []    # store the gt box locations
         self.margin = margin
+        self.lidar_data = None
         if not os.path.exists(self.output_path):
             os.makedirs(self.output_path)
 
@@ -248,6 +249,7 @@ class CADC_BEV:
         date, run, frame = result_frame[unique_id]
 
         lidar_data = self.dataset.get_lidar([date, run, frame])
+        self.lidar_data = lidar_data
         annotations = self.dataset.get_label([date, run, frame])[int(frame)]
 
         point_count_threshold, distance_threshold, score_threshold = self.dataset.get_threshold()
