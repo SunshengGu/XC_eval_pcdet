@@ -37,6 +37,7 @@ class CADC_BEV:
         self.pred_loc = []
         self.gt_poly = []   # store the ground truth polygons
         self.gt_loc = []    # store the gt box locations
+        self.offset = None
         self.margin = margin
         self.lidar_data = None
         if not os.path.exists(self.output_path):
@@ -175,6 +176,7 @@ class CADC_BEV:
 
         # Transform all polygons so 0,0 is the minimum
         offset = np.array([[-side_range[0], -fwd_range[0]]] * 4)
+        self.offset = offset
 
         gt_poly = [poly + offset for poly in gt_poly]
         pred_poly = [poly + offset for poly in pred_poly]

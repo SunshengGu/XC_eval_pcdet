@@ -98,96 +98,29 @@ def parse_config():
     return args, cfg, x_cfg
 
 
-def eval_single_ckpt(model, test_loader, args, eval_output_dir, logger, epoch_id, dist_test=False):
-    # load checkpoint
-    model.load_params_from_file(filename=args.ckpt, logger=logger, to_cpu=dist_test)
-    model.cuda()
-
-    # start evaluation
-    eval_utils.eval_one_epoch(
-        cfg, model, test_loader, epoch_id, logger, dist_test=dist_test,
-        result_dir=eval_output_dir, save_to_file=args.save_to_file
-    )
-
-
-def get_no_evaluated_ckpt(ckpt_dir, ckpt_record_file, args):
-    ckpt_list = glob.glob(os.path.join(ckpt_dir, '*checkpoint_epoch_*.pth'))
-    ckpt_list.sort(key=os.path.getmtime)
-    evaluated_ckpt_list = [float(x.strip()) for x in open(ckpt_record_file, 'r').readlines()]
-
-    for cur_ckpt in ckpt_list:
-        num_list = re.findall('checkpoint_epoch_(.*).pth', cur_ckpt)
-        if num_list.__len__() == 0:
-            continue
-
-        epoch_id = num_list[-1]
-        if 'optim' in epoch_id:
-            continue
-        if float(epoch_id) not in evaluated_ckpt_list and int(float(epoch_id)) >= args.start_epoch:
-            return epoch_id, cur_ckpt
-    return -1, None
-
-
-def repeat_eval_ckpt(model, test_loader, args, eval_output_dir, logger, ckpt_dir, dist_test=False):
-    # evaluated ckpt record
-    ckpt_record_file = eval_output_dir / ('eval_list_%s.txt' % cfg.DATA_CONFIG.DATA_SPLIT['test'])
-    with open(ckpt_record_file, 'a'):
-        pass
-
-    # tensorboard log
-    if cfg.LOCAL_RANK == 0:
-        tb_log = SummaryWriter(log_dir=str(eval_output_dir / ('tensorboard_%s' % cfg.DATA_CONFIG.DATA_SPLIT['test'])))
-    total_time = 0
-    first_eval = True
-
-    while True:
-        # check whether there is checkpoint which is not evaluated
-        cur_epoch_id, cur_ckpt = get_no_evaluated_ckpt(ckpt_dir, ckpt_record_file, args)
-        if cur_epoch_id == -1 or int(float(cur_epoch_id)) < args.start_epoch:
-            wait_second = 30
-            print('Wait %s seconds for next check (progress: %.1f / %d minutes): %s \r'
-                  % (wait_second, total_time * 1.0 / 60, args.max_waiting_mins, ckpt_dir), end='', flush=True)
-            time.sleep(wait_second)
-            total_time += 30
-            if total_time > args.max_waiting_mins * 60 and (first_eval is False):
-                break
-            continue
-
-        total_time = 0
-        first_eval = False
-
-        model.load_params_from_file(filename=cur_ckpt, logger=logger, to_cpu=dist_test)
-        model.cuda()
-
-        # start evaluation
-        cur_result_dir = eval_output_dir / ('epoch_%s' % cur_epoch_id) / cfg.DATA_CONFIG.DATA_SPLIT['test']
-        tb_dict = eval_utils.eval_one_epoch(
-            cfg, model, test_loader, cur_epoch_id, logger, dist_test=dist_test,
-            result_dir=cur_result_dir, save_to_file=args.save_to_file
-        )
-
-        if cfg.LOCAL_RANK == 0:
-            for key, val in tb_dict.items():
-                tb_log.add_scalar(key, val, cur_epoch_id)
-
-        # record this epoch which has been evaluated
-        with open(ckpt_record_file, 'a') as f:
-            print('%s' % cur_epoch_id, file=f)
-        logger.info('Epoch %s has been evaluated' % cur_epoch_id)
-
-
-def calculate_iou(gt_boxes, pred_boxes):
+def calculate_iou(gt_boxes, pred_boxes, dataset_name):
     # see pcdet/datasets/kitti/kitti_object_eval_python/eval.py for explanation
-    z_axis = 2
-    z_center = 0.5
-    if cfg.DATA_CONFIG.DATASET == 'KittiDataset':
-        z_axis = 1
-        z_center = 1.0
+    z_axis = 1
+    z_center = 1.0
+    if dataset_name == 'CadcDataset':
+        # z_axis = 2
+        z_center = 0.5
     overlap = d3_box_overlap(gt_boxes, pred_boxes, z_axis=z_axis, z_center=z_center)
     # pick max iou wrt to each detection box
-    print('overlap.shape: {}'.format(overlap.shape))
+    # print('overlap.shape: {}'.format(overlap.shape))
     iou, gt_index = np.max(overlap, axis=0), np.argmax(overlap, axis=0)
     return iou, gt_index
+
+
+def calculate_overlaps(gt_boxes, pred_boxes, dataset_name):
+    # see pcdet/datasets/kitti/kitti_object_eval_python/eval.py for explanation
+    z_axis = 1
+    z_center = 1.0
+    if dataset_name == 'CadcDataset':
+        # z_axis = 2
+        z_center = 0.5
+    overlaps = d3_box_overlap(gt_boxes, pred_boxes, z_axis=z_axis, z_center=z_center)
+    return overlaps
 
 
 def calculate_bev_iou(gt_boxes, pred_boxes):
@@ -203,25 +136,68 @@ def find_missing_gt(gt_dict, pred_boxes, iou_unmatching_thresholds):
     gt_labels = gt_dict['labels']
     overlap = bboxes3d_nearest_bev_iou(gt_boxes[:, 0:7], pred_boxes[:, 0:7])
     # pick max iou wrt to each detection box
-    print('overlap.shape: {}'.format(overlap.shape))
+    # print('overlap.shape: {}'.format(overlap.shape))
     ious = np.max(overlap.numpy(), axis=1)
     ind = 0
     missed_gt_idx = []
+    missed_gt_label = []
     for iou in ious:
         if iou < iou_unmatching_thresholds[gt_labels[ind]]:
-            print('gt lable is : {}'.format(gt_labels[ind]))
+            print('gt label is : {}'.format(gt_labels[ind]))
             print('maximum iou is: {}'.format(iou))
             print('matching thresh is: {}'.format(iou_unmatching_thresholds[gt_labels[ind]]))
             missed_gt_idx.append(ind)
+            missed_gt_label.append(gt_labels[ind])
         ind += 1
-    print('missed_gt_idx: {}'.format(missed_gt_idx))
-    return missed_gt_idx
+    # print('missed_gt_idx: {}'.format(missed_gt_idx))
+    return missed_gt_idx, missed_gt_label
+
+
+def find_missing_gt_3d(gt_dict, pred_boxes, iou_unmatching_thresholds, dataset_name):
+    z_axis = 1
+    z_center = 1.0
+    if dataset_name == 'CadcDataset':
+        # z_axis = 2
+        z_center = 0.5
+    gt_boxes = gt_dict['boxes']
+    gt_labels = gt_dict['labels']
+    overlap = d3_box_overlap(gt_boxes[:, 0:7], pred_boxes[:, 0:7], z_axis=z_axis, z_center=z_center)
+    # pick max iou wrt to each detection box
+    print('overlap.shape: {}'.format(overlap.shape))
+    ious = np.max(overlap, axis=1)
+    print("number of gt boxes: {}".format(len(gt_boxes)))
+    print("number of pred boxes: {}".format(len(pred_boxes)))
+    print("len(ious): {}".format(len(ious)))
+    ind = 0
+    missed_gt_idx = []
+    missed_gt_label = []
+    missed_gt_iou = []
+    for iou in ious:
+        # this is the highest IoU among all pred boxes with the particular gt box
+        print("iou: {}".format(iou))
+        print("iou thresh: {}".format(iou_unmatching_thresholds[gt_labels[ind]]))
+        if iou < iou_unmatching_thresholds[gt_labels[ind]]:
+            print('gt label is : {}'.format(gt_labels[ind]))
+            print('maximum iou is: {}'.format(iou))
+            print('matching thresh is: {}'.format(iou_unmatching_thresholds[gt_labels[ind]]))
+            missed_gt_idx.append(ind)
+            missed_gt_label.append(gt_labels[ind])
+            missed_gt_iou.append(iou)
+        ind += 1
+    # print('missed_gt_idx: {}'.format(missed_gt_idx))
+    return missed_gt_idx, missed_gt_label, missed_gt_iou
 
 
 def main():
     """
     important variables:
+        Note:
+            number code for box types:
+            0 - FP
+            1 - TP
+            2 - FN
         FN_analysis: indicates if we are doing FN analysis
+        skip_TP_FP: indicates if we are skipping TP and FP analysis
         max_obj_cnt: The maximum number of objects in an image, right now set to 50
         batches_to_analyze: The number of batches for which explanations are generated
         method: Explanation method used.
@@ -229,10 +205,14 @@ def main():
         high_rez: Whether to use higher resolution (in the case of CADC, this means 2000x2000 instead of 400x400)
         overlay_orig_bev: If True, overlay attributions onto the original point cloud BEV. If False, overlay
             attributions onto the 2D pseudoimage.
+        overlay: Parameter for attr visualization
         mult_by_inputs: Whether to pointwise-multiply Integrated Gradients attributions with the input being explained
             (i.e., the 2D pseudoimage in the case of PointPillar).
         channel_xai: Whether to generate channel-wise attribution heat map for the pseudoimage
         gray_scale_overlay: Whether to convert the input image into gray scale.
+        IOU_3D: Indicate if we are using 3D or 2D IoU to find anchors that match the FN boxes
+        d3_iou_thresh: iou thresholds from the evaluation script
+        FN_search_range: The vicinity within within which we search for the highest-IoU anchor box
         plot_class_wise: Whether to generate plots for each class.
         box_margin: Margin for the bounding boxes in meters
         orig_bev_w: Width of the original BEV in # pixels. For CADC, width = height. Note that this HAS to be an
@@ -243,21 +223,28 @@ def main():
     :return:
     """
     FN_analysis = True
+    skip_TP_FP = True
     box_cnt = 0
     start_time = time.time()
     max_obj_cnt = 50
     batches_to_analyze = 1
     method = 'IG'
-    ignore_thresh = 0
+    ignore_thresh = 0.0
     verify_box = False
     attr_to_csv = False
     attr_shown = 'positive'
     high_rez = True
     overlay_orig_bev = True
+    overlay = 0.4
     mult_by_inputs = True
     channel_xai = False
     gray_scale_overlay = True
     plot_class_wise = False
+    IOU_3D = True
+    tight_iou = True
+    d3_iou_thresh = []
+    d3_iou_thresh_dict = {}
+    FN_search_range = 5000
     color_map = 'jet'
     box_margin = 0.2
     if gray_scale_overlay:
@@ -265,7 +252,27 @@ def main():
     scaling_factor = 5.0
     args, cfg, x_cfg = parse_config()
     dataset_name = cfg.DATA_CONFIG.DATASET
+    if dataset_name == 'KittiDataset':
+        if tight_iou:
+            d3_iou_thresh = [0.7, 0.5, 0.5]
+            d3_iou_thresh_dict = {'Car': 0.7, 'Pedestrian': 0.5, 'Cyclist': 0.5}
+        else:
+            d3_iou_thresh = [0.5, 0.25, 0.25]
+            d3_iou_thresh_dict = {'Car': 0.5, 'Pedestrian': 0.25, 'Cyclist': 0.25}
+    elif dataset_name == 'CadcDataset':
+        if tight_iou:
+            d3_iou_thresh = [0.7, 0.5, 0.7]
+            d3_iou_thresh_dict = {'Car': 0.7, 'Pedestrian': 0.5, 'Truck': 0.7}
+        else:
+            d3_iou_thresh = [0.5, 0.25, 0.5]
+            d3_iou_thresh_dict = {'Car': 0.5, 'Pedestrian': 0.25, 'Truck': 0.5}
     num_channels_viz = min(32, cfg.MODEL.MAP_TO_BEV.NUM_BEV_FEATURES)
+    figure_size = (8, 6)
+    # figure_size = (24, 18)
+    if high_rez:
+        # upscale the attributions if we are using high resolution input bev
+        # also increase figure size to accommodate the higher resolution
+        figure_size = (24, 18)
     pseudo_img_w = 0
     pseudo_img_h = 0
     total_anchors = 0
@@ -394,15 +401,19 @@ def main():
     info_file = XAI_res_path_str + "/XAI_information.txt"
     f = open(info_file, "w")
     f.write('High Resolution: {}\n'.format(high_rez))
+    f.write('XQ ignore threshold: {}\n'.format(ignore_thresh))
     f.write('DPI Division Factor: {}\n'.format(dpi_division_factor))
     f.write('Attributions Visualized: {}\n'.format(attr_shown))
     f.write('Bounding box margin: {}\n'.format(box_margin))
+    f.write('FN search range: {}\n'.format(FN_search_range))
     info_file_2 = XAI_attr_path_str + "/XAI_information.txt"
     f2 = open(info_file_2, "w")
     f2.write('High Resolution: {}\n'.format(high_rez))
+    f2.write('XQ ignore threshold: {}\n'.format(ignore_thresh))
     f2.write('DPI Division Factor: {}\n'.format(dpi_division_factor))
     f2.write('Attributions Visualized: {}\n'.format(attr_shown))
     f2.write('Bounding box margin: {}\n'.format(box_margin))
+    f2.write('FN search range: {}\n'.format(FN_search_range))
     if overlay_orig_bev:
         f.write('Background Image: BEV of the original point cloud\n')
         f2.write('Background Image: BEV of the original point cloud\n')
@@ -436,6 +447,7 @@ def main():
             # run the forward pass once to generate outputs and intermediate representations
             dummy_tensor = 0
             load_data_to_gpu(batch_dict)  # this function is designed for dict, don't use for other data types!
+            anchors_scores = None
             with torch.no_grad():
                 anchors_scores = model(dummy_tensor, batch_dict)
             pred_dicts = batch_dict['pred_dicts']
@@ -465,8 +477,38 @@ def main():
             gt_dict = gt_infos[batch_num * args.batch_size:(batch_num + 1) * args.batch_size]
             conf_mat = []
             missed_boxes = []
+            missed_boxes_label = []
+            missed_boxes_iou = []
             missed_boxes_plotted = []
             batch_pred_scores = []
+
+            # for i in range(args.batch_size):  # i is input image id in the batch
+            #     missed_boxes_plotted = []
+            #     for c in range(len(class_name_list)):
+            #         missed_boxes_plotted.append(False)
+            #     conf_mat_frame = []
+            #     pred_boxes = pred_dicts[i]['pred_boxes'].cpu().numpy()
+            #     pred_labels = pred_dicts[i]['pred_labels'].cpu().numpy() - 1
+            #     iou, gt_index = calculate_bev_iou(gt_dict[i]['boxes'], pred_boxes)
+            #     missed_gt_index, missed_gt_label = find_missing_gt(gt_dict[i], pred_boxes, iou_unmatching_thresholds)
+            #     missed_boxes.append(missed_gt_index)
+            #     missed_boxes_label.append(missed_gt_label)
+            #     # sample_pred_scores = pred_dicts[i]['pred_scores'].cpu().numpy()
+            #     # batch_pred_scores.append(sample_pred_scores)
+            #     for j in range(len(pred_dicts[i]['pred_scores'])):  # j is prediction box id in the i-th image
+            #         gt_cls = gt_dict[i]['labels'][gt_index[j]]
+            #         iou_thresh_2d = iou_unmatching_thresholds[gt_cls]
+            #         curr_pred_score = pred_dicts[i]['pred_scores'][j].cpu().numpy()
+            #         if curr_pred_score >= score_thres:
+            #             adjusted_pred_boxes_label = pred_dicts[i]['pred_labels'][j].cpu().numpy() - 1
+            #             if iou[j] >= iou_thresh_2d and gt_dict[i]['labels'][gt_index[j]] == class_name_list[
+            #                 adjusted_pred_boxes_label]:
+            #                 conf_mat_frame.append('TP')
+            #             else:
+            #                 conf_mat_frame.append('FP')
+            #         else:
+            #             conf_mat_frame.append('ignore')  # these boxes do not meet score thresh, ignore for now
+            #     conf_mat.append(conf_mat_frame)
 
             for i in range(args.batch_size):  # i is input image id in the batch
                 missed_boxes_plotted = []
@@ -474,9 +516,13 @@ def main():
                     missed_boxes_plotted.append(False)
                 conf_mat_frame = []
                 pred_boxes = pred_dicts[i]['pred_boxes'].cpu().numpy()
-                iou, gt_index = calculate_bev_iou(gt_dict[i]['boxes'], pred_boxes)
-                missed_gt_index = find_missing_gt(gt_dict[i], pred_boxes, iou_unmatching_thresholds)
+                pred_labels = pred_dicts[i]['pred_labels'].cpu().numpy() - 1
+                iou, gt_index = calculate_iou(gt_dict[i]['boxes'], pred_boxes, dataset_name)
+                missed_gt_index, missed_gt_label, missed_gt_iou = find_missing_gt_3d(
+                    gt_dict[i], pred_boxes, d3_iou_thresh_dict, dataset_name)
                 missed_boxes.append(missed_gt_index)
+                missed_boxes_label.append(missed_gt_label)
+                missed_boxes_iou.append(missed_gt_iou)
                 # sample_pred_scores = pred_dicts[i]['pred_scores'].cpu().numpy()
                 # batch_pred_scores.append(sample_pred_scores)
                 for j in range(len(pred_dicts[i]['pred_scores'])):  # j is prediction box id in the i-th image
@@ -493,6 +539,66 @@ def main():
                     else:
                         conf_mat_frame.append('ignore')  # these boxes do not meet score thresh, ignore for now
                 conf_mat.append(conf_mat_frame)
+
+            # for i in range(args.batch_size):  # i is input image id in the batch
+            #     missed_boxes_plotted = []
+            #     for c in range(len(class_name_list)):
+            #         missed_boxes_plotted.append(False)
+            #     # ************** TP, FP, FN identification start ********************* #
+            #     conf_mat_frame = []
+            #     pred_boxes_i = pred_dicts[i]['pred_boxes'].cpu().numpy()
+            #     pred_labels_i = pred_dicts[i]['pred_labels'].cpu().numpy() - 1
+            #     pred_scores_i = pred_dicts[i]['pred_scores'].cpu().numpy()
+            #     # calculates 3D iou between the gt and pred boxes
+            #     overlaps = calculate_overlaps(gt_dict[i]['boxes'], pred_boxes_i, dataset_name)
+            #     det_size = len(pred_boxes_i)
+            #     assigned_detection = [-1] * det_size
+            #     ignored_threshold = [False] * det_size
+            #     # record the FN indices and labels
+            #     missed_gt_index = []
+            #     missed_gt_label = []
+            #     for p in range(det_size):
+            #         if pred_scores_i[p] < score_thres:
+            #             ignored_threshold[p] = True
+            #     for gt_ind in range(len(gt_dict[i]['boxes'])):
+            #         max_overlap = 0
+            #         gt_label = gt_dict[i]['labels'][gt_ind]
+            #         min_overlap = d3_iou_thresh_dict[gt_label]
+            #         matched_ind = -1
+            #         for pred_ind in range(det_size):
+            #             # pred box need to exceed score thresh and not already assigned
+            #             if ignored_threshold[pred_ind] or assigned_detection[pred_ind] != -1:
+            #                 continue
+            #             # pred label and
+            #             if class_name_list[pred_labels_i[pred_ind]] != gt_label:
+            #                 continue
+            #             overlap = overlaps[pred_ind][gt_ind]
+            #             if (overlap >= min_overlap) and (overlap > max_overlap):
+            #                 mactched_ind = pred_ind
+            #                 max_overlap = overlap
+            #         if matched_ind == -1:
+            #             missed_gt_index.append(gt_ind)
+            #             missed_gt_label.append(gt_label)
+            #         else:
+            #             assigned_detection[pred_ind] = matched_ind
+            #     missed_boxes.append(missed_gt_index)
+            #     missed_boxes_label.append(missed_gt_label)
+            #     # label the predictions as either FP or TP
+            #     for pred_ind in range(det_size):
+            #         gt_cls = gt_dict[i]['labels'][gt_index[j]]
+            #         iou_thresh_2d = iou_unmatching_thresholds[gt_cls]
+            #         curr_pred_score = pred_dicts[i]['pred_scores'][j].cpu().numpy()
+            #         if curr_pred_score >= score_thres:
+            #             adjusted_pred_boxes_label = pred_dicts[i]['pred_labels'][j].cpu().numpy() - 1
+            #             if iou[j] >= iou_thresh_2d and gt_dict[i]['labels'][gt_index[j]] == class_name_list[
+            #                 adjusted_pred_boxes_label]:
+            #                 conf_mat_frame.append('TP')
+            #             else:
+            #                 conf_mat_frame.append('FP')
+            #         else:
+            #             conf_mat_frame.append('ignore')  # these boxes do not meet score thresh, ignore for now
+            #     conf_mat.append(conf_mat_frame)
+            #     # ************** TP, FP, FN identification end ********************* #
             attributions = []  # a 2D dictionary that stores the gradients in this batch
             # initialize attributions
             for j in range(max_obj_cnt):  # the maximum number of objects in one image
@@ -511,9 +617,9 @@ def main():
                 gt_boxes_vertices = None
                 gt_boxes_loc = None
                 pred_boxes_loc = None
-                total_attr = 0              # total amount of attributions in a box
+                total_attr = 0  # total amount of attributions in a box
                 if dataset_name == 'CadcDataset':
-                    #TODO: implement box padding for Cadc
+                    # TODO: implement box padding for Cadc
                     bev_fig, bev_fig_data = cadc_bev.get_bev_image(img_idx)
                     pred_boxes_vertices = cadc_bev.pred_poly
                     padded_pred_boxes_vertices = cadc_bev.pred_poly_expand
@@ -528,6 +634,13 @@ def main():
                     gt_boxes_loc = kitti_bev.gt_loc
                     pred_boxes_loc = kitti_bev.pred_loc
                 bev_image = np.transpose(PseudoImage2D[i].cpu().detach().numpy(), (1, 2, 0))
+                if overlay_orig_bev:
+                    # need to horizontally flip the original bev image and rotate 90 degrees ccw to match location
+                    # of explanations
+                    bev_image_raw = np.flip(bev_fig_data, 0)
+                    bev_image = np.rot90(bev_image_raw, k=1, axes=(0, 1))
+                    if not gray_scale_overlay:
+                        overlay = 0.2
                 pred_boxes = pred_dicts[i]['pred_boxes'].cpu().numpy()
                 pred_scores = pred_dicts[i]['pred_scores'].cpu().numpy()
                 '''
@@ -554,6 +667,12 @@ def main():
 
                 # generating corners for counting points in box
                 pred_boxes_corners = box_utils.boxes_to_corners_3d(pred_boxes)
+                # TODO: get the points
+                points = None
+                if dataset_name == "KittiDataset":
+                    points = kitti_bev.lidar_data
+                elif dataset_name == "CadcDataset":
+                    points = cadc_bev.lidar_data
 
                 for k in range(3):  # iterate through the 3 classes
                     num_boxes = min(box_cnt_list) - 1
@@ -590,285 +709,340 @@ def main():
                     pred_box_points = attr_file.create_dataset(
                         "points_in_box", (0, 1), maxshape=(None, 1), dtype="int32", chunks=True)
 
-                    for j in range(num_boxes):  # iterate through each box in this sample
-                        # if j > 5:
-                        #     # save time for debugging
-                        #     break
-                        if not box_validation(pred_boxes[j], pred_boxes_vertices[j], dataset_name):
-                            continue  # can't compute XQ if the boxes don't match
-                        '''
-                        Note:
-                        Sometimes the size of batch_dict['anchor_selections'][i] changes for no reason.
-                        Hence need this double check here
-                        Also, num_boxes is already decremented by 1, just to be safe
-                        '''
-                        if j >= batch_dict['box_count'][i] or j >= len(batch_dict['anchor_selections'][i]):
-                            break
-                        box_w = pred_boxes[j][3]
-                        box_l = pred_boxes[j][4]
-                        box_x = pred_boxes_loc[j][0]
-                        box_y = pred_boxes_loc[j][1]
-                        dist_to_ego = np.sqrt(box_x * box_x + box_y * box_y)
+                    if not skip_TP_FP:
+                        for j in range(num_boxes):  # iterate through each box in this sample
+                            # if j > 5:
+                            #     # save time for debugging
+                            #     break
+                            if not box_validation(pred_boxes[j], pred_boxes_vertices[j], dataset_name):
+                                continue  # can't compute XQ if the boxes don't match
+                            '''
+                            Note:
+                            Sometimes the size of batch_dict['anchor_selections'][i] changes for no reason.
+                            Hence need this double check here
+                            Also, num_boxes is already decremented by 1, just to be safe
+                            '''
+                            if j >= batch_dict['box_count'][i] or j >= len(batch_dict['anchor_selections'][i]):
+                                break
+                            box_w = pred_boxes[j][3]
+                            box_l = pred_boxes[j][4]
+                            box_x = pred_boxes_loc[j][0]
+                            box_y = pred_boxes_loc[j][1]
+                            dist_to_ego = np.sqrt(box_x * box_x + box_y * box_y)
 
-                        if k + 1 == pred_dicts[i]['pred_labels'][j] and conf_mat[i][j] != 'ignore':
-                            # compute contribution for the positive class only, k+1 because PCDet labels start at 1
-                            target = (j, k)  # i.e., generate reason as to why the j-th box is classified as the k-th class
-                            anchor_id = batch_dict['anchor_selections'][i][j]
+                            if k + 1 == pred_dicts[i]['pred_labels'][j] and conf_mat[i][j] != 'ignore':
+                                # compute contribution for the positive class only, k+1 because PCDet labels start at 1
+                                target = (
+                                j, k)  # i.e., generate reason as to why the j-th box is classified as the k-th class
+                                anchor_id = batch_dict['anchor_selections'][i][j]
 
-                            if use_anchor_idx:
-                                # if we are using anchor box outputs, need to use the indices in for anchor boxes
-                                target = (anchor_id, k)
-                            sign = attr_shown
-                            if method == 'Saliency':
-                                if len(attributions[j][k].shape) == 1:  # compute attributions only when necessary
-                                    attributions[j][k] = saliency2D.attribute(
-                                        PseudoImage2D, target=target, additional_forward_args=batch_dict)
-                            if method == 'IG':
-                                if len(attributions[j][k].shape) == 1:  # compute attributions only when necessary
-                                    attributions[j][k] = ig2D.attribute(
-                                        PseudoImage2D, baselines=PseudoImage2D * 0, target=target,
-                                        additional_forward_args=batch_dict, n_steps=steps,
-                                        internal_batch_size=batch_dict['batch_size'])
-                                # sign = "all"
-                                # sign = "positive"
-                            grad = np.transpose(attributions[j][k][i].squeeze().cpu().detach().numpy(), (1, 2, 0))
+                                if use_anchor_idx:
+                                    # if we are using anchor box outputs, need to use the indices in for anchor boxes
+                                    target = (anchor_id, k)
+                                sign = attr_shown
+                                if method == 'Saliency':
+                                    if len(attributions[j][k].shape) == 1:  # compute attributions only when necessary
+                                        attributions[j][k] = saliency2D.attribute(
+                                            PseudoImage2D, target=target, additional_forward_args=batch_dict)
+                                if method == 'IG':
+                                    if len(attributions[j][k].shape) == 1:  # compute attributions only when necessary
+                                        attributions[j][k] = ig2D.attribute(
+                                            PseudoImage2D, baselines=PseudoImage2D * 0, target=target,
+                                            additional_forward_args=batch_dict, n_steps=steps,
+                                            internal_batch_size=batch_dict['batch_size'])
+                                    # sign = "all"
+                                    # sign = "positive"
+                                grad = np.transpose(attributions[j][k][i].squeeze().cpu().detach().numpy(), (1, 2, 0))
 
-                            # pos_grad = np.sum(np.where(grad < 0, 0, grad), axis=2)
-                            # neg_grad = np.sum(-1 * np.where(grad > 0, 0, grad), axis=2)
-                            pos_grad = np.sum((grad>0)*grad, axis=2)
-                            neg_grad = np.sum(-1*(grad<0)*grad, axis=2)
-                            pos_grad_copy = copy.deepcopy(pos_grad)
-                            neg_grad_copy = copy.deepcopy(neg_grad)
-                            box_type = None
-                            if conf_mat[i][j] == 'TP':
-                                box_type = 1
-                            elif conf_mat[i][j] == 'FP':
-                                box_type = 0
+                                # pos_grad = np.sum(np.where(grad < 0, 0, grad), axis=2)
+                                # neg_grad = np.sum(-1 * np.where(grad > 0, 0, grad), axis=2)
+                                pos_grad = np.sum((grad > 0) * grad, axis=2)
+                                neg_grad = np.sum(-1 * (grad < 0) * grad, axis=2)
+                                pos_grad_copy = copy.deepcopy(pos_grad)
+                                neg_grad_copy = copy.deepcopy(neg_grad)
+                                box_type = None
+                                if conf_mat[i][j] == 'TP':
+                                    box_type = 1
+                                elif conf_mat[i][j] == 'FP':
+                                    box_type = 0
+                                points_flag = box_utils.in_hull(points[:, 0:3], pred_boxes_corners[j])
+                                num_pts = points_flag.sum()
+                                new_size = attr_file["pos_attr"].shape[0] + 1
+                                attr_file["pos_attr"].resize(new_size, axis=0)
+                                attr_file["neg_attr"].resize(new_size, axis=0)
+                                attr_file["pred_boxes"].resize(new_size, axis=0)
+                                attr_file["pred_boxes_expand"].resize(new_size, axis=0)
+                                attr_file["box_type"].resize(new_size, axis=0)
+                                attr_file["pred_boxes_loc"].resize(new_size, axis=0)
+                                attr_file["box_score"].resize(new_size, axis=0)
+                                attr_file["points_in_box"].resize(new_size, axis=0)
 
-                            # TODO: get the points
-                            points = None
-                            if dataset_name=="KittiDataset":
-                                points = kitti_bev.lidar_data
-                            elif dataset_name=="CadcDataset":
-                                points = cadc_bev.lidar_data
-                            points_flag = box_utils.in_hull(points[:, 0:3], pred_boxes_corners[j])
-                            num_pts = points_flag.sum()
-                            new_size = attr_file["pos_attr"].shape[0] + 1
-                            attr_file["pos_attr"].resize(new_size, axis=0)
-                            attr_file["neg_attr"].resize(new_size, axis=0)
-                            attr_file["pred_boxes"].resize(new_size, axis=0)
-                            attr_file["pred_boxes_expand"].resize(new_size, axis=0)
-                            attr_file["box_type"].resize(new_size, axis=0)
-                            attr_file["pred_boxes_loc"].resize(new_size, axis=0)
-                            attr_file["box_score"].resize(new_size, axis=0)
-                            attr_file["points_in_box"].resize(new_size, axis=0)
+                                attr_file["pos_attr"][new_size - 1] = pos_grad
+                                attr_file["neg_attr"][new_size - 1] = neg_grad
+                                attr_file["pred_boxes"][new_size - 1] = pred_boxes_vertices[j]
+                                attr_file["pred_boxes_expand"][new_size - 1] = padded_pred_boxes_vertices[j]
+                                attr_file["box_type"][new_size - 1] = box_type
+                                attr_file["pred_boxes_loc"][new_size - 1] = pred_boxes_loc[j]
+                                attr_file["box_score"][new_size - 1] = pred_scores[j]
+                                print("pred_scores[{}]: {}".format(j, pred_scores[j]))
+                                attr_file["points_in_box"][new_size - 1] = num_pts
 
-                            attr_file["pos_attr"][new_size - 1] = pos_grad
-                            attr_file["neg_attr"][new_size - 1] = neg_grad
-                            attr_file["pred_boxes"][new_size - 1] = pred_boxes_vertices[j]
-                            attr_file["pred_boxes_expand"][new_size - 1] = padded_pred_boxes_vertices[j]
-                            attr_file["box_type"][new_size - 1] = box_type
-                            attr_file["pred_boxes_loc"][new_size - 1] = pred_boxes_loc[j]
-                            attr_file["box_score"][new_size - 1] = pred_scores[j]
-                            attr_file["points_in_box"][new_size - 1] = num_pts
+                                # XQ = get_sum_XQ(grad, pred_boxes_vertices[j], dataset_name, box_w, box_l, sign,
+                                #                 high_rez=high_rez, scaling_factor=scaling_factor, margin=box_margin)
+                                grad_copy = pos_grad_copy if attr_shown == "positive" else neg_grad_copy
+                                # print("pred_boxes_vertices[j] prior to transformation: {}".format(pred_boxes_vertices[j]))
+                                XQ = get_sum_XQ_analytics(pos_grad, neg_grad, padded_pred_boxes_vertices[j],
+                                                          dataset_name,
+                                                          sign, ignore_thresh=ignore_thresh, high_rez=high_rez,
+                                                          scaling_factor=scaling_factor, grad_copy=grad_copy)
+                                XQ_list.append(XQ)
+                                cls_score_list.append(pred_scores[j])
+                                dist_list.append(dist_to_ego)
+                                label_list.append(k)
+                                box_cnt += 1
+                                if conf_mat[i][j] == 'TP':
+                                    TP_XQ_list.append(XQ)
+                                    TP_score_list.append(pred_scores[j])
+                                    TP_dist_list.append(dist_to_ego)
+                                    TP_label_list.append(k)
+                                    attr_file["box_type"][new_size - 1] = 1
+                                elif conf_mat[i][j] == 'FP':
+                                    FP_XQ_list.append(XQ)
+                                    FP_score_list.append(pred_scores[j])
+                                    FP_dist_list.append(dist_to_ego)
+                                    FP_label_list.append(k)
+                                    attr_file["box_type"][new_size - 1] = 0
+                                box_explained = flip_xy(padded_pred_boxes_vertices[j])
 
-                            # XQ = get_sum_XQ(grad, pred_boxes_vertices[j], dataset_name, box_w, box_l, sign,
-                            #                 high_rez=high_rez, scaling_factor=scaling_factor, margin=box_margin)
-                            grad_copy = pos_grad_copy if attr_shown=="positive" else neg_grad_copy
-                            # print("pred_boxes_vertices[j] prior to transformation: {}".format(pred_boxes_vertices[j]))
-                            XQ = get_sum_XQ_analytics(pos_grad, neg_grad, padded_pred_boxes_vertices[j], dataset_name,
-                                                      sign, ignore_thresh=ignore_thresh, high_rez=high_rez,
-                                                      scaling_factor=scaling_factor, grad_copy=grad_copy)
-                            XQ_list.append(XQ)
-                            cls_score_list.append(pred_scores[j])
-                            dist_list.append(dist_to_ego)
-                            label_list.append(k)
-                            box_cnt += 1
-                            if conf_mat[i][j] == 'TP':
-                                TP_XQ_list.append(XQ)
-                                TP_score_list.append(pred_scores[j])
-                                TP_dist_list.append(dist_to_ego)
-                                TP_label_list.append(k)
-                                attr_file["box_type"][new_size-1] = 1
-                            elif conf_mat[i][j] == 'FP':
-                                FP_XQ_list.append(XQ)
-                                FP_score_list.append(pred_scores[j])
-                                FP_dist_list.append(dist_to_ego)
-                                FP_label_list.append(k)
-                                attr_file["box_type"][new_size - 1] = 0
-                            box_explained = flip_xy(padded_pred_boxes_vertices[j])
-                            figure_size = (8, 6)
-                            # figure_size = (24, 18)
-                            if high_rez:
-                                # upscale the attributions if we are using high resolution input bev
-                                # also increase figure size to accommodate the higher resolution
-                                figure_size = (24, 18)
-                                '''
-                                note: it is more efficient to do the upscaling inside Captum's visualize_image_attr
-                                only need to upscale a single 2d array instead of 64 such arrays
-                                '''
-                                # TODO: implement for kitti as well
-                            overlay = 0.4
-                            if overlay_orig_bev:
-                                # need to horizontally flip the original bev image and rotate 90 degrees ccw to match location
-                                # of explanations
-                                bev_image_raw = np.flip(bev_fig_data, 0)
-                                bev_image = np.rot90(bev_image_raw, k=1, axes=(0, 1))
-                                if not gray_scale_overlay:
-                                    overlay = 0.2
+                                if channel_xai:  # generates channel-wise explanation
+                                    # TODO: this part needs fixing
+                                    for c in range(num_channels_viz):
+                                        grad_viz = viz.visualize_image_attr(
+                                            grad[:, :, c], bev_image, method="blended_heat_map", sign=sign,
+                                            show_colorbar=True,
+                                            title="Overlaid {}".format(method),
+                                            alpha_overlay=overlay, fig_size=figure_size, upscale=high_rez)
+                                        XAI_sample_path_str = XAI_cls_path_str + '/sample_{}'.format(i)
+                                        if not os.path.exists(XAI_sample_path_str):
+                                            os.makedirs(XAI_sample_path_str)
+                                        os.chmod(XAI_sample_path_str, 0o777)
 
-
-                            if channel_xai:  # generates channel-wise explanation
-                                # TODO: this part needs fixing
-                                for c in range(num_channels_viz):
-                                    grad_viz = viz.visualize_image_attr(
-                                        grad[:, :, c], bev_image, method="blended_heat_map", sign=sign, show_colorbar=True,
-                                        title="Overlaid {}".format(method),
-                                        alpha_overlay=overlay, fig_size=figure_size, upscale=high_rez)
-                                    XAI_sample_path_str = XAI_cls_path_str + '/sample_{}'.format(i)
-                                    if not os.path.exists(XAI_sample_path_str):
-                                        os.makedirs(XAI_sample_path_str)
-                                    os.chmod(XAI_sample_path_str, 0o777)
-
-                                    XAI_box_relative_path_str = XAI_sample_path_str.split("tools/", 1)[1] + \
-                                                                '/box_{}_{}_channel_{}_XQ_{}.png'.format(
-                                                                    j, conf_mat[i][j], c, XQ)
-                                    # print('XAI_box_path_str: {}'.format(XAI_box_path_str))
+                                        XAI_box_relative_path_str = XAI_sample_path_str.split("tools/", 1)[1] + \
+                                                                    '/box_{}_{}_channel_{}_XQ_{}.png'.format(
+                                                                        j, conf_mat[i][j], c, XQ)
+                                        # print('XAI_box_path_str: {}'.format(XAI_box_path_str))
+                                        grad_viz[0].savefig(XAI_box_relative_path_str, bbox_inches='tight',
+                                                            pad_inches=0.0)
+                                        os.chmod(XAI_box_relative_path_str, 0o777)
+                                else:
+                                    grad_viz = viz.visualize_image_attr(grad, bev_image, method="blended_heat_map",
+                                                                        sign=sign,
+                                                                        show_colorbar=True,
+                                                                        title="Overlaid {}".format(method),
+                                                                        alpha_overlay=overlay,
+                                                                        fig_size=figure_size, upscale=high_rez)
+                                    XAI_box_relative_path_str = XAI_cls_path_str.split("tools/", 1)[1] + \
+                                                                '/box_{}_{}_XQ_{}_points_{}_box_loc_{}.png'.format(
+                                                                    j, conf_mat[i][j], XQ, num_pts, pred_boxes[j][:3])
+                                    XAI_attr_csv_str = XAI_cls_path_str + \
+                                                       '/box_{}_{}_XQ_{}.csv'.format(
+                                                           j, conf_mat[i][j], XQ)
+                                    verts = copy.deepcopy(padded_pred_boxes_vertices[j])
+                                    if high_rez:
+                                        verts = verts / scaling_factor
+                                    if attr_to_csv:
+                                        if verify_box:
+                                            write_attr_to_csv(XAI_attr_csv_str, grad_copy, verts)
+                                        else:
+                                            if attr_shown == "positive":
+                                                write_attr_to_csv(XAI_attr_csv_str, pos_grad, verts)
+                                            elif attr_shown == "negative":
+                                                write_attr_to_csv(XAI_attr_csv_str, neg_grad, verts)
+                                    polys = patches.Polygon(box_explained,
+                                                            closed=True, fill=False, edgecolor='y', linewidth=1)
+                                    grad_viz[1].add_patch(polys)
                                     grad_viz[0].savefig(XAI_box_relative_path_str, bbox_inches='tight', pad_inches=0.0)
+                                    plt.close('all')
                                     os.chmod(XAI_box_relative_path_str, 0o777)
-                            else:
-                                grad_viz = viz.visualize_image_attr(grad, bev_image, method="blended_heat_map", sign=sign,
-                                                                    show_colorbar=True, title="Overlaid {}".format(method),
-                                                                    alpha_overlay=overlay,
-                                                                    fig_size=figure_size, upscale=high_rez)
-                                XAI_box_relative_path_str = XAI_cls_path_str.split("tools/", 1)[1] + \
-                                                            '/box_{}_{}_XQ_{}_points_{}.png'.format(
-                                                                j, conf_mat[i][j], XQ, num_pts)
-                                XAI_attr_csv_str = XAI_cls_path_str + \
-                                                            '/box_{}_{}_XQ_{}.csv'.format(
-                                                                j, conf_mat[i][j], XQ)
-                                verts = copy.deepcopy(padded_pred_boxes_vertices[j])
-                                if high_rez:
-                                    verts = verts/scaling_factor
-                                if attr_to_csv:
-                                    if verify_box:
-                                        write_attr_to_csv(XAI_attr_csv_str, grad_copy, verts)
-                                    else:
-                                        if attr_shown == "positive":
-                                            write_attr_to_csv(XAI_attr_csv_str, pos_grad, verts)
-                                        elif attr_shown == "negative":
-                                            write_attr_to_csv(XAI_attr_csv_str, neg_grad, verts)
-                                polys = patches.Polygon(box_explained,
-                                                        closed=True, fill=False, edgecolor='y', linewidth=1)
-                                grad_viz[1].add_patch(polys)
-                                grad_viz[0].savefig(XAI_box_relative_path_str, bbox_inches='tight', pad_inches=0.0)
 
-                                if FN_analysis:
-                                    if not missed_boxes_plotted[k] and len(missed_boxes[i]) > 0:
-                                        missed_boxes_plotted[k] = True
-                                        # print('len(gt_boxes_vertices): {}'.format(len(gt_boxes_vertices)))
-                                        # print('missed_boxes[i]: {}'.format(missed_boxes[i]))
-                                        for index in missed_boxes[i]:
-                                            if index >= len(gt_boxes_vertices):
-                                                break
+                    if FN_analysis:
+                        if IOU_3D:
+                            f.write("IoU for FN anchor: 3D\n")
+                        else:
+                            f.write("IoU for FN anchor: 2D\n")
+                        f.write("Search vicinity for FN anchor: {}\n".format(FN_search_range))
+                        if not missed_boxes_plotted[k] and len(missed_boxes[i]) > 0:
+                            missed_boxes_plotted[k] = True
+                            # print('len(gt_boxes_vertices): {}'.format(len(gt_boxes_vertices)))
+                            # print('missed_boxes[i]: {}'.format(missed_boxes[i]))
+                            print("\nnumber of missed boxes: {}\n".format(len(missed_boxes[i])))
+                            for index, label, top_iou in zip(missed_boxes[i], missed_boxes_label[i], missed_boxes_iou[i]):
+                                # print("\nlabel is: {}\n".format(label))
+                                if index >= len(gt_boxes_vertices):
+                                    break
+                                if label != class_name_list[k]:
+                                    continue  # only analyzing the class k right now
 
-                                            # obtain the missed gt box
-                                            missed_box = gt_boxes_vertices[index]
-                                            box_vertices = transform_box_coord(grad.shape[0], grad.shape[1], missed_box,
-                                                                               dataset_name, high_rez, scaling_factor)
-                                            box_vertices = flip_xy(box_vertices)
-                                            # print("\nthe missed gt box: {}\n".format(missed_box))
-                                            missed_ploys = patches.Polygon(box_vertices,
-                                                                           closed=True, fill=False, edgecolor='c', linewidth=1)
-                                            grad_viz[1].add_patch(missed_ploys)
+                                # obtain the missed gt box
+                                missed_box = gt_boxes_vertices[index]
+                                box_vertices = transform_box_coord(pseudo_img_h, pseudo_img_w, missed_box,
+                                                                   dataset_name, high_rez, scaling_factor)
+                                box_vertices = flip_xy(box_vertices)
+                                # print("\nthe missed gt box: {}\n".format(missed_box))
+                                # if len(missed_box)!=0:
+                                #     box_cnt += len(missed_box)
+                                if len(missed_box) != 0:
+                                    print("\nfinding anchor boxes matching the missed gt boxes")
+                                    # obtain the anchor box matching that gt_box
+                                    # this is valid in (x, y), and in meters, with upper left as (0,0)
+                                    missed_box_loc = gt_boxes_loc[index]
+                                    print('missed_box_loc: {}'.format(missed_box_loc))
+                                    # y, x = transform_point_coord(grad.shape[0], grad.shape[1], missed_box_loc,
+                                    #                                    dataset_name, high_rez, scaling_factor)
+                                    # print('transformed box location (y,x): ({}, {})'.format(y, x))
+                                    anchor_ind = find_anchor_index(dataset_name, missed_box_loc[1],
+                                                                   missed_box_loc[0])
+                                    print('the anchor index is: {}'.format(anchor_ind))
+                                    lower_bound = max(anchor_ind - FN_search_range, 0)
+                                    upper_bound = min(total_anchors, anchor_ind + FN_search_range + 1)
+                                    matched_anchor_vertices = None
+                                    has_match = False
+                                    max_iou = 0
+                                    best_FN_anchor = None
+                                    best_FN_anchor_label = None
+                                    best_FN_anchor_exp = None
+                                    bev_tool = None
+                                    best_FN_anchor_ind = None
+                                    if dataset_name == 'KittiDataset':
+                                        bev_tool = kitti_bev
+                                    elif dataset_name == 'CadcDataset':
+                                        bev_tool = cadc_bev
+                                    for ind in range(lower_bound, upper_bound, 1):
+                                        # print('the anchor index to search: {}'.format(ind))
+                                        box_gpu = batch_dict['anchor_boxes'][i][ind]
+                                        scores = anchors_scores[i][ind].cpu().detach().numpy()
+                                        anchor_label = np.argmax(scores)
+                                        # **** Note ***** #
+                                        # anchor labels indeed goes from 0 to 2
+                                        if anchor_label != k:
+                                            # only process anchors that matching the specific class label
+                                            continue
+                                        box = box_gpu.cpu().detach().numpy()
+                                        gt_box = gt_dict[i]['boxes'][index]
+                                        if abs(box[0] - gt_box[0]) > 0.5 or abs(box[1] - gt_box[1]) > 0.5 or \
+                                                abs(box[2] - gt_box[2]) > 0.5:
+                                            continue # early stopping
+                                        gt_box_expand = np.expand_dims(gt_box, axis=0)
+                                        box_expand = np.expand_dims(box, axis=0)
+                                        curr_iou = None
+                                        if IOU_3D:
+                                            curr_iou, _ = calculate_iou(gt_box_expand, box_expand,
+                                                                        dataset_name)
+                                        else:
+                                            curr_iou, _ = calculate_bev_iou(gt_box_expand, box_expand)
+                                        if curr_iou[0] > max_iou:
+                                            has_match = True
+                                            max_iou = curr_iou[0]
+                                            best_FN_anchor = box
+                                            best_FN_anchor_exp = box_expand
+                                            best_FN_anchor_ind = ind
+                                            best_FN_anchor_label = anchor_label
+                                    if has_match:
+                                        # TODO: save necessary info to attr file, show XQ and num points in box in image
+                                        print("\nFound matching anchor for an FN box! \n")
+                                        FN_target = (anchor_ind, k)
+                                        FN_attr = ig2D.attribute(
+                                            PseudoImage2D, baselines=PseudoImage2D * 0, target=FN_target,
+                                            additional_forward_args=batch_dict, n_steps=steps,
+                                            internal_batch_size=batch_dict['batch_size'])
+                                        FN_all_grad = np.transpose(FN_attr[i].squeeze().cpu().detach().numpy(),
+                                                                   (1, 2, 0))
+                                        FN_pos_grad = np.sum((FN_all_grad > 0) * FN_all_grad, axis=2)
+                                        FN_neg_grad = np.sum(-1 * (FN_all_grad < 0) * FN_all_grad, axis=2)
+                                        FN_grad = None
+                                        if attr_shown == 'positive':
+                                            FN_grad = FN_pos_grad
+                                        elif attr_shown == 'negative':
+                                            FN_grad = FN_neg_grad
+                                        x, y, z, w, l, h, yaw = best_FN_anchor[0], best_FN_anchor[1], \
+                                                                best_FN_anchor[2], best_FN_anchor[3], \
+                                                                best_FN_anchor[4], best_FN_anchor[5], \
+                                                                best_FN_anchor[6]
+                                        matched_anchor_vertices = bev_tool.cuboid_to_bev(x, y, z, w, l, h, yaw)
+                                        matched_anchor_vertices += bev_tool.offset
+                                        orig_matched_vertices = copy.deepcopy(matched_anchor_vertices)
+                                        w_big = w + 2 * box_margin
+                                        l_big = l + 2 * box_margin
+                                        if box_margin != 0:
+                                            matched_anchor_vertices = bev_tool.cuboid_to_bev(x, y, z, w_big, l_big, h,
+                                                                                             yaw)
+                                            matched_anchor_vertices += bev_tool.offset
+                                        orig_matched_vertices = transform_box_coord(
+                                            pseudo_img_h, pseudo_img_w, orig_matched_vertices, dataset_name, high_rez,
+                                            scaling_factor)
+                                        XQ = get_sum_XQ_analytics(FN_pos_grad, FN_neg_grad, matched_anchor_vertices,
+                                                                  dataset_name,
+                                                                  attr_shown, ignore_thresh=ignore_thresh,
+                                                                  high_rez=high_rez,
+                                                                  scaling_factor=scaling_factor)
+                                        padded_anchor_shown = flip_xy(matched_anchor_vertices)
+                                        anchor_shown = flip_xy(orig_matched_vertices)
+                                        missed_polys = patches.Polygon(
+                                            box_vertices, closed=True, fill=False, edgecolor='c', linewidth=1)
+                                        matched_anchor_polys = patches.Polygon(
+                                            padded_anchor_shown, closed=True, fill=False, edgecolor='y',
+                                            linewidth=1)
+                                        matched_anchor_polys_orig = patches.Polygon(
+                                            anchor_shown, closed=True, fill=False, edgecolor='m',
+                                            linewidth=1)
+                                        grad_viz = viz.visualize_image_attr(FN_all_grad, bev_image,
+                                                                            method="blended_heat_map",
+                                                                            sign=attr_shown,
+                                                                            show_colorbar=True,
+                                                                            title="Overlaid {}".format(method),
+                                                                            alpha_overlay=overlay,
+                                                                            fig_size=figure_size, upscale=high_rez)
+                                        # grad_viz[1].add_patch(matched_anchor_polys)
+                                        # grad_viz[1].add_patch(matched_anchor_polys_orig)
+                                        grad_viz[1].add_patch(missed_polys)
+                                        best_FN_corners = box_utils.boxes_to_corners_3d(best_FN_anchor_exp)
+                                        points_flag = box_utils.in_hull(points[:, 0:3], best_FN_corners[0])
+                                        num_pts = points_flag.sum()
+                                        anchor_loc = np.array([best_FN_anchor[0], best_FN_anchor[1]])
+                                        new_size = attr_file["pos_attr"].shape[0] + 1
+                                        attr_file["pos_attr"].resize(new_size, axis=0)
+                                        attr_file["neg_attr"].resize(new_size, axis=0)
+                                        attr_file["pred_boxes"].resize(new_size, axis=0)
+                                        attr_file["pred_boxes_expand"].resize(new_size, axis=0)
+                                        attr_file["box_type"].resize(new_size, axis=0)
+                                        attr_file["pred_boxes_loc"].resize(new_size, axis=0)
+                                        attr_file["box_score"].resize(new_size, axis=0)
+                                        attr_file["points_in_box"].resize(new_size, axis=0)
 
-                                            if len(missed_box) != 0:
-                                                print("\nfinding anchor boxes matching the missed gt boxes")
-                                                # obtain the anchor box matching that gt_box
-                                                # this is valid in (x, y), and in meters, with upper left as (0,0)
-                                                missed_box_loc = gt_boxes_loc[index]
-                                                print('missed_box_loc: {}'.format(missed_box_loc))
-                                                # y, x = transform_point_coord(grad.shape[0], grad.shape[1], missed_box_loc,
-                                                #                                    dataset_name, high_rez, scaling_factor)
-                                                # print('transformed box location (y,x): ({}, {})'.format(y, x))
-                                                anchor_ind = find_anchor_index(dataset_name, missed_box_loc[1],
-                                                                               missed_box_loc[0])
-                                                print('the anchor index is: {}'.format(anchor_ind))
-                                                lower_bound = max(anchor_ind - 4, 0)
-                                                upper_bound = min(total_anchors, anchor_ind + 4)
-                                                matched_anchor_vertices = None
-                                                max_iou = 0
-                                                experiment = False
-                                                if experiment:
-                                                    box_gpu = batch_dict['anchor_boxes'][i][anchor_ind]
-                                                    box = box_gpu.cpu().detach().numpy()
-                                                    print("\nthe FN anchor that we want to visualize: {}\n".
-                                                          format(box))
-                                                    box_expand = np.expand_dims(box, axis=0)
-                                                    anchor_vertices = kitti_bev.cuboid_to_bev(box[0], box[1], box[2], box[3],
-                                                                                              box[4], box[5], box[6])
-                                                    if dataset_name == 'CadcDataset':
-                                                        for vert_ind in range(len(anchor_vertices)):
-                                                            anchor_vertices[vert_ind][0] += 50
-                                                            anchor_vertices[vert_ind][1] += 50
-                                                    elif dataset_name == 'KittiDataset':
-                                                        for vert_ind in range(len(anchor_vertices)):
-                                                            # TODO: need to confirm the correctness of this
-                                                            # anchor_vertices[vert_ind][0] += 50
-                                                            anchor_vertices[vert_ind][1] += 39.68
-
-                                                    print("\nthe FN anchor_vertices: {}\n".format(anchor_vertices))
-                                                    viz_vertices = transform_box_coord(
-                                                        grad.shape[0], grad.shape[1], anchor_vertices, dataset_name,
-                                                        high_rez, scaling_factor
-                                                    )
-                                                    print("\nthe FN anchor_vertices scaled: {}\n".format(viz_vertices))
-                                                    viz_vertices = flip_xy(viz_vertices)
-                                                    # print("\nthe FN box with flipped vertices: {}\n".format(viz_vertices))
-                                                    viz_poly = patches.Polygon(
-                                                        viz_vertices, closed=True, fill=False, edgecolor='m', linewidth=1)
-                                                    grad_viz[1].add_patch(viz_poly)
-                                                for ind in range(lower_bound, upper_bound, 1):
-                                                    print('the anchor index to search: {}'.format(ind))
-                                                    box_gpu = batch_dict['anchor_boxes'][i][ind]
-                                                    box = box_gpu.cpu().detach().numpy()
-                                                    box_expand = np.expand_dims(box, axis=0)
-                                                    anchor_vertices = kitti_bev.cuboid_to_bev(box[0], box[1], box[2], box[3],
-                                                                                              box[4], box[5], box[6])
-                                                    if dataset_name == 'CadcDataset':
-                                                        for vert_ind in range(len(anchor_vertices)):
-                                                            anchor_vertices[vert_ind][0] += 50
-                                                            anchor_vertices[vert_ind][1] += 50
-                                                    elif dataset_name == 'KittiDataset':
-                                                        for vert_ind in range(len(anchor_vertices)):
-                                                            # TODO: need to confirm the correctness of this
-                                                            # anchor_vertices[vert_ind][0] += 50
-                                                            anchor_vertices[vert_ind][1] += 39.68
-                                                    gt_box = gt_dict[i]['boxes'][index]
-                                                    gt_box_expand = np.expand_dims(gt_box, axis=0)
-                                                    curr_iou, _ = calculate_bev_iou(gt_box_expand, box_expand)
-                                                    print('iou between the missed gt box and the corresponding anchor: {}'
-                                                          .format(curr_iou))
-                                                    if curr_iou[0] > max_iou:
-                                                        matched_anchor_vertices = anchor_vertices
-                                                        max_iou = curr_iou[0]
-                                                if matched_anchor_vertices is not None:
-                                                    matched_anchor_vertices = transform_box_coord(
-                                                        grad.shape[0], grad.shape[1], matched_anchor_vertices, dataset_name,
-                                                        high_rez, scaling_factor)
-                                                    matched_anchor_vertices = flip_xy(matched_anchor_vertices)
-                                                    matched_anchor_polys = patches.Polygon(
-                                                        matched_anchor_vertices, closed=True, fill=False, edgecolor='m', linewidth=1)
-                                                    grad_viz[1].add_patch(matched_anchor_polys)
+                                        attr_file["pos_attr"][new_size - 1] = FN_pos_grad
+                                        attr_file["neg_attr"][new_size - 1] = FN_neg_grad
+                                        attr_file["pred_boxes"][new_size - 1] = orig_matched_vertices
+                                        attr_file["pred_boxes_expand"][new_size - 1] = matched_anchor_vertices
+                                        attr_file["box_type"][new_size - 1] = 2
+                                        attr_file["pred_boxes_loc"][new_size - 1] = anchor_loc
+                                        matched_anchor_score = batch_dict['sigmoid_anchor_scores'][i][
+                                            best_FN_anchor_ind].cpu().detach().numpy()
+                                        print("anchors_scores[{}][{}]: {}".format(i,
+                                                                                  best_FN_anchor_ind,
+                                                                                  matched_anchor_score[k]))
+                                        attr_file["box_score"][new_size - 1] = matched_anchor_score[k]
+                                        attr_file["points_in_box"][new_size - 1] = num_pts
                                         XAI_missed_boxes_str = XAI_cls_path_str.split("tools/", 1)[1] + \
-                                                               '/missed_gt_boxes.png'
+                                                               '/FN_box_{}_XQ_{}_points_{}_top_iou_{}.png'.format(
+                                                                   index, XQ, num_pts, top_iou)
                                         grad_viz[0].savefig(XAI_missed_boxes_str, bbox_inches='tight', pad_inches=0.0)
-                                plt.close('all')
-                                os.chmod(XAI_box_relative_path_str, 0o777)
-                                # print('box_{}_{}.png is saved in {}'.format(j,conf_mat[i][j],XAI_cls_path_str))
+                                        box_cnt += 1
+                                # missed_ploys = patches.Polygon(box_vertices,
+                                #                                closed=True, fill=False, edgecolor='c', linewidth=1)
+                                # grad_viz[1].add_patch(missed_ploys)
                     attr_file.close()
     finally:
-        f.write("total number of boxes analyzed: {}".format(box_cnt))
+        f.write("total number of boxes analyzed: {}\n".format(box_cnt))
         f.close()
 
         # plotting

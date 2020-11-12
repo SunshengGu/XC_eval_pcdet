@@ -38,6 +38,7 @@ class KITTI_BEV:
         self.pred_loc = []
         self.gt_poly = []    # store the ground truth polygons
         self.gt_loc = []     # store the gt box locations
+        self.offset = None   # offset for box locations
         now = datetime.datetime.now()
         dt_string = now.strftime("%b_%d_%Y_%H_%M_%S")
         output_path = output_path + '{}_bev_pred'.format(dt_string)

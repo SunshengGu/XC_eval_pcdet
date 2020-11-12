@@ -335,6 +335,7 @@ class Detector3DTemplate(nn.Module):
         # boxes_params = []
         anchor_selections = []
         batch_dict['box_count'] = {}  # store the number of boxes for each image in the sample
+        batch_dict['sigmoid_anchor_scores'] = []
         output_anchor = post_process_cfg.OUTPUT_ANCHOR_BOXES  # indicates if we output anchor boxes
         anchor_scores = []  # store class scores for individual anchor boxes
         anchor_boxes = []
@@ -363,6 +364,7 @@ class Detector3DTemplate(nn.Module):
             src_cls_preds = cls_preds
             src_box_preds = box_preds
             # print("src_box_preds.shape: {}".format(src_box_preds.shape))
+
             anchor_scores.append(src_cls_preds)
             anchor_boxes.append(src_box_preds)
             # print('src_box_preds.shape before nms: {}'.format(src_box_preds.shape))
@@ -372,6 +374,9 @@ class Detector3DTemplate(nn.Module):
 
             if not batch_dict['cls_preds_normalized']:
                 cls_preds = torch.sigmoid(cls_preds)
+                batch_dict['sigmoid_anchor_scores'].append(torch.sigmoid(src_cls_preds))
+            else:
+                batch_dict['sigmoid_anchor_scores'].append(src_cls_preds)
 
             if post_process_cfg.NMS_CONFIG.MULTI_CLASSES_NMS:
                 raise NotImplementedError

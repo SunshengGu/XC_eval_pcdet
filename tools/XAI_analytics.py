@@ -233,7 +233,7 @@ def main():
         f.write('Analyze XQ by: count\n')
 
     label_dict = None  # maps class name to label
-    vicinity_dict = None # Search vicinity for the generate_box_mask function
+    vicinity_dict = None  # Search vicinity for the generate_box_mask function
     if dataset_name == 'KittiDataset':
         label_dict = {"Car": 0, "Pedestrian": 1, "Cyclist": 2}
         vicinity_dict = {"Car": 20, "Pedestrian": 5, "Cyclist": 9}
@@ -257,6 +257,11 @@ def main():
             FP_dist_list = []
             FP_label_list = []
             FP_pts_count_list = []
+            FN_score_list = []
+            FN_XQ_list = []
+            FN_dist_list = []
+            FN_label_list = []
+            FN_pts_count_list = []
             XQ_list = []
             for root, dirs, files in os.walk(XAI_attr_path):
                 # print('processing files: ')
@@ -335,6 +340,12 @@ def main():
                                     FP_score_list.append(pred_scores[j][0])
                                     FP_dist_list.append(dist_to_ego)
                                     FP_label_list.append(label)
+                                elif boxes_type[j] == 2:  # 0 is FP
+                                    FN_XQ_list.append(XQ)
+                                    FN_pts_count_list.append(num_pts_in_pred_box[j])
+                                    FN_score_list.append(pred_scores[j][0])
+                                    FN_dist_list.append(dist_to_ego)
+                                    FN_label_list.append(label)
                 # print('processing dirs: ')
                 # for name in dirs:
                 #     print(os.path.join(root, name))
@@ -346,21 +357,23 @@ def main():
             all_xq = XAI_res_path_str + "/all_xq_thresh{}.csv".format(ignore_thresh)
             tp_xq = XAI_res_path_str + "/tp_xq_thresh{}.csv".format(ignore_thresh)
             fp_xq = XAI_res_path_str + "/fp_xq_thresh{}.csv".format(ignore_thresh)
+            fn_xq = XAI_res_path_str + "/fn_xq_thresh{}.csv".format(ignore_thresh)
             fnames = ['class_score', 'XQ', 'dist_to_ego', 'class_label']
             write_to_csv(all_xq, fnames, cls_score_list, XQ_list, dist_list, label_list)
             write_to_csv(tp_xq, fnames, TP_score_list, TP_XQ_list, TP_dist_list, TP_label_list)
             write_to_csv(fp_xq, fnames, FP_score_list, FP_XQ_list, FP_dist_list, FP_label_list)
+            write_to_csv(fn_xq, fnames, FN_score_list, FN_XQ_list, FN_dist_list, FN_label_list)
 
             # class score vs. XQ plot
-            fig, axs = plt.subplots(3, figsize=(10, 20))
+            fig, axs = plt.subplots((2, 2), figsize=(20, 20))
             cls_score_arr = np.array(cls_score_list)
             XQ_arr = np.array(XQ_list)
             cls_n_XQ = np.vstack([cls_score_arr, XQ_arr])
             z_all = gaussian_kde(cls_n_XQ)(cls_n_XQ)
             idx = z_all.argsort()
             x, y, z = cls_score_arr[idx], XQ_arr[idx], z_all[idx]
-            axs[0].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
-            axs[0].set_title('All Boxes')
+            axs[0, 0].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
+            axs[0, 0].set_title('All Boxes')
 
             TP_score_arr = np.array(TP_score_list)
             TP_XQ_arr = np.array(TP_XQ_list)
@@ -368,8 +381,8 @@ def main():
             z_all = gaussian_kde(TP_cls_n_XQ)(TP_cls_n_XQ)
             idx = z_all.argsort()
             x, y, z = TP_score_arr[idx], TP_XQ_arr[idx], z_all[idx]
-            axs[1].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
-            axs[1].set_title('TP Boxes')
+            axs[0, 1].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
+            axs[0, 1].set_title('TP Boxes')
 
             FP_score_arr = np.array(FP_score_list)
             FP_XQ_arr = np.array(FP_XQ_list)
@@ -377,81 +390,108 @@ def main():
             z_all = gaussian_kde(FP_cls_n_XQ)(FP_cls_n_XQ)
             idx = z_all.argsort()
             x, y, z = FP_score_arr[idx], FP_XQ_arr[idx], z_all[idx]
-            axs[2].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
-            axs[2].set_title('FP Boxes')
+            axs[1, 0].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
+            axs[1, 0].set_title('FP Boxes')
+
+            FN_score_arr = np.array(FN_score_list)
+            FN_XQ_arr = np.array(FN_XQ_list)
+            FN_cls_n_XQ = np.vstack([FN_score_arr, FN_XQ_arr])
+            z_all = gaussian_kde(FN_cls_n_XQ)(FN_cls_n_XQ)
+            idx = z_all.argsort()
+            x, y, z = FN_score_arr[idx], FN_XQ_arr[idx], z_all[idx]
+            axs[1, 1].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
+            axs[1, 1].set_title('FN Boxes')
             for ax in axs:
                 ax.set(xlabel='class scores', ylabel='XQ')
             plt.savefig("{}/XQ_class_score_density_thresh{}.png".format(XAI_result_path, ignore_thresh))
             plt.close()
 
             # XQ distribution
-            fig, axs = plt.subplots(3, figsize=(10, 20))
-            axs[0].hist(XQ_list, bins=20, range=(0.0, 1.0))
-            axs[0].set_title('All Boxes')
-            axs[1].hist(TP_XQ_list, bins=20, range=(0.0, 1.0))
-            axs[1].set_title('TP Boxes')
-            axs[2].hist(FP_XQ_list, bins=20, range=(0.0, 1.0))
-            axs[2].set_title('FP Boxes')
+            fig, axs = plt.subplots((2, 2), figsize=(20, 20))
+            axs[0, 0].hist(XQ_list, bins=20, range=(0.0, 1.0))
+            axs[0, 0].set_title('All Boxes')
+            axs[0, 1].hist(TP_XQ_list, bins=20, range=(0.0, 1.0))
+            axs[0, 1].set_title('TP Boxes')
+            axs[1, 0].hist(FP_XQ_list, bins=20, range=(0.0, 1.0))
+            axs[1, 0].set_title('FP Boxes')
+            axs[1, 1].hist(FN_XQ_list, bins=20, range=(0.0, 1.0))
+            axs[1, 1].set_title('FN Boxes')
             for ax in axs:
                 ax.set(xlabel='XQ', ylabel='box_count')
             plt.savefig("{}/pred_box_XQ_histograms_thresh{}.png".format(XAI_result_path, ignore_thresh))
             plt.close()
 
             # distance to ego vs. XQ plot
-            fig, axs = plt.subplots(3, figsize=(10, 20))
+            fig, axs = plt.subplots((2, 2), figsize=(20, 20))
             dist_arr = np.array(dist_list)
             dist_n_XQ = np.vstack([dist_arr, XQ_arr])
             z_all = gaussian_kde(dist_n_XQ)(dist_n_XQ)
             idx = z_all.argsort()
             x, y, z = dist_arr[idx], XQ_arr[idx], z_all[idx]
-            axs[0].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
-            axs[0].set_title('All Boxes')
+            axs[0, 0].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
+            axs[0, 0].set_title('All Boxes')
 
             TP_dist_arr = np.array(TP_dist_list)
             TP_dist_n_XQ = np.vstack([TP_dist_arr, TP_XQ_arr])
             z_all = gaussian_kde(TP_dist_n_XQ)(TP_dist_n_XQ)
             idx = z_all.argsort()
             x, y, z = TP_dist_arr[idx], TP_XQ_arr[idx], z_all[idx]
-            axs[1].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
-            axs[1].set_title('TP Boxes')
+            axs[0, 1].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
+            axs[0, 1].set_title('TP Boxes')
 
             FP_dist_arr = np.array(FP_dist_list)
             FP_dist_n_XQ = np.vstack([FP_dist_arr, FP_XQ_arr])
             z_all = gaussian_kde(FP_dist_n_XQ)(FP_dist_n_XQ)
             idx = z_all.argsort()
             x, y, z = FP_dist_arr[idx], FP_XQ_arr[idx], z_all[idx]
-            axs[2].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
-            axs[2].set_title('FP Boxes')
+            axs[1, 0].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
+            axs[1, 0].set_title('FP Boxes')
+
+            FN_dist_arr = np.array(FN_dist_list)
+            FN_dist_n_XQ = np.vstack([FN_dist_arr, FN_XQ_arr])
+            z_all = gaussian_kde(FN_dist_n_XQ)(FN_dist_n_XQ)
+            idx = z_all.argsort()
+            x, y, z = FN_dist_arr[idx], FN_XQ_arr[idx], z_all[idx]
+            axs[1, 1].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
+            axs[1, 1].set_title('FN Boxes')
             for ax in axs:
                 ax.set(xlabel='distance to ego', ylabel='XQ')
             plt.savefig("{}/XQ_distance_to_ego_thresh{}.png".format(XAI_result_path, ignore_thresh))
             plt.close()
 
             # num of lidar points in box vs. XQ plot
-            fig, axs = plt.subplots(3, figsize=(10, 20))
+            fig, axs = plt.subplots((2, 2), figsize=(20, 20))
             pts_arr = np.array(pts_count_list)
             pts_n_XQ = np.vstack([pts_arr, XQ_arr])
             z_all = gaussian_kde(pts_n_XQ)(pts_n_XQ)
             idx = z_all.argsort()
             x, y, z = pts_arr[idx], XQ_arr[idx], z_all[idx]
-            axs[0].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
-            axs[0].set_title('All Boxes')
+            axs[0, 0].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
+            axs[0, 0].set_title('All Boxes')
 
             TP_pts_arr = np.array(TP_pts_count_list)
             TP_dist_n_XQ = np.vstack([TP_pts_arr, TP_XQ_arr])
             z_all = gaussian_kde(TP_dist_n_XQ)(TP_dist_n_XQ)
             idx = z_all.argsort()
             x, y, z = TP_dist_arr[idx], TP_XQ_arr[idx], z_all[idx]
-            axs[1].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
-            axs[1].set_title('TP Boxes')
+            axs[0, 1].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
+            axs[0, 1].set_title('TP Boxes')
 
             FP_pts_arr = np.array(FP_pts_count_list)
             FP_pts_n_XQ = np.vstack([FP_pts_arr, FP_XQ_arr])
             z_all = gaussian_kde(FP_pts_n_XQ)(FP_pts_n_XQ)
             idx = z_all.argsort()
             x, y, z = FP_dist_arr[idx], FP_XQ_arr[idx], z_all[idx]
-            axs[2].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
-            axs[2].set_title('FP Boxes')
+            axs[1, 0].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
+            axs[1, 0].set_title('FP Boxes')
+
+            FN_pts_arr = np.array(FN_pts_count_list)
+            FN_pts_n_XQ = np.vstack([FN_pts_arr, FN_XQ_arr])
+            z_all = gaussian_kde(FN_pts_n_XQ)(FN_pts_n_XQ)
+            idx = z_all.argsort()
+            x, y, z = FN_dist_arr[idx], FN_XQ_arr[idx], z_all[idx]
+            axs[1, 1].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
+            axs[1, 1].set_title('FN Boxes')
             for ax in axs:
                 ax.set(xlabel='distance to ego', ylabel='XQ')
             plt.savefig("{}/XQ_points_in_box_thresh{}.png".format(XAI_result_path, ignore_thresh))
@@ -464,6 +504,7 @@ def main():
                     selected = [j for j in range(len(label_list)) if label_list[j] == i]
                     selected_TP = [j for j in range(len(TP_label_list)) if TP_label_list[j] == i]
                     selected_FP = [j for j in range(len(FP_label_list)) if FP_label_list[j] == i]
+                    selected_FN = [j for j in range(len(FN_label_list)) if FN_label_list[j] == i]
                     cls_score_list_i = list_selection(cls_score_list, selected)
                     XQ_list_i = list_selection(XQ_list, selected)
                     dist_list_i = list_selection(dist_list, selected)
@@ -476,52 +517,64 @@ def main():
                     FP_XQ_list_i = list_selection(FP_XQ_list, selected_FP)
                     FP_dist_list_i = list_selection(FP_dist_list, selected_FP)
                     FP_pts_count_list_i = list_selection(FP_pts_count_list, selected)
+                    FN_score_list_i = list_selection(FN_score_list, selected_FN)
+                    FN_XQ_list_i = list_selection(FN_XQ_list, selected_FN)
+                    FN_dist_list_i = list_selection(FN_dist_list, selected_FN)
+                    FN_pts_count_list_i = list_selection(FN_pts_count_list, selected)
 
-                    fig, axs = plt.subplots(3, figsize=(10, 20))
-                    axs[0].scatter(cls_score_list_i, XQ_list_i)
-                    axs[0].set_title('All Boxes')
-                    axs[1].scatter(TP_score_list_i, TP_XQ_list_i)
-                    axs[1].set_title('TP Boxes')
-                    axs[2].scatter(FP_score_list_i, FP_XQ_list_i)
-                    axs[2].set_title('FP Boxes')
+                    fig, axs = plt.subplots((2, 2), figsize=(10, 20))
+                    axs[0, 0].scatter(cls_score_list_i, XQ_list_i)
+                    axs[0, 0].set_title('All Boxes')
+                    axs[0, 1].scatter(TP_score_list_i, TP_XQ_list_i)
+                    axs[0, 1].set_title('TP Boxes')
+                    axs[1, 0].scatter(FP_score_list_i, FP_XQ_list_i)
+                    axs[1, 0].set_title('FP Boxes')
+                    axs[1, 1].scatter(FN_score_list_i, FN_XQ_list_i)
+                    axs[1, 1].set_title('FN Boxes')
                     for ax in axs:
                         ax.set(xlabel='class scores', ylabel='XQ')
                     plt.savefig("{}/XQ_class_score_{}_thresh{}.png".format(XAI_result_path, class_name, ignore_thresh))
                     plt.close()
 
-                    fig, axs = plt.subplots(3, figsize=(10, 20))
-                    axs[0].hist(XQ_list_i, bins=20, range=(0.0, 1.0))
-                    axs[0].set_title('All Boxes')
-                    axs[1].hist(TP_XQ_list_i, bins=20, range=(0.0, 1.0))
-                    axs[1].set_title('TP Boxes')
-                    axs[2].hist(FP_XQ_list_i, bins=20, range=(0.0, 1.0))
-                    axs[2].set_title('FP Boxes')
+                    fig, axs = plt.subplots((2, 2), figsize=(10, 20))
+                    axs[0, 0].hist(XQ_list_i, bins=20, range=(0.0, 1.0))
+                    axs[0, 0].set_title('All Boxes')
+                    axs[0, 1].hist(TP_XQ_list_i, bins=20, range=(0.0, 1.0))
+                    axs[0, 1].set_title('TP Boxes')
+                    axs[1, 0].hist(FP_XQ_list_i, bins=20, range=(0.0, 1.0))
+                    axs[1, 0].set_title('FP Boxes')
+                    axs[1, 1].hist(FN_XQ_list_i, bins=20, range=(0.0, 1.0))
+                    axs[1, 1].set_title('FN Boxes')
                     for ax in axs:
                         ax.set(xlabel='XQ', ylabel='box_count')
                     plt.savefig("{}/pred_box_XQ_histograms_{}_thresh{}.png".format(
                         XAI_result_path, class_name, ignore_thresh))
                     plt.close()
 
-                    fig, axs = plt.subplots(3, figsize=(10, 20))
-                    axs[0].scatter(dist_list_i, XQ_list_i)
-                    axs[0].set_title('All Boxes')
-                    axs[1].scatter(TP_dist_list_i, TP_XQ_list_i)
-                    axs[1].set_title('TP Boxes')
-                    axs[2].scatter(FP_dist_list_i, FP_XQ_list_i)
-                    axs[2].set_title('FP Boxes')
+                    fig, axs = plt.subplots((2, 2), figsize=(10, 20))
+                    axs[0, 0].scatter(dist_list_i, XQ_list_i)
+                    axs[0, 0].set_title('All Boxes')
+                    axs[0, 1].scatter(TP_dist_list_i, TP_XQ_list_i)
+                    axs[0, 1].set_title('TP Boxes')
+                    axs[1, 0].scatter(FP_dist_list_i, FP_XQ_list_i)
+                    axs[1, 0].set_title('FP Boxes')
+                    axs[1, 1].scatter(FN_dist_list_i, FN_XQ_list_i)
+                    axs[1, 1].set_title('FN Boxes')
                     for ax in axs:
                         ax.set(xlabel='distance to ego', ylabel='XQ')
                     plt.savefig("{}/XQ_distance_to_ego_{}_thresh{}.png".format(
                         XAI_result_path, class_name, ignore_thresh))
                     plt.close()
 
-                    fig, axs = plt.subplots(3, figsize=(10, 20))
-                    axs[0].scatter(pts_count_list_i, XQ_list_i)
-                    axs[0].set_title('All Boxes')
-                    axs[1].scatter(TP_pts_count_list_i, TP_XQ_list_i)
-                    axs[1].set_title('TP Boxes')
-                    axs[2].scatter(FP_pts_count_list_i, FP_XQ_list_i)
-                    axs[2].set_title('FP Boxes')
+                    fig, axs = plt.subplots((2, 2), figsize=(10, 20))
+                    axs[0, 0].scatter(pts_count_list_i, XQ_list_i)
+                    axs[0, 0].set_title('All Boxes')
+                    axs[0, 1].scatter(TP_pts_count_list_i, TP_XQ_list_i)
+                    axs[0, 1].set_title('TP Boxes')
+                    axs[1, 0].scatter(FP_pts_count_list_i, FP_XQ_list_i)
+                    axs[1, 0].set_title('FP Boxes')
+                    axs[1, 1].scatter(FN_pts_count_list_i, FN_XQ_list_i)
+                    axs[1, 1].set_title('FN Boxes')
                     for ax in axs:
                         ax.set(xlabel='points in box', ylabel='XQ')
                     plt.savefig("{}/XQ_points_in_box_{}_thresh{}.png".format(
