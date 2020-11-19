@@ -118,12 +118,12 @@ def bev_box_overlap(boxes, qboxes, criterion=-1):
     return riou
 
 
-@numba.jit(nopython=True, parallel=True)
+@numba.jit(nopython=True, parallel=True) # nopython=True,
 def d3_box_overlap_kernel(boxes,
                           qboxes,
                           rinc,
                           criterion=-1,
-                          z_axis=1,
+                          z_axis=2,
                           z_center=1.0):
     """
         z_axis: the z (height) axis.
@@ -131,7 +131,9 @@ def d3_box_overlap_kernel(boxes,
     """
     N, K = boxes.shape[0], qboxes.shape[0]
     for i in range(N):
+        # print("\n\nboxes[{}]: {}".format(i, boxes[i]))
         for j in range(K):
+            # print("\nqboxes[{}]: {}".format(j, qboxes[j]))
             if rinc[i, j] > 0:
                 min_z = min(
                     boxes[i, z_axis] + boxes[i, z_axis + 3] * (1 - z_center),
@@ -144,6 +146,10 @@ def d3_box_overlap_kernel(boxes,
                     area1 = boxes[i, 3] * boxes[i, 4] * boxes[i, 5]
                     area2 = qboxes[j, 3] * qboxes[j, 4] * qboxes[j, 5]
                     inc = iw * rinc[i, j]
+                    # print("iw: {}".format(iw))
+                    # print("prev rinc[{}, {}]: {}".format(i, j, rinc[i,j]))
+                    # print("area1: {}".format(area1))
+                    # print("area2: {}".format(area2))
                     if criterion == -1:
                         ua = (area1 + area2 - inc)
                     elif criterion == 0:
@@ -153,6 +159,9 @@ def d3_box_overlap_kernel(boxes,
                     else:
                         ua = 1.0
                     rinc[i, j] = inc / ua
+                    # print("ua: {}".format(ua))
+                    # print("inc: {}".format(inc))
+                    # print("updated rinc[{}, {}]: {}".format(i, j, rinc[i,j]))
                 else:
                     rinc[i, j] = 0.0
 
@@ -166,8 +175,25 @@ def d3_box_overlap(boxes, qboxes, criterion=-1, z_axis=1, z_center=1.0):
     bev_axes = list(range(7))
     bev_axes.pop(z_axis + 3)
     bev_axes.pop(z_axis)
+
+    # print("\nverification in d3_box_overlap:")
+    #
+    # cnt = 0
+    # end = min(4, len(qboxes))
+    # print("boxes before rotate_iou_gpu_eval:")
+    # while cnt < end:
+    #     print("predicted box {}: {}".format(cnt, qboxes[cnt]))
+    #     cnt += 1
     
-    rinc = rotate_iou_gpu_eval(boxes[:, bev_axes], qboxes[:, bev_axes], 2)
+    rinc = rotate_iou_gpu_eval(boxes[:, bev_axes], qboxes[:, bev_axes], criterion=2)
+    # note that the boxes and qboxes variables are not changed after the above function
+
+    # cnt = 0
+    # print("boxes after rotate_iou_gpu_eval:")
+    # while cnt < end:
+    #     print("predicted box {}: {}".format(cnt, qboxes[cnt]))
+    #     cnt += 1
+
     d3_box_overlap_kernel(boxes, qboxes, rinc, criterion, z_axis, z_center)
     return rinc
 

@@ -140,7 +140,7 @@ def get_sum_XQ_analytics(pos_grad, neg_grad, box_vertices, dataset_name, sign, i
         # print("No attributions present!")
         return 0
     XQ = attr_in_box / total_attr
-    print("XQ: {}".format(XQ))
+    # print("XQ: {}".format(XQ))
     return XQ
 
 
