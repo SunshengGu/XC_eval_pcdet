@@ -166,7 +166,7 @@ def find_missing_gt_3d(gt_dict, pred_labels, overlap, iou_unmatching_thresholds,
     # print("\nverification in find_missing_gt_3d:")
     # print('overlap.shape: {}'.format(overlap.shape))
     ious, pred_idx = np.max(overlap, axis=1), np.argmax(overlap, axis=1)
-    # print("number of gt boxes: {}".format(len(gt_boxes)))
+    print("\nnumber of gt boxes according to the `info` attribute of the dataset object: {}\n".format(len(gt_boxes)))
     # print("number of pred boxes: {}".format(len(pred_boxes)))
     # print("len(ious): {}".format(len(ious)))
     ind = 0
@@ -201,8 +201,6 @@ def find_missing_gt_3d(gt_dict, pred_labels, overlap, iou_unmatching_thresholds,
                 missed_gt_iou.append(iou)
         elif cls_names[pred_labels[pred_id]] != gt_labels[ind]:
             # exceeded iou thresholds but missclassifed
-            if ind == 24:
-                print("\ngt_box 24 is missed!\n")
             misclassified_gt_idx.append(ind)
             misclassified_gt_label.append(gt_labels[ind])
             misclassified_gt_iou.append(iou)
@@ -248,11 +246,11 @@ def main():
     :return:
     """
     FN_analysis = True
-    skip_TP_FP = False
+    skip_TP_FP = True
     box_cnt = 0
     start_time = time.time()
     max_obj_cnt = 50
-    batches_to_analyze = 3
+    batches_to_analyze = 5
     method = 'IG'
     ignore_thresh = 0.0
     verify_box = False
@@ -375,10 +373,11 @@ def main():
         dist=dist_test, workers=args.workers, logger=logger, training=False
     )
     print("grid size for 2D pseudoimage: {}".format(test_set.grid_size))
+    class_name_list = cfg.CLASS_NAMES
 
-    cadc_bev = CADC_BEV(dataset=test_set, scale_to_pseudoimg=(not high_rez), background='black',
+    cadc_bev = CADC_BEV(dataset=test_set, scale_to_pseudoimg=(not high_rez), class_name=class_name_list, background='black',
                         scale=scaling_factor, cmap=color_map, dpi_factor=dpi_division_factor, margin=box_margin)
-    kitti_bev = KITTI_BEV(dataset=test_set, scale_to_pseudoimg=(not high_rez), background='black',
+    kitti_bev = KITTI_BEV(dataset=test_set, scale_to_pseudoimg=(not high_rez), class_name=class_name_list, background='black',
                           result_path='output/kitti_models/pointpillar/default/eval/epoch_7728/val/default/result.pkl',
                           scale=scaling_factor, cmap=color_map, dpi_factor=dpi_division_factor, margin=box_margin)
     print('\n \n building the 2d network')
@@ -399,8 +398,6 @@ def main():
     model.load_params_from_file(filename=args.ckpt, logger=logger, to_cpu=dist_test)
     model.cuda()
     model.eval()
-
-    class_name_list = cfg.CLASS_NAMES
 
     # get the date and time to create a folder for the specific time when this script is run
     now = datetime.datetime.now()
@@ -460,7 +457,7 @@ def main():
             if batch_num == batches_to_analyze:
                 break  # just process a limited number of batches
             print("\nbatch_num: {}\n".format(batch_num))
-            if batch_num != 1:
+            if batch_num != 3:
                 continue
             # print('\nlen(batch_dict): {}\n'.format(len(batch_dict)))
             XAI_batch_path_str = XAI_res_path_str + '/batch_{}'.format(batch_num)
@@ -901,13 +898,19 @@ def main():
                                     best_FN_anchor_exp = None
                                     bev_tool = None
                                     best_FN_anchor_ind = None
-                                    match_dist = 0.5
+                                    match_dist = 1.0
+                                    check_heading = True
                                     if label == "Pedestrian" or label == "Cyclist":
-                                        match_dist = 0.3
+                                        match_dist = 0.5
+                                        check_heading = False
                                     if dataset_name == 'KittiDataset':
                                         bev_tool = kitti_bev
                                     elif dataset_name == 'CadcDataset':
                                         bev_tool = cadc_bev
+                                    gt_box = gt_dict[i]['boxes'][index]
+                                    print("\ngt_box heading: {}".format(gt_box[6]))
+                                    dist_filter = False
+                                    heading_filter = False
                                     for ind in range(lower_bound, upper_bound, 1):
                                         # print('the anchor index to search: {}'.format(ind))
                                         box_gpu = batch_dict['anchor_boxes'][i][ind]
@@ -919,10 +922,13 @@ def main():
                                             # only process anchors that matching the specific class label
                                             continue
                                         box = box_gpu.cpu().detach().numpy()
-                                        gt_box = gt_dict[i]['boxes'][index]
                                         if abs(box[0] - gt_box[0]) > match_dist or abs(box[1] - gt_box[1]) > match_dist or \
                                                 abs(box[2] - gt_box[2]) > match_dist:
                                             continue  # early stopping
+                                        dist_filter = True
+                                        if check_heading and abs(abs(box[6]) - abs(gt_box[6])) > 0.5:
+                                            continue  # don't check for misaligned boxes
+                                        heading_filter = True
                                         gt_box_expand = np.expand_dims(gt_box, axis=0)
                                         box_expand = np.expand_dims(box, axis=0)
                                         curr_iou = None
@@ -937,11 +943,15 @@ def main():
                                             best_FN_anchor_exp = box_expand
                                             best_FN_anchor_ind = ind
                                             best_FN_anchor_label = anchor_label
-                                        if curr_iou[0] >= 0.7:
+                                        if curr_iou[0] >= 0.85:
                                             break
+                                    if dist_filter:
+                                        print("\nFN box {} passed the dist filter!".format(index))
+                                    if heading_filter:
+                                        print("\nFN box {} passed the heading filter!".format(index))
                                     if has_match:
                                         # TODO: save necessary info to attr file, show XQ and num points in box in image
-                                        print("\nFound matching anchor for an FN box! \n")
+                                        print("\nFound matching anchor for an FN box {}! \n".format(index))
                                         FN_target = (anchor_ind, k)
                                         FN_attr = ig2D.attribute(
                                             PseudoImage2D, baselines=PseudoImage2D * 0, target=FN_target,

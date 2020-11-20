@@ -15,7 +15,7 @@ import datetime
 
 
 class CADC_BEV:
-    def __init__(self, dataset, repo_dir='/root/pcdet', scale_to_pseudoimg=False, class_name=['Car', 'Pedestrian', 'Cyclist'],
+    def __init__(self, dataset, repo_dir='/root/pcdet', scale_to_pseudoimg=False, class_name=['Car', 'Pedestrian', 'Truck'],
                 result_path='output/cadc_models/pointpillar/default/eval/epoch_4/val/default/result.pkl',
                 output_path = 'data/cadc/', background='black', scale=5, cmap='jet', dpi_factor=20.0, margin=0.0):
         self.repo_dir = repo_dir
@@ -269,6 +269,7 @@ class CADC_BEV:
                     distance < distance_threshold:
                 gt.append(cuboid)
         annotations['cuboids'] = gt
+        print("\nnumber of gt boxes according to the get_label method of the dataset object: {}\n".format(len(gt)))
 
         # filter prediction
         predictions = result_frame['boxes_lidar']
