@@ -106,6 +106,19 @@ class CADC_BEV:
         poly = np.array([[-1 * y1, x1], [-1 * y2, x2], [-1 * y4, x4], [-1 * y3, x3]])
         return poly
 
+    def get_preds(self, result_frame):
+        # filter predictions
+        box_preds = []
+        # box_var_preds = []
+        print("len(result_frame['boxes_lidar']): {}".format(len(result_frame['boxes_lidar'])))
+        for i in range(len(result_frame['boxes_lidar'])):
+            # Rotate prediction
+            result_frame['boxes_lidar'][i][6] += np.pi / 2
+            box_preds.append(result_frame['boxes_lidar'][i])
+            # # Exponentiate to get variances
+            # box_var_preds.append(np.exp(result_frame['boxes_lidar_log_var'][i]))
+        return box_preds
+
     def draw_bev(self, lidar, annotations, predictions, output_path, s1=50, s2=50, f1=50, f2=50):
         '''
         :param lidar : Lidar data as an np.array
@@ -117,14 +130,17 @@ class CADC_BEV:
         # limit the viewing range
         side_range = [-s1, s2]  # 15 meters from either side of the car
         fwd_range = [-f1, f2]  # 15 m infront of the car
+        print("\nshape of lidar data: {}\n".format(lidar.shape))
 
         lidar_x = lidar[:, 0]
         lidar_y = lidar[:, 1]
         lidar_z = lidar[:, 2]
+        lidar_intensity = lidar[:, 3]
 
         lidar_x_trunc = []
         lidar_y_trunc = []
         lidar_z_trunc = []
+        lidar_intensity_trunc = []
 
         for i in range(len(lidar_x)):
             if lidar_x[i] > fwd_range[0] and lidar_x[i] < fwd_range[1]:  # get the lidar coordinates
@@ -132,11 +148,12 @@ class CADC_BEV:
                     lidar_x_trunc.append(lidar_x[i])
                     lidar_y_trunc.append(lidar_y[i])
                     lidar_z_trunc.append(lidar_z[i])
+                    lidar_intensity_trunc.append(lidar_intensity[i])
 
         # to use for the plot
         x_img = [i * -1 for i in lidar_y_trunc]  # in the image plot, the negative lidar y axis is the img x axis
         y_img = lidar_x_trunc  # the lidar x axis is the img y axis
-        pixel_values = lidar_z_trunc
+        pixel_values = lidar_intensity_trunc
 
         # shift values such that 0,0 is the minimum
         x_img = [i - side_range[0] for i in x_img]
@@ -209,11 +226,12 @@ class CADC_BEV:
             polys = patches.Polygon(poly, closed=True, fill=False, edgecolor='r', linewidth=1)
             ax.add_patch(polys)
 
-        ax.scatter(x_img, y_img, s=1, c=pixel_values, alpha=1.0, cmap=cmap)  # Plot Lidar points
         if self.background == 'black':
+            ax.scatter(x_img, y_img, s=1, c=pixel_values, alpha=1.0, cmap=cmap)  # Plot Lidar points
             ax.set_facecolor((0, 0, 0))
         elif self.background == 'white':
-            ax.set_facecolor((1, 1, 1))
+            ax.scatter(x_img, y_img, s=1, c=pixel_values)  # Plot Lidar points
+            # ax.set_facecolor((1, 1, 1))
         ax.axis('scaled')  # {equal, scaled}
         ax.xaxis.set_visible(False)  # Do not draw axis tick marks
         ax.yaxis.set_visible(False)  # Do not draw axis tick marks
@@ -250,8 +268,18 @@ class CADC_BEV:
         # For now since we send over three variables we can do it this way
         date, run, frame = result_frame[unique_id]
 
-        lidar_data = self.dataset.get_lidar([date, run, frame])
-        self.lidar_data = lidar_data
+        # # The following lines are for retaining lidar points information for point count later
+        # # ************************* start ************************** #
+        # lidar_points = self.dataset.get_lidar([date, run, frame])
+        # calib = self.dataset.get_calib([date, run, frame])
+        # pts_rect = calib.lidar_to_rect(lidar_points[:, 0:3])
+        # img_shape = self.dataset.get_image_shape([date, run, frame])
+        # fov_flag = self.dataset.get_fov_flag(pts_rect, img_shape, calib)
+        # pts_fov = lidar_points[fov_flag]
+        # self.lidar_data = pts_fov
+        # # ************************* end ************************** #
+        lidar_points = self.dataset.get_lidar([date, run, frame])
+        self.lidar_data = lidar_points
         annotations = self.dataset.get_label([date, run, frame])[int(frame)]
 
         point_count_threshold, distance_threshold, score_threshold = self.dataset.get_threshold()
@@ -260,6 +288,7 @@ class CADC_BEV:
         # print('score_threshold: {}'.format(score_threshold))
         # filter gt
         gt = []
+        ind = 0
         for cuboid in annotations['cuboids']:
             x, y, z = cuboid['position']['x'], cuboid['position']['y'], cuboid['position']['z']
             distance = np.sqrt(np.square(x) + np.square(y) + np.square(z))
@@ -268,6 +297,8 @@ class CADC_BEV:
                     cuboid['points_count'] >= point_count_threshold[cuboid['label']] and \
                     distance < distance_threshold:
                 gt.append(cuboid)
+                print("\nnumber of points in gt box {}: {}\n".format(ind, cuboid['points_count']))
+                ind += 1
         annotations['cuboids'] = gt
         print("\nnumber of gt boxes according to the get_label method of the dataset object: {}\n".format(len(gt)))
 
@@ -282,7 +313,7 @@ class CADC_BEV:
 
         print("\nProcessing Sample: %s_%s_%s" % (date, run, frame))
 
-        bev_fig = self.draw_bev(lidar_data, annotations, predictions,
+        bev_fig = self.draw_bev(lidar_points, annotations, predictions,
                              os.path.join(self.output_path, "%s_%s_%s.png" % (date, run, frame)))
 
         bev_fig.canvas.draw()

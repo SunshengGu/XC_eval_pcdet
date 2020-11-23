@@ -181,6 +181,7 @@ class KittiDataset(DatasetTemplate):
                     for k in range(num_objects):
                         flag = box_utils.in_hull(pts_fov[:, 0:3], corners_lidar[k])
                         num_points_in_gt[k] = flag.sum()
+                        # print("\nnum_points_in_gt[{}]: {}\n".format(k, num_points_in_gt[k]))
                     annotations['num_points_in_gt'] = num_points_in_gt
 
             return info
@@ -350,8 +351,8 @@ class KittiDataset(DatasetTemplate):
         calib = self.get_calib(sample_idx)
 
         img_shape = info['image']['image_shape']
-        print('\nimg_shape: {}'.format(img_shape))
-        print('\ntype(img_shape): {}'.format(type(img_shape)))
+        # print('\nimg_shape: {}'.format(img_shape))
+        # print('\ntype(img_shape): {}'.format(type(img_shape)))
         if self.dataset_cfg.FOV_POINTS_ONLY:
             pts_rect = calib.lidar_to_rect(points[:, 0:3])
             fov_flag = self.get_fov_flag(pts_rect, img_shape, calib)

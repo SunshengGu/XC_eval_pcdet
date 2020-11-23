@@ -51,9 +51,12 @@ class KITTI_BEV:
     def load_gt_anns(self, result_frame, unique_id):
         kitti_annotations = self.dataset.get_label(result_frame[unique_id])
         calib = self.dataset.get_calib(result_frame[unique_id])
+        dummy_list = [result_frame[unique_id]]
+        gt_infos = self.dataset.get_infos(sample_id_list=dummy_list)
         # Convert to CADC
         annotations = {
-            'cuboids': []
+            'cuboids': [],
+            'point_cnts': gt_infos[0]['annos']['num_points_in_gt']
         }
         for obj in kitti_annotations:
             loc_lidar = calib.rect_to_lidar(obj.loc.reshape(1, 3))[0]
@@ -73,21 +76,28 @@ class KITTI_BEV:
             }
             annotations['cuboids'].append(cuboid)
             # exit()
-
+        # these two printed below indeed have the same size
+        # print("\nlen(annotations['cuboids']): {}".format(len(annotations['cuboids'])))
+        # print("len(annotations['point_cnts']): {}\n".format(len(annotations['point_cnts'])))
         # Filter GT boxes
         gt = []
-        for cuboid in annotations['cuboids']:
-            if cuboid['label'] in self.class_name:
+        gt_pt_cnt = []
+        for cuboid, pt_cnt in zip(annotations['cuboids'], annotations['point_cnts']):
+            x, y = cuboid['position']['x'], cuboid['position']['y']
+            if (cuboid['label'] in self.class_name) and (-1.5 < x < 70.5) and (-40.5 < y < 40.5):
                 gt.append(cuboid)
+                gt_pt_cnt.append(pt_cnt)
         annotations['cuboids'] = gt
-
+        annotations['point_cnts'] = gt_pt_cnt
+        print("\nnumber of gt boxes according to the get_label method of the dataset object: {}\n".format(len(gt)))
         return annotations
 
     def get_preds(self, result_frame):
         # filter predictions
         box_preds = []
         # box_var_preds = []
-        print("len(result_frame['boxes_lidar']): {}".format(len(result_frame['boxes_lidar'])))
+        print("\nnumber of pred boxes according to len(result_frame['boxes_lidar']): {}\n".format(
+            len(result_frame['boxes_lidar'])))
         for i in range(len(result_frame['boxes_lidar'])):
             # Rotate prediction
             result_frame['boxes_lidar'][i][6] += np.pi / 2
@@ -174,10 +184,15 @@ class KITTI_BEV:
         lidar_x = lidar[:, 0]
         lidar_y = lidar[:, 1]
         lidar_z = lidar[:, 2]
+        lidar_intensity = lidar[:, 3]
+        print("\nshape of lidar data: {}\n".format(lidar.shape))
+        # annotations has nothing but cuboids...
+        # print("\nannotations.keys: {}\n".format(annotations.keys()))
 
         lidar_x_trunc = []
         lidar_y_trunc = []
         lidar_z_trunc = []
+        lidar_intensity_trunc = []
 
         for i in range(len(lidar_x)):
             if lidar_x[i] > fwd_range[0] and lidar_x[i] < fwd_range[1]:  # get the lidar coordinates
@@ -185,12 +200,13 @@ class KITTI_BEV:
                     lidar_x_trunc.append(lidar_x[i])
                     lidar_y_trunc.append(lidar_y[i])
                     lidar_z_trunc.append(lidar_z[i])
+                    lidar_intensity_trunc.append(lidar_intensity[i])
 
         # to use for the plot
         x_img = [i * -1 for i in lidar_y_trunc]  # in the image plot, the negative lidar y axis is the img x axis
         y_img = lidar_x_trunc  # the lidar x axis is the img y axis
-        pixel_values = lidar_z_trunc
-
+        # pixel_values = lidar_z_trunc
+        pixel_values = lidar_intensity_trunc
         # shift values such that 0,0 is the minimum
         x_img = [i - side_range[0] for i in x_img]
         y_img = [i - fwd_range[0] for i in y_img]
@@ -200,7 +216,9 @@ class KITTI_BEV:
         gt_loc = []
         pred_loc = []
 
-        for cuboid in annotations['cuboids']:
+        ind = 0
+
+        for cuboid, pt_cnt in zip(annotations['cuboids'], annotations['point_cnts']):
             x = cuboid['position']['x']
             y = cuboid['position']['y']
             z = cuboid['position']['z']
@@ -208,6 +226,10 @@ class KITTI_BEV:
             l = cuboid['dimensions']['y']
             h = cuboid['dimensions']['z']
             yaw = cuboid['yaw']
+            # this cuboid thing doesn't have info on the number of points in boxes...
+            # print("\ncuboid.keys(): {}\n".format(cuboid.keys()))
+            print("\nnumber of points in gt box {}: {}\n".format(ind, pt_cnt))
+            ind += 1
 
             # if (x < fwd_range[0] or x > fwd_range[1] or y < side_range[0] or y > side_range[1]):
             #     continue  # out of bounds
@@ -252,15 +274,20 @@ class KITTI_BEV:
             self.height_pix = 496
         dpi = self.width_pix / self.dpi_factor  # Image resolution, dots per inch
         fig, ax = plt.subplots(figsize=(self.height_pix / dpi, self.width_pix / dpi), dpi=dpi)
-
+        gt_patch, pred_patch = None, None
         for poly in gt_poly:  # plot the tracklets
-            polys = patches.Polygon(poly, closed=True, fill=False, edgecolor='g', linewidth=1)
-            ax.add_patch(polys)
+            gt_patch = patches.Polygon(poly, closed=True, fill=False, edgecolor='g', linewidth=1, label='gt_box')
+            ax.add_patch(gt_patch)
         for poly in pred_poly:
-            polys = patches.Polygon(poly, closed=True, fill=False, edgecolor='r', linewidth=1)
-            ax.add_patch(polys)
+            pred_patch = patches.Polygon(poly, closed=True, fill=False, edgecolor='r', linewidth=1, label='pred_box')
+            ax.add_patch(pred_patch)
 
         ax.scatter(x_img, y_img, s=1, c=pixel_values, alpha=1.0, cmap=cmap)  # Plot Lidar points
+        if pred_patch is not None:
+            if gt_patch is not None:
+                plt.legend(handles=[gt_patch, pred_patch])
+            else:
+                plt.legend(handles=[pred_patch])
         if self.background == 'black':
             ax.set_facecolor((0, 0, 0))
         elif self.background == 'white':
@@ -285,6 +312,7 @@ class KITTI_BEV:
                  bev_fig_array--np.array containing data for this figure
         '''
         result_frame = self.results[frame_idx]
+        print("\nresult_frame.keys(): {}\n".format(result_frame.keys()))
 
         # TODO double check, this is either sample_idx or frame_id depending on
         # code in generate_prediction_dicts() in cadc_dataset.py

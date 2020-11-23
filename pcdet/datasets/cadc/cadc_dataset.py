@@ -165,6 +165,8 @@ class CadcDataset(DatasetTemplate):
         annotations = {}
         annotations['name'] = np.array([obj['label'] for obj in obj_list])
         annotations['num_points_in_gt'] = [[obj['points_count'] for obj in obj_list]]
+        # for ind, count in enumerate(annotations['num_points_in_gt']):
+        #     print("\nnum_points_in_gt[{}]: {}\n".format(ind, count))
         
         loc_lidar = np.array([[obj['position']['x'],obj['position']['y'],obj['position']['z']] for obj in obj_list]) 
         dims = np.array([[obj['dimensions']['x'],obj['dimensions']['y'],obj['dimensions']['z']] for obj in obj_list])
