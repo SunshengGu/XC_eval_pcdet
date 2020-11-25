@@ -45,8 +45,40 @@ class KITTI_BEV:
         self.output_path = os.path.join(repo_dir, output_path)
         self.margin = margin
         self.lidar_data = None
+        self.pred_boxes = None
+        self.pred_labels = None
         if not os.path.exists(self.output_path):
             os.makedirs(self.output_path)
+
+    def set_pred_box(self, pred_boxes, pred_labels):
+        for i in range(len(pred_boxes)):
+            pred_boxes[i][6] += np.pi / 2
+        self.pred_boxes = pred_boxes
+        self.pred_labels = pred_labels
+
+    # def get_gt_anns(self):
+    #     annotations = {
+    #         'cuboids': [],
+    #     }
+    #     for box, label in zip(self.pred_boxes, self.pred_labels):
+    #         x, y = box[0], box[1]
+    #         if (-1.5 < x < 70.5) and (-40.5 < y < 40.5):
+    #             cuboid = {
+    #                 'label': self.class_name[label],
+    #                 'position': {
+    #                     'x': box[0],
+    #                     'y': box[1],
+    #                     'z': box[2]
+    #                 },
+    #                 'dimensions': {
+    #                     'x': box[3],
+    #                     'y': box[4],
+    #                     'z': box[5]
+    #                 },
+    #                 'yaw': box[6]
+    #             }
+    #             annotations['cuboids'].append(cuboid)
+    #     return annotations
 
     def load_gt_anns(self, result_frame, unique_id):
         kitti_annotations = self.dataset.get_label(result_frame[unique_id])
@@ -332,12 +364,12 @@ class KITTI_BEV:
         self.lidar_data = pts_fov
         # ************************* end ************************** #
         annotations = self.load_gt_anns(result_frame, unique_id)
-        box_preds = self.get_preds(result_frame)
+        # box_preds = self.get_preds(result_frame)
         scores = result_frame['score']
 
         print("Processing Sample: %s" % result_frame[unique_id])
 
-        bev_fig = self.draw_bev(lidar_points, annotations, box_preds,
+        bev_fig = self.draw_bev(lidar_points, annotations, self.pred_boxes,
                                 os.path.join(self.output_path, "%s.png" % result_frame[unique_id]))
 
         bev_fig.canvas.draw()

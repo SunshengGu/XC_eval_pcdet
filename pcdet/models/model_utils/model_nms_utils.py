@@ -16,7 +16,7 @@ def class_agnostic_nms(box_scores, box_preds, nms_config, score_thresh=None):
         # for PointPillar:
         # NMS_PRE_MAXSIZE: 4096
         # NMS_POST_MAXSIZE: 500
-        box_scores_nms, indices = torch.topk(box_scores, k=min(nms_config.NMS_PRE_MAXSIZE, box_scores.shape[0]))
+        box_scores_nms, indices = torch.topk(box_scores, k=min(nms_config.NMS_PRE_MAXSIZE, box_scores.shape[0]), sorted=True)
         # box_scores_nms: box scores exceeding the threshold
         # indices: indices of these box scores
         # boxes_for_nms: corresponding boxes, each with 7 parameters

@@ -2,6 +2,7 @@ import os
 
 import torch
 import torch.nn as nn
+import copy
 
 from ...ops.iou3d_nms import iou3d_nms_utils
 from .. import backbones_2d, backbones_3d, dense_heads, roi_heads
@@ -339,6 +340,7 @@ class Detector3DTemplate(nn.Module):
         output_anchor = post_process_cfg.OUTPUT_ANCHOR_BOXES  # indicates if we output anchor boxes
         anchor_scores = []  # store class scores for individual anchor boxes
         anchor_boxes = []
+        anchor_labels = []
         # max_box_ind = 0 # index of the input in the batch with most number of boxes
         max_num_boxes = box_limit
         for index in range(batch_size):
@@ -387,10 +389,9 @@ class Detector3DTemplate(nn.Module):
                 # 2. the indices of the maximum values in the indicated dimension
                 # now, for each box, we have a class prediction
                 cls_preds, label_preds = torch.max(cls_preds, dim=-1)
-                # print('\n shape of label_preds before: ' + str(label_preds.shape))
-                # print('label_preds data type: ' + str(type(label_preds)))
-                # question: why add 1 to each element of label_preds?
-                # because class labels are 1,2,3 instead of 0,1,2?
+                # orig_label_preds = label_preds + 1
+                # orig_cls_preds = cls_preds
+                anchor_labels.append(label_preds)
                 label_preds = batch_dict['roi_labels'][index] if batch_dict.get('has_class_labels',
                                                                                 False) else label_preds + 1
                 if batch_dict.get('has_class_labels', False):
@@ -408,9 +409,14 @@ class Detector3DTemplate(nn.Module):
                     max_cls_preds, _ = torch.max(src_cls_preds, dim=-1)
                     selected_scores = max_cls_preds[selected]
 
-                final_scores = selected_scores
+                final_scores = selected_scores # this is the original code
                 final_labels = label_preds[selected]
                 final_boxes = box_preds[selected]
+
+                # # the following modifications did nothing
+                # final_scores = orig_cls_preds[selected]
+                # final_labels = orig_label_preds[selected]
+                # final_boxes = src_box_preds[selected]
 
                 # for label in final_labels:
                 #     print('label is {}'.format(label))
@@ -446,6 +452,7 @@ class Detector3DTemplate(nn.Module):
         if output_anchor:
             anchor_scores = torch.stack(anchor_scores)
             batch_dict['anchor_boxes'] = anchor_boxes
+            batch_dict['anchor_labels'] = anchor_labels
             return anchor_scores
 
         # pad each output in the batch to match dimensions with the maximum length output
