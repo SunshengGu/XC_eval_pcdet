@@ -46,11 +46,13 @@ class KITTI_BEV:
         self.margin = margin
         self.lidar_data = None
         self.pred_boxes = None
+        self.pred_boxes_for_cnt = None
         self.pred_labels = None
         if not os.path.exists(self.output_path):
             os.makedirs(self.output_path)
 
     def set_pred_box(self, pred_boxes, pred_labels):
+        self.pred_boxes_for_cnt = copy.deepcopy(pred_boxes)
         for i in range(len(pred_boxes)):
             pred_boxes[i][6] += np.pi / 2
         self.pred_boxes = pred_boxes
@@ -217,7 +219,7 @@ class KITTI_BEV:
         lidar_y = lidar[:, 1]
         lidar_z = lidar[:, 2]
         lidar_intensity = lidar[:, 3]
-        print("\nshape of lidar data: {}\n".format(lidar.shape))
+        # print("\nshape of lidar data: {}\n".format(lidar.shape))
         # annotations has nothing but cuboids...
         # print("\nannotations.keys: {}\n".format(annotations.keys()))
 
@@ -260,7 +262,7 @@ class KITTI_BEV:
             yaw = cuboid['yaw']
             # this cuboid thing doesn't have info on the number of points in boxes...
             # print("\ncuboid.keys(): {}\n".format(cuboid.keys()))
-            print("\nnumber of points in gt box {}: {}\n".format(ind, pt_cnt))
+            # print("\nnumber of points in gt box {}: {}\n".format(ind, pt_cnt))
             ind += 1
 
             # if (x < fwd_range[0] or x > fwd_range[1] or y < side_range[0] or y > side_range[1]):

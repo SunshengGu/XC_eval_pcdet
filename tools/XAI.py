@@ -245,9 +245,12 @@ def main():
             parameter to get higher dpi.
     :return:
     """
-    use_anchor_directly = False
-    FN_analysis = True
-    skip_TP_FP = False
+    box_debug = False
+    run_all = True
+    unmatched_TP_FP_pred = 0
+    # use_anchor_directly = True
+    FN_analysis = False
+    TP_FP_analysis = True
     box_cnt = 0
     TP_box_cnt = 0
     FP_box_cnt = 0
@@ -258,8 +261,8 @@ def main():
     partly_missed_box_analyzed = 0
     misclassified_box_analyzed = 0
     start_time = time.time()
-    max_obj_cnt = 50
-    batches_to_analyze = 7
+    max_obj_cnt = 100
+    batches_to_analyze = 460
     method = 'IG'
     ignore_thresh = 0.0
     verify_box = False
@@ -419,10 +422,15 @@ def main():
     if high_rez:
         rez_string = 'HighResolution'
     # create directory to store results just for this run, include the method in folder name
-    XAI_result_path = os.path.join(cwd, 'XAI_results/{}_{}_{}_{}batches'.format(
+    XAI_result_path = os.path.join(cwd, 'XAI_results/{}_{}_{}_{}_batches'.format(
         dt_string, method, dataset_name, batches_to_analyze))
-    XAI_attr_path = os.path.join(cwd, 'XAI_attributions/{}_{}_{}_{}batches'.format(
+    XAI_attr_path = os.path.join(cwd, 'XAI_attributions/{}_{}_{}_{}_batches'.format(
         dt_string, method, dataset_name, batches_to_analyze))
+    if run_all:
+        XAI_result_path = os.path.join(cwd, 'XAI_results/{}_{}_{}_{}_batches'.format(
+            dt_string, method, dataset_name, "all"))
+        XAI_attr_path = os.path.join(cwd, 'XAI_attributions/{}_{}_{}_{}_batches'.format(
+            dt_string, method, dataset_name, "all"))
 
     print('\nXAI_result_path: {}'.format(XAI_result_path))
     XAI_res_path_str = str(XAI_result_path)
@@ -470,11 +478,12 @@ def main():
     os.chmod(info_file_2, 0o777)
     try:
         for batch_num, batch_dict in enumerate(test_loader):
-            if batch_num == batches_to_analyze:
+            if (not run_all) and batch_num == batches_to_analyze:
                 break  # just process a limited number of batches
             print("\nbatch_num: {}\n".format(batch_num))
-            if batch_num != 6:
-                continue
+            # check_list = [459]
+            # if batch_num not in check_list:
+            #     continue
             # print('\nlen(batch_dict): {}\n'.format(len(batch_dict)))
             XAI_batch_path_str = XAI_res_path_str + '/batch_{}'.format(batch_num)
             os.mkdir(XAI_batch_path_str)
@@ -547,50 +556,35 @@ def main():
                 # box_cnt_list.append(len(conf_mat[i]))
                 box_cnt_list.append(max_obj_cnt)
                 box_cnt_list.append(len(batch_dict['anchor_selections'][i]))
+                # print("\nlen(batch_dict['anchor_selections'][i]): {}\n".format(len(batch_dict['anchor_selections'][i])))
                 num_boxes = min(box_cnt_list)
                 batch_num_boxes.append(num_boxes)
-                print("\nshowing box counts:")
-                print("batch_dict['box_count'][i]: {}".format(batch_dict['box_count'][i]))
-                # print("len(conf_mat[i]): {}".format(len(conf_mat[i])))
-                print("len(batch_dict['anchor_selections'][i]): {}".format(len(batch_dict['anchor_selections'][i])))
+                # print("\nshowing box counts:")
+                # print("batch_dict['box_count'][i]: {}".format(batch_dict['box_count'][i]))
+                # # print("len(conf_mat[i]): {}".format(len(conf_mat[i])))
+                # print("len(batch_dict['anchor_selections'][i]): {}".format(len(batch_dict['anchor_selections'][i])))
 
                 anchor_boxes_i = batch_anchors[i][anchor_select_i].cpu().numpy()
                 anchor_boxes_all_i = batch_anchors[i].cpu().numpy()
                 anchor_labels_i = batch_anchor_labels[i][anchor_select_i].cpu().numpy()
                 anchor_labels_all_i = batch_anchor_labels[i].cpu().numpy()
-                for count, anchor_index in enumerate(anchor_select_i):
-                    print("\nbox[{}] in selection: {}".format(count, anchor_boxes_i[count]))
-                    print("box[{}] in all anchors: {}".format(anchor_index, anchor_boxes_all_i[anchor_index]))
-                    print("label[{}] in selection: {}".format(count, anchor_labels_i[count]))
-                    print("label[{}] in all anchors: {}\n".format(anchor_index, anchor_labels_all_i[anchor_index]))
+
                 anchor_sig_all_i = batch_anchor_sig[i].cpu().numpy()
 
-                pred_boxes = anchor_boxes_i[:num_boxes, :]
-                pred_labels = anchor_labels_i[:num_boxes]
-                pred_scores = np.zeros(num_boxes)
-                for box_ind in range(num_boxes):
-                    anc_id = batch_dict['anchor_selections'][i][box_ind]
-                    # anc_id = anchor_select_i_cpu[box_ind]
-                    pred_boxes[box_ind] = anchor_boxes_all_i[anc_id]
-                    pred_labels[box_ind] = anchor_labels_all_i[anc_id]
-                    pred_scores[box_ind] = np.max(anchor_sig_all_i[anc_id])
-                    print("\nbox_ind: {}".format(box_ind))
-                    print("anc_id: {}".format(anc_id))
-                    print("type(box_ind): {}".format(type(box_ind)))
-                    print("type(anc_id): {}".format(type(anc_id)))
-                    print("pred_boxes[{}]: {}".format(box_ind, pred_boxes[box_ind]))
-                    print("pred_labels[{}]: {}".format(box_ind, pred_labels[box_ind]))
-                    print("pred_scores[{}]: {}".format(box_ind, pred_scores[box_ind]))
-                    print("anchor_boxes_all_i[{}]: {}".format(anc_id, anchor_boxes_all_i[anc_id]))
-                    print("anchor_labels_all_i[{}]: {}\n".format(anc_id, anchor_labels_all_i[anc_id]))
+                # pred_boxes = anchor_boxes_i[:num_boxes, :]
+                # pred_labels = anchor_labels_i[:num_boxes]
+                pred_boxes = pred_dicts[i]['pred_boxes'].cpu().numpy()
+                pred_labels = pred_dicts[i]['pred_labels'].cpu().numpy() - 1
+                pred_scores = pred_dicts[i]['pred_scores'].cpu().numpy()
+
                 batch_pred_boxes.append(pred_boxes)
                 batch_pred_labels.append(pred_labels)
                 batch_pred_scores.append(pred_scores)
 
                 scores_for_anchors = anchors_scores[i].cpu().detach().numpy()
-                print("\nscores_for_anchors.shape: {}\n".format(scores_for_anchors.shape))
-                # print("type(gt_dict[i]['boxes']) before filtering: {}".format(type(gt_dict[i]['boxes'])))
-                print("type(gt_dict[i]['labels']) before filtering: {}".format(type(gt_dict[i]['labels'])))
+                # print("\nscores_for_anchors.shape: {}\n".format(scores_for_anchors.shape))
+                # # print("type(gt_dict[i]['boxes']) before filtering: {}".format(type(gt_dict[i]['boxes'])))
+                # print("type(gt_dict[i]['labels']) before filtering: {}".format(type(gt_dict[i]['labels'])))
                 missed_boxes_plotted = []
                 for c in range(len(class_name_list)):
                     missed_boxes_plotted.append(False)
@@ -611,7 +605,7 @@ def main():
                     else:
                         gt_dict[i]['boxes'] = filtered_gt_boxes
                     gt_dict[i]['labels'] = filtered_gt_labels
-                print("type(gt_dict[i]['boxes']) after filtering: {}".format(type(gt_dict[i]['boxes'])))
+                # print("type(gt_dict[i]['boxes']) after filtering: {}".format(type(gt_dict[i]['boxes'])))
 
                 # need to handle the case when no gt boxes exist
                 gt_present = True
@@ -625,7 +619,7 @@ def main():
                         pred_name = class_name_list[adjusted_pred_boxes_label]
                         if curr_pred_score >= score_thres:
                             conf_mat_frame.append('FP')
-                            print("pred_box_ind: {}, pred_label: {}, didn't match any gt boxes".format(j, pred_name))
+                            # print("pred_box_ind: {}, pred_label: {}, didn't match any gt boxes".format(j, pred_name))
                         else:
                             conf_mat_frame.append('ignore')  # these boxes do not meet score thresh, ignore for now
                             print("pred_box {} has score below threshold: {}".format(j, curr_pred_score))
@@ -651,8 +645,9 @@ def main():
                 # sample_pred_scores = pred_dicts[i]['pred_scores'].cpu().numpy()
                 # batch_pred_scores.append(sample_pred_scores)
                 # *************************** FP TP identification start ******************************************** #
-                print("\nnumber of pred boxes according to len(pred_scores): {}\n".format(
-                    len(pred_scores)))
+                # print("\nnumber of pred boxes according to len(pred_scores): {}\n".format(
+                #     len(pred_scores)))
+
                 for j in range(len(pred_scores)):  # j is prediction box id in the i-th image
                     gt_cls = gt_dict[i]['labels'][gt_index[j]]
                     iou_thresh_3d = d3_iou_thresh_dict[gt_cls]
@@ -665,15 +660,18 @@ def main():
                                 conf_mat_frame.append('TP')
                             else:
                                 conf_mat_frame.append('FP')
-                            print("pred_box_ind: {}, pred_label: {}, gt_ind is {}, gt_label: {}, iou: {}".format(
-                                j, pred_name, gt_index[j], gt_cls, iou[j]))
+                            if box_debug:
+                                print("pred_box_ind: {}, pred_label: {}, gt_ind is {}, gt_label: {}, iou: {}".format(
+                                    j, pred_name, gt_index[j], gt_cls, iou[j]))
                         elif iou[j] > 0:
                             conf_mat_frame.append('FP')
-                            print("pred_box_ind: {}, pred_label: {}, gt_ind is {}, gt_label: {}, iou: {}".format(
-                                j, pred_name, gt_index[j], gt_cls, iou[j]))
+                            if box_debug:
+                                print("pred_box_ind: {}, pred_label: {}, gt_ind is {}, gt_label: {}, iou: {}".format(
+                                    j, pred_name, gt_index[j], gt_cls, iou[j]))
                         else:
                             conf_mat_frame.append('FP')
-                            print("pred_box_ind: {}, pred_label: {}, didn't match any gt boxes".format(j, pred_name))
+                            if box_debug:
+                                print("pred_box_ind: {}, pred_label: {}, didn't match any gt boxes".format(j, pred_name))
                     else:
                         conf_mat_frame.append('ignore')  # these boxes do not meet score thresh, ignore for now
                         print("pred_box {} has score below threshold: {}".format(j, curr_pred_score))
@@ -706,22 +704,25 @@ def main():
                 anchor_boxes_all_i = batch_anchors[i].cpu().numpy()
                 anchor_labels_all_i = batch_anchor_labels[i].cpu().numpy()
 
-                pred_boxes_i = batch_pred_boxes[i]
-                pred_labels_i = batch_pred_labels[i]
+                # pred_boxes_i = batch_pred_boxes[i]
+                # pred_labels_i = batch_pred_labels[i]
 
-                # pred_boxes_i = pred_dicts[i]['pred_boxes'].cpu().numpy()
-                # pred_labels_i = pred_dicts[i]['pred_labels'].cpu().numpy() - 1
+                pred_boxes_i = pred_dicts[i]['pred_boxes'].cpu().numpy()
+                pred_labels_i = pred_dicts[i]['pred_labels'].cpu().numpy() - 1
+                pred_boxes_for_pts = None
                 if dataset_name == 'CadcDataset':
                     # TODO: implement box padding for Cadc
                     # cadc_bev.set_pred_box(pred_boxes_i, pred_labels_i)
                     bev_fig, bev_fig_data = cadc_bev.get_bev_image(img_idx)
                     pred_boxes_vertices = cadc_bev.pred_poly
+                    pred_boxes_for_pts = cadc_bev.pred_boxes_for_cnt
                     padded_pred_boxes_vertices = cadc_bev.pred_poly_expand
                     gt_boxes_vertices = cadc_bev.gt_poly
                     gt_boxes_loc = cadc_bev.gt_loc
                     pred_boxes_loc = cadc_bev.pred_loc
                 elif dataset_name == 'KittiDataset':
                     kitti_bev.set_pred_box(pred_boxes_i, pred_labels_i)
+                    pred_boxes_for_pts = kitti_bev.pred_boxes_for_cnt
                     bev_fig, bev_fig_data = kitti_bev.get_bev_image(img_idx)
                     pred_boxes_vertices = kitti_bev.pred_poly
                     padded_pred_boxes_vertices = kitti_bev.pred_poly_expand
@@ -736,18 +737,15 @@ def main():
                     bev_image = np.rot90(bev_image_raw, k=1, axes=(0, 1))
                     if not gray_scale_overlay:
                         overlay = 0.2
-                print("\ngt box locations:")
-                for gt_ind in range(len(gt_boxes_loc)):
-                    print("location of gt_box {}: {}".format(gt_ind, gt_boxes_loc[gt_ind]))
-                # pred_boxes = None
-                # pred_scores = None
-                # if use_anchor_directly:
-                #     pred_boxes = anchor_boxes_i
-                #     pred_scores = np.max(anchor_scores_i, axis=-1)
-                # else:
+                # print("\ngt box locations:")
+                # for gt_ind in range(len(gt_boxes_loc)):
+                #     print("location of gt_box {}: {}".format(gt_ind, gt_boxes_loc[gt_ind]))
                 pred_boxes = pred_boxes_i
                 pred_labels = pred_labels_i
-                pred_scores = batch_pred_scores[i]
+                # pred_scores = batch_pred_scores[i]
+                pred_scores = pred_dicts[i]['pred_scores'].cpu().numpy()
+
+
                 '''
                 format for pred_boxes[box_index]: x,y,z,l,w,h,theta, for both CADC and KITTI
                 format for pred_boxes_vertices[box_index]: ((x1,y1), ... ,(x4,y4))
@@ -767,6 +765,7 @@ def main():
 
                 # generating corners for counting points in box
                 pred_boxes_corners = box_utils.boxes_to_corners_3d(pred_boxes)
+                pred_boxes_for_pts_corners = box_utils.boxes_to_corners_3d(pred_boxes_for_pts)
                 # TODO: get the points
                 points = None
                 if dataset_name == "KittiDataset":
@@ -776,7 +775,7 @@ def main():
 
                 for k in range(3):  # iterate through the 3 classes
                     # num_boxes = min(box_cnt_list) - 1
-                    print('num_boxes: {}'.format(num_boxes))
+                    # print('num_boxes: {}'.format(num_boxes))
                     XAI_cls_path_str = XAI_sample_path_str + '/explanation_for_{}'.format(
                         class_name_list[k])
                     XAI_attr_cls_path_str = XAI_attr_sample_path_str + '/explanation_for_{}'.format(
@@ -808,20 +807,21 @@ def main():
                         "box_score", (0, 1), maxshape=(None, 1), dtype="float32", chunks=True)
                     pred_box_points = attr_file.create_dataset(
                         "points_in_box", (0, 1), maxshape=(None, 1), dtype="int32", chunks=True)
+                    pred_boxes_score_all = attr_file.create_dataset(
+                        "box_score_all", (0, 3), maxshape=(None, 3), dtype="float32", chunks=True)
 
-                    if not skip_TP_FP:
+                    if TP_FP_analysis:
                         for j in range(batch_num_boxes[i]):  # iterate through each box in this sample
                             # if j > 5:
                             #     # save time for debugging
                             #     break
                             if not box_validation(pred_boxes[j], pred_boxes_vertices[j], dataset_name):
-                                print("pred_boxes[{}] didn't matched the computed vertices".format(j))
+                                # print("pred_boxes[{}] didn't matched the computed vertices".format(j))
                                 continue  # can't compute XQ if the boxes don't match
                             '''
                             Note:
                             Sometimes the size of batch_dict['anchor_selections'][i] changes for no reason.
                             Hence need this double check here
-                            Also, num_boxes is already decremented by 1, just to be safe
                             '''
                             if j >= batch_dict['box_count'][i] or j >= len(batch_dict['anchor_selections'][i]):
                                 break
@@ -837,18 +837,57 @@ def main():
                                 # i.e., generate reason as to why the j-th box is classified as the k-th class
                                 target = (j, k)
                                 anchor_id = batch_dict['anchor_selections'][i][j]
-                                print("\nanchor_id for the {}th pred box is {}".format(j, anchor_id))
-                                print("type(j): {}".format(type(j)))
-                                print("type(anchor_id): {}".format(type(anchor_id)))
-                                print("this is the anchor box: {}".format(anchor_boxes_all_i[anchor_id]))
-                                print("this is the anchor label: {}".format(
-                                    class_name_list[anchor_labels_all_i[anchor_id]]))
-                                print("this is the anchor score: {}".format(np.max(anchor_sig_all_i[anchor_id])))
+                                anchor_score_all = anchor_sig_all_i[anchor_id]
+                                anchor_score = np.max(anchor_score_all)
+                                anchor_cls_label = anchor_labels_all_i[anchor_id]
+                                anchor_class = class_name_list[anchor_cls_label]
+                                # print("\nanchor_id for the {}th pred box is {}".format(j, anchor_id))
+                                # print("type(j): {}".format(type(j)))
+                                # print("type(anchor_id): {}".format(type(anchor_id)))
+                                # print("this is the anchor box: {}".format(anchor_boxes_all_i[anchor_id]))
+                                # print("this is the anchor label: {}".format(anchor_class))
+                                # print("this is the anchor score: {}".format(anchor_score))
                                 # print("this is the anchor box: {}".format(anchor_boxes_i[anchor_id]))
-
                                 if use_anchor_idx:
                                     # if we are using anchor box outputs, need to use the indices in for anchor boxes
                                     target = (anchor_id, k)
+                                alternate = [j-4, j-3, j-2, j-1, j+1, j+2, j+3, j+4]
+                                # target_cls = k
+                                box_matched = True
+                                box_dist_match_thresh = 0.0001
+                                box_score_match_thresh = 1e-6
+                                if (abs(box_x - anchor_boxes_all_i[anchor_id][0]) >= box_dist_match_thresh or \
+                                        abs(box_y - anchor_boxes_all_i[anchor_id][1]) >= box_dist_match_thresh or \
+                                        anchor_cls_label != k or abs(anchor_score - pred_scores[j]) >= box_score_match_thresh):
+                                    box_matched = False
+                                    for box_id in alternate:
+                                        # print("batch_num_boxes[i]: {}".format(batch_num_boxes[i]))
+                                        # print("len(batch_dict['anchor_selections'][i]: {}".format(
+                                        #     len(batch_dict['anchor_selections'][i])))
+                                        limit = min(len(batch_dict['anchor_selections'][i]), batch_num_boxes[i])
+                                        if 0 <= box_id < limit:
+                                            anchor_id = batch_dict['anchor_selections'][i][box_id]
+                                            anchor_score_all = anchor_sig_all_i[anchor_id]
+                                            anchor_score = np.max(anchor_score_all)
+                                            anchor_cls_label = anchor_labels_all_i[anchor_id]
+                                            anchor_class = class_name_list[anchor_cls_label]
+                                            if (abs(box_x - anchor_boxes_all_i[anchor_id][0]) < box_dist_match_thresh and \
+                                                    abs(box_y - anchor_boxes_all_i[anchor_id][1]) < box_dist_match_thresh and \
+                                                    anchor_cls_label == k and \
+                                                    abs(anchor_score - pred_scores[j]) < box_score_match_thresh):
+                                                # found the right box, update target
+                                                target = (anchor_id, k)
+                                                box_matched = True
+                                                pred_box_id = box_id
+                                                break
+
+                                if not box_matched:
+                                    unmatched_TP_FP_pred += 1
+                                    f.write("{}th pred box in batch {} image {} does not have a matching anchor\n".format(
+                                        j, batch_num, i
+                                    ))
+                                    continue
+
                                 sign = attr_shown
                                 if method == 'Saliency':
                                     if len(attributions[j][k].shape) == 1:  # compute attributions only when necessary
@@ -876,8 +915,9 @@ def main():
                                 elif conf_mat[i][j] == 'FP':
                                     box_type = 0
                                     FP_box_cnt += 1
-                                points_flag = box_utils.in_hull(points[:, 0:3], pred_boxes_corners[j])
+                                points_flag = box_utils.in_hull(points[:, 0:3], pred_boxes_for_pts_corners[j])
                                 num_pts = points_flag.sum()
+                                # print("type(num_pts): {}".format(type(num_pts)))
                                 new_size = attr_file["pos_attr"].shape[0] + 1
                                 attr_file["pos_attr"].resize(new_size, axis=0)
                                 attr_file["neg_attr"].resize(new_size, axis=0)
@@ -887,6 +927,7 @@ def main():
                                 attr_file["pred_boxes_loc"].resize(new_size, axis=0)
                                 attr_file["box_score"].resize(new_size, axis=0)
                                 attr_file["points_in_box"].resize(new_size, axis=0)
+                                attr_file["box_score_all"].resize(new_size, axis=0)
 
                                 attr_file["pos_attr"][new_size - 1] = pos_grad
                                 attr_file["neg_attr"][new_size - 1] = neg_grad
@@ -897,6 +938,7 @@ def main():
                                 attr_file["box_score"][new_size - 1] = pred_scores[j]
                                 # print("pred_scores[{}]: {}".format(j, pred_scores[j]))
                                 attr_file["points_in_box"][new_size - 1] = num_pts
+                                attr_file["box_score_all"][new_size - 1] = anchor_score_all
 
                                 # XQ = get_sum_XQ(grad, pred_boxes_vertices[j], dataset_name, box_w, box_l, sign,
                                 #                 high_rez=high_rez, scaling_factor=scaling_factor, margin=box_margin)
@@ -1120,6 +1162,8 @@ def main():
                                     if has_match:
                                         # TODO: save necessary info to attr file, show XQ and num points in box in image
                                         print("\nFound matching anchor for an FN box {}! \n".format(index))
+                                        f.write("batch {} image {}\nFound matching anchor for an FN box {}!\n".format(
+                                            batch_num, i, index))
                                         if FN_type == 2:
                                             missed_box_analyzed += 1
                                         if FN_type == 3:
@@ -1201,8 +1245,8 @@ def main():
                                         attr_file["pred_boxes_loc"][new_size - 1] = anchor_loc
                                         matched_anchor_score = batch_dict['sigmoid_anchor_scores'][i][
                                             best_FN_anchor_ind].cpu().detach().numpy()
-                                        print("anchors_scores[{}][{}]: {}".format(
-                                            i, best_FN_anchor_ind, matched_anchor_score[k]))
+                                        # print("anchors_scores[{}][{}]: {}".format(
+                                        #     i, best_FN_anchor_ind, matched_anchor_score[k]))
                                         attr_file["box_score"][new_size - 1] = matched_anchor_score[k]
                                         attr_file["points_in_box"][new_size - 1] = num_pts
                                         XAI_missed_boxes_str = XAI_cls_path_str.split("tools/", 1)[1] + \
@@ -1223,6 +1267,7 @@ def main():
         f.write("misclassified_box_cnt: {}\n".format(misclassified_box_cnt))
         f.write("number of missed boxes analyzed: {}\n".format(missed_box_analyzed))
         f.write("number of partly missed boxes analyzed: {}\n".format(partly_missed_box_analyzed))
+        f.write("number of pred boxes without matching anchors: {}\n".format(unmatched_TP_FP_pred))
         f.close()
 
         # plotting
@@ -1230,9 +1275,9 @@ def main():
         tp_xq = XAI_res_path_str + "/tp_xq.csv"
         fp_xq = XAI_res_path_str + "/fp_xq.csv"
         fnames = ['class_score', 'XQ', 'dist_to_ego', 'class_label']
-        write_to_csv(all_xq, fnames, cls_score_list, XQ_list, dist_list, label_list)
-        write_to_csv(tp_xq, fnames, TP_score_list, TP_XQ_list, TP_dist_list, TP_label_list)
-        write_to_csv(fp_xq, fnames, FP_score_list, FP_XQ_list, FP_dist_list, FP_label_list)
+        write_to_csv(all_xq, fnames, [cls_score_list, XQ_list, dist_list, label_list])
+        write_to_csv(tp_xq, fnames, [TP_score_list, TP_XQ_list, TP_dist_list, TP_label_list])
+        write_to_csv(fp_xq, fnames, [FP_score_list, FP_XQ_list, FP_dist_list, FP_label_list])
 
         fig, axs = plt.subplots(3, figsize=(10, 20))
         axs[0].scatter(cls_score_list, XQ_list)
