@@ -103,6 +103,67 @@ def find_missing_gt(gt_dict, pred_boxes, iou_unmatching_thresholds):
     return missed_gt_idx
 
 
+def tp_fp_density_plotting(y_list, x_list, TP_y_list, TP_x_list, FP_y_list, FP_x_list, fig_name, x_label, x_log=False):
+    x_max = max(x_list)
+    x_min = min(x_list)
+    fig, axs = plt.subplots(3, figsize=(10, 20))
+    fig.tight_layout(pad=8.0)
+    y_arr = y_list
+    x_arr = x_list
+    if isinstance(y_list, list):
+        y_arr = np.array(y_list)
+    if isinstance(x_list, list):
+        x_arr = np.array(x_list)
+    x_n_y = np.vstack([x_arr, y_arr])
+    z_all = gaussian_kde(x_n_y)(x_n_y)
+    idx = z_all.argsort()
+    x, y, z = x_arr[idx], y_arr[idx], z_all[idx]
+    axs[0].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
+    axs[0].set_title('All Boxes', fontsize=20)
+
+    TP_x_arr = TP_x_list
+    TP_y_arr = TP_y_list
+    if isinstance(TP_y_list, list):
+        TP_y_arr = np.array(TP_y_list)
+    if isinstance(TP_x_list, list):
+        TP_x_arr = np.array(TP_x_list)
+    TP_x_n_y = np.vstack([TP_x_arr, TP_y_arr])
+    z_all = gaussian_kde(TP_x_n_y)(TP_x_n_y)
+    idx = z_all.argsort()
+    x, y, z = TP_x_arr[idx], TP_y_arr[idx], z_all[idx]
+    axs[1].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
+    axs[1].set_title('TP Boxes', fontsize=20)
+
+    FP_x_arr = FP_x_list
+    FP_y_arr = FP_y_list
+    if isinstance(FP_y_list, list):
+        FP_x_arr = np.array(FP_x_list)
+    if isinstance(FP_x_list, list):
+        FP_y_arr = np.array(FP_y_list)
+    FP_x_n_y = np.vstack([FP_x_arr, FP_y_arr])
+    z_all = gaussian_kde(FP_x_n_y)(FP_x_n_y)
+    idx = z_all.argsort()
+    x, y, z = FP_x_arr[idx], FP_y_arr[idx], z_all[idx]
+    axs[2].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
+    axs[2].set_title('FP Boxes', fontsize=20)
+    for ax in axs:
+        ax.axis(ymin=0.0, ymax=1.0)
+        ax.set_xlabel(x_label, fontsize=20)
+        ax.set_ylabel('XQ', fontsize=20)
+        ax.tick_params(axis='x', labelsize=16)
+        ax.tick_params(axis='y', labelsize=16)
+        # ax.set(xlabel=x_label, ylabel='XQ', fontsize=20)
+        if x_log:
+            ax.set_xscale('log')
+            ax.axis(xmin=1, xmax=x_max)
+        else:
+            ax.axis(xmin=x_min, xmax=x_max)
+    # plt.xticks(fontsize=16)
+    # plt.yticks(fontsize=16)
+    plt.savefig(fig_name)
+    plt.close()
+
+
 def main():
     """
     important variables:
@@ -542,112 +603,40 @@ def main():
                 ### generate 3 plots for each analysis, all, FP, TP ###
 
                 # class score vs. XQ plot
-                fig, axs = plt.subplots(3, figsize=(10, 20))
-                cls_score_arr = np.array(cls_score_list)
-                XQ_arr = np.array(XQ_list)
-                cls_n_XQ = np.vstack([cls_score_arr, XQ_arr])
-                z_all = gaussian_kde(cls_n_XQ)(cls_n_XQ)
-                idx = z_all.argsort()
-                x, y, z = cls_score_arr[idx], XQ_arr[idx], z_all[idx]
-                axs[0].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
-                axs[0].set_title('All Boxes')
-
-                TP_score_arr = np.array(TP_score_list)
-                TP_XQ_arr = np.array(TP_XQ_list)
-                TP_cls_n_XQ = np.vstack([TP_score_arr, TP_XQ_arr])
-                z_all = gaussian_kde(TP_cls_n_XQ)(TP_cls_n_XQ)
-                idx = z_all.argsort()
-                x, y, z = TP_score_arr[idx], TP_XQ_arr[idx], z_all[idx]
-                axs[1].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
-                axs[1].set_title('TP Boxes')
-
-                FP_score_arr = np.array(FP_score_list)
-                FP_XQ_arr = np.array(FP_XQ_list)
-                FP_cls_n_XQ = np.vstack([FP_score_arr, FP_XQ_arr])
-                z_all = gaussian_kde(FP_cls_n_XQ)(FP_cls_n_XQ)
-                idx = z_all.argsort()
-                x, y, z = FP_score_arr[idx], FP_XQ_arr[idx], z_all[idx]
-                axs[2].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
-                axs[2].set_title('FP Boxes')
-                for ax in axs:
-                    ax.set(xlabel='class scores', ylabel='XQ')
-                plt.savefig("{}/XQ_class_score_density_thresh{}.png".format(XAI_result_path, ignore_thresh))
-                plt.close()
+                fig_name = "{}/XQ_class_score_density_thresh{}.png".format(XAI_result_path, ignore_thresh)
+                x_label = "class scores"
+                tp_fp_density_plotting(XQ_list, cls_score_list, TP_XQ_list, TP_score_list, FP_XQ_list,
+                                       FP_score_list, fig_name, x_label)
 
                 # XQ distribution
                 fig, axs = plt.subplots(3, figsize=(10, 20))
+                fig.tight_layout(pad=8.0)
                 axs[0].hist(XQ_list, bins=20, range=(0.0, 1.0))
-                axs[0].set_title('All Boxes')
+                axs[0].set_title('All Boxes', fontsize=20)
                 axs[1].hist(TP_XQ_list, bins=20, range=(0.0, 1.0))
-                axs[1].set_title('TP Boxes')
+                axs[1].set_title('TP Boxes', fontsize=20)
                 axs[2].hist(FP_XQ_list, bins=20, range=(0.0, 1.0))
-                axs[2].set_title('FP Boxes')
+                axs[2].set_title('FP Boxes', fontsize=20)
                 for ax in axs:
-                    ax.set(xlabel='XQ', ylabel='box_count')
+                    # ax.set(xlabel='XQ', ylabel='box_count')
+                    ax.set_xlabel('XQ', fontsize=20)
+                    ax.set_ylabel('box_count', fontsize=20)
+                    ax.tick_params(axis='x', labelsize=16)
+                    ax.tick_params(axis='y', labelsize=16)
                 plt.savefig("{}/pred_box_XQ_histograms_thresh{}.png".format(XAI_result_path, ignore_thresh))
                 plt.close()
 
                 # distance to ego vs. XQ plot
-                fig, axs = plt.subplots(3, figsize=(10, 20))
-                dist_arr = np.array(dist_list)
-                dist_n_XQ = np.vstack([dist_arr, XQ_arr])
-                z_all = gaussian_kde(dist_n_XQ)(dist_n_XQ)
-                idx = z_all.argsort()
-                x, y, z = dist_arr[idx], XQ_arr[idx], z_all[idx]
-                axs[0].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
-                axs[0].set_title('All Boxes')
-
-                TP_dist_arr = np.array(TP_dist_list)
-                TP_dist_n_XQ = np.vstack([TP_dist_arr, TP_XQ_arr])
-                z_all = gaussian_kde(TP_dist_n_XQ)(TP_dist_n_XQ)
-                idx = z_all.argsort()
-                x, y, z = TP_dist_arr[idx], TP_XQ_arr[idx], z_all[idx]
-                axs[1].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
-                axs[1].set_title('TP Boxes')
-
-                FP_dist_arr = np.array(FP_dist_list)
-                FP_dist_n_XQ = np.vstack([FP_dist_arr, FP_XQ_arr])
-                z_all = gaussian_kde(FP_dist_n_XQ)(FP_dist_n_XQ)
-                idx = z_all.argsort()
-                x, y, z = FP_dist_arr[idx], FP_XQ_arr[idx], z_all[idx]
-                axs[2].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
-                axs[2].set_title('FP Boxes')
-                for ax in axs:
-                    ax.set(xlabel='distance to ego', ylabel='XQ')
-                plt.savefig("{}/XQ_distance_to_ego_thresh{}.png".format(XAI_result_path, ignore_thresh))
-                plt.close()
+                fig_name = "{}/XQ_distance_to_ego_thresh{}.png".format(XAI_result_path, ignore_thresh)
+                x_label = 'distance to ego'
+                tp_fp_density_plotting(XQ_list, dist_list, TP_XQ_list, TP_dist_list, FP_XQ_list,
+                                       FP_dist_list, fig_name, x_label)
 
                 # num of lidar points in box vs. XQ plot
-                fig, axs = plt.subplots(3, figsize=(10, 20))
-                pts_arr = np.array(pts_count_list)
-                # print("\npts_arr.shape:{}\n".format(pts_arr.shape))
-                # print("\nXQ_arr.shape:{}\n".format(XQ_arr.shape))
-                pts_n_XQ = np.vstack([pts_arr, XQ_arr])
-                z_all = gaussian_kde(pts_n_XQ)(pts_n_XQ)
-                idx = z_all.argsort()
-                x, y, z = pts_arr[idx], XQ_arr[idx], z_all[idx]
-                axs[0].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
-                axs[0].set_title('All Boxes')
-
-                TP_pts_arr = np.array(TP_pts_count_list)
-                TP_pts_n_XQ = np.vstack([TP_pts_arr, TP_XQ_arr])
-                z_all = gaussian_kde(TP_pts_n_XQ)(TP_pts_n_XQ)
-                idx = z_all.argsort()
-                x, y, z = TP_pts_arr[idx], TP_XQ_arr[idx], z_all[idx]
-                axs[1].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
-                axs[1].set_title('TP Boxes')
-
-                FP_pts_arr = np.array(FP_pts_count_list)
-                FP_pts_n_XQ = np.vstack([FP_pts_arr, FP_XQ_arr])
-                z_all = gaussian_kde(FP_pts_n_XQ)(FP_pts_n_XQ)
-                idx = z_all.argsort()
-                x, y, z = FP_pts_arr[idx], FP_XQ_arr[idx], z_all[idx]
-                axs[2].scatter(x, y, c=z, s=10, cmap='jet', label=None, picker=True, zorder=2, marker='.')
-                axs[2].set_title('FP Boxes')
-                for ax in axs:
-                    ax.set(xlabel='points in box', ylabel='XQ')
-                plt.savefig("{}/XQ_points_in_box_thresh{}.png".format(XAI_result_path, ignore_thresh))
-                plt.close()
+                fig_name = "{}/XQ_points_in_box_thresh{}.png".format(XAI_result_path, ignore_thresh)
+                x_label = 'points in box'
+                tp_fp_density_plotting(XQ_list, pts_count_list, TP_XQ_list, TP_pts_count_list, FP_XQ_list,
+                                       FP_pts_count_list, fig_name, x_label, x_log=True)
 
             if plot_class_wise:
                 # generate 3 plots for each class
@@ -736,57 +725,38 @@ def main():
                             XAI_result_path, class_name, ignore_thresh))
                         plt.close()
                     else:
-                        fig, axs = plt.subplots(3, figsize=(10, 20))
-                        axs[0].scatter(cls_score_list_i, XQ_list_i)
-                        axs[0].set_title('All Boxes')
-                        axs[1].scatter(TP_score_list_i, TP_XQ_list_i)
-                        axs[1].set_title('TP Boxes')
-                        axs[2].scatter(FP_score_list_i, FP_XQ_list_i)
-                        axs[2].set_title('FP Boxes')
-                        for ax in axs:
-                            ax.set(xlabel='class scores', ylabel='XQ')
-                        plt.savefig(
-                            "{}/XQ_class_score_{}_thresh{}.png".format(XAI_result_path, class_name, ignore_thresh))
-                        plt.close()
+                        fig_name = "{}/XQ_class_score_{}_thresh{}.png".format(XAI_result_path, class_name, ignore_thresh)
+                        x_label = "class scores"
+                        tp_fp_density_plotting(XQ_list_i, cls_score_list_i, TP_XQ_list_i, TP_score_list_i, FP_XQ_list_i,
+                                               FP_score_list_i, fig_name, x_label)
 
                         fig, axs = plt.subplots(3, figsize=(10, 20))
+                        fig.tight_layout(pad=8.0)
                         axs[0].hist(XQ_list_i, bins=20, range=(0.0, 1.0))
-                        axs[0].set_title('All Boxes')
+                        axs[0].set_title('All Boxes', fontsize=20)
                         axs[1].hist(TP_XQ_list_i, bins=20, range=(0.0, 1.0))
-                        axs[1].set_title('TP Boxes')
+                        axs[1].set_title('TP Boxes', fontsize=20)
                         axs[2].hist(FP_XQ_list_i, bins=20, range=(0.0, 1.0))
-                        axs[2].set_title('FP Boxes')
+                        axs[2].set_title('FP Boxes', fontsize=20)
                         for ax in axs:
-                            ax.set(xlabel='XQ', ylabel='box_count')
+                            # ax.set(xlabel='XQ', ylabel='box_count')
+                            ax.set_xlabel('XQ', fontsize=20)
+                            ax.set_ylabel('box_count', fontsize=20)
+                            ax.tick_params(axis='x', labelsize=16)
+                            ax.tick_params(axis='y', labelsize=16)
                         plt.savefig("{}/pred_box_XQ_histograms_{}_thresh{}.png".format(
                             XAI_result_path, class_name, ignore_thresh))
                         plt.close()
 
-                        fig, axs = plt.subplots(3, figsize=(10, 20))
-                        axs[0].scatter(dist_list_i, XQ_list_i)
-                        axs[0].set_title('All Boxes')
-                        axs[1].scatter(TP_dist_list_i, TP_XQ_list_i)
-                        axs[1].set_title('TP Boxes')
-                        axs[2].scatter(FP_dist_list_i, FP_XQ_list_i)
-                        axs[2].set_title('FP Boxes')
-                        for ax in axs:
-                            ax.set(xlabel='distance to ego', ylabel='XQ')
-                        plt.savefig("{}/XQ_distance_to_ego_{}_thresh{}.png".format(
-                            XAI_result_path, class_name, ignore_thresh))
-                        plt.close()
+                        fig_name = "{}/XQ_distance_to_ego_{}_thresh{}.png".format(XAI_result_path, class_name, ignore_thresh)
+                        x_label = 'distance to ego'
+                        tp_fp_density_plotting(XQ_list_i, dist_list_i, TP_XQ_list_i, TP_dist_list_i, FP_XQ_list_i,
+                                               FP_dist_list_i, fig_name, x_label)
 
-                        fig, axs = plt.subplots(3, figsize=(10, 20))
-                        axs[0].scatter(pts_count_list_i, XQ_list_i)
-                        axs[0].set_title('All Boxes')
-                        axs[1].scatter(TP_pts_count_list_i, TP_XQ_list_i)
-                        axs[1].set_title('TP Boxes')
-                        axs[2].scatter(FP_pts_count_list_i, FP_XQ_list_i)
-                        axs[2].set_title('FP Boxes')
-                        for ax in axs:
-                            ax.set(xlabel='points in box', ylabel='XQ')
-                        plt.savefig("{}/XQ_points_in_box_{}_thresh{}.png".format(
-                            XAI_result_path, class_name, ignore_thresh))
-                        plt.close()
+                        fig_name = "{}/XQ_points_in_box_{}_thresh{}.png".format(XAI_result_path, class_name, ignore_thresh)
+                        x_label = 'points in box'
+                        tp_fp_density_plotting(XQ_list_i, pts_count_list_i, TP_XQ_list_i, TP_pts_count_list_i, FP_XQ_list_i,
+                                               FP_pts_count_list_i, fig_name, x_label, x_log=True)
             print("finished analysis for threshold = {}".format(ignore_thresh))
     finally:
         f.close()

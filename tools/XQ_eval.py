@@ -25,6 +25,7 @@ from XAI_utils.bbox_utils import *
 from XAI_utils.tp_fp import *
 from XAI_utils.XQ_utils import *
 from XAI_utils.metrics import *
+from XAI_analytics import tp_fp_density_plotting
 from pcdet.models import load_data_to_gpu
 from pcdet.datasets.kitti.kitti_dataset import KittiDataset
 from pcdet.datasets.cadc.cadc_dataset import CadcDataset
@@ -49,16 +50,175 @@ def parse_config():
     return args
 
 
+def evaluate_metric(score_arr, label_arr, save_path, file_name, cols, score_id, thresh, cls_names, cls_labels):
+    """
+
+    :param score_arr: array of the score being evaluated
+    :param label_arr: array indicating TP/FP boxes
+    :param save_path:
+    :param file_name:
+    :param cols:
+    :param score_id: name of the score being evaluated (e.g., class score, XQ, etc.)
+    :param thresh: XQ threshold
+    :param cls_names: list of class names specific to a dataset
+    :param cls_labels: class labels for the boxes (e.g., car, pedestrian, cyclist, etc.)
+    :return:
+    """
+    # plot_roc(score_arr, label_arr, save_path=save_path, thresh=thresh, measure=score_id)
+    # plot_pr(score_arr, label_arr, save_path=save_path, thresh=thresh, measure=score_id)
+    # plot_pr(score_arr, label_arr, save_path=save_path, thresh=thresh, measure=score_id, flip=True)
+    eval_dict = get_summary_statistics(score_arr, label_arr, thresh, score_id, "all")
+    eval_file = os.path.join(save_path, file_name)
+    print("{} objects in total".format(len(score_arr)))
+    cls_eval_dicts = []
+    class_wise_score = []
+    class_wise_label = []
+    with open(eval_file, 'w') as evalfile:
+        writer = csv.DictWriter(evalfile, fieldnames=cols)
+        writer.writeheader()
+        writer.writerow(eval_dict)
+        for cls in range(3):
+            cls_name = cls_names[cls]
+            cls_file_name = "{}_{}".format(cls_name, file_name)
+            positions = np.where(cls_labels == cls)
+            cls_score_arr = score_arr[positions]
+            cls_tp_fp_arr = label_arr[positions]
+            class_wise_score.append(cls_score_arr)
+            class_wise_label.append(cls_tp_fp_arr)
+            print("{} {} objects".format(len(cls_score_arr), cls_name))
+            # plot_roc(cls_score_arr, cls_tp_fp_arr, save_path=save_path, thresh=thresh, measure=score_id, cls_name=cls_name)
+            # plot_pr(cls_score_arr, cls_tp_fp_arr, save_path=save_path, thresh=thresh, measure=score_id, cls_name=cls_name)
+            # plot_pr(cls_score_arr, cls_tp_fp_arr, save_path=save_path, thresh=thresh, measure=score_id, cls_name=cls_name,
+            #         flip=True)
+            cls_eval_dict = get_summary_statistics(cls_score_arr, cls_tp_fp_arr, thresh, score_id, cls_name)
+            cls_eval_dicts.append(eval_dict)
+            # eval_file = os.path.join(save_path, cls_file_name)
+            writer.writerow(cls_eval_dict)
+    plot_multi_roc(cls_names, score_arr, label_arr, class_wise_score, class_wise_label,
+                   save_path=save_path, thresh=thresh, measure=score_id)
+    plot_multi_pr(cls_names, score_arr, label_arr, class_wise_score, class_wise_label,
+                   save_path=save_path, thresh=thresh, measure=score_id)
+    plot_multi_pr(cls_names, score_arr, label_arr, class_wise_score, class_wise_label,
+                  save_path=save_path, thresh=thresh, measure=score_id, flip=True)
+    return eval_dict, cls_eval_dicts
+
+
+def wsum_experiment(all_cls_score_arr, XQ_arr, label_arr, save_path, file_name, cols, score_id, thresh, cls_names, cls_labels):
+    """
+
+    :param cls_score_arr: array of the class scores
+    :param label_arr: array indicating TP/FP boxes
+    :param save_path:
+    :param file_name:
+    :param cols:
+    :param score_id: name of the score being evaluated (e.g., class score, XQ, etc.)
+    :param thresh: XQ threshold
+    :param cls_names: list of class names specific to a dataset
+    :param cls_labels: class labels for the boxes (e.g., car, pedestrian, cyclist, etc.)
+    :return:
+    """
+    eval_file = os.path.join(save_path, file_name)
+    min_fpr_95 = 100
+    max_aupr = 0
+    max_aupr_opposite = 0
+    max_auroc = 0
+    min_fpr_95_cls = [100, 100, 100]
+    max_aupr_cls = [0, 0, 0]
+    max_aupr_opposite_cls = [0, 0, 0]
+    max_auroc_cls = [0, 0, 0]
+    min_fpr_95_w = -1
+    max_aupr_w = -1
+    max_aupr_opposite_w = -1
+    max_auroc_w = -1
+    min_fpr_95_cls_w = [-1, -1, -1]
+    max_aupr_cls_w = [-1, -1, -1]
+    max_aupr_opposite_cls_w = [-1, -1, -1]
+    max_auroc_cls_w = [-1, -1, -1]
+    with open(eval_file, 'w') as evalfile:
+        writer = csv.DictWriter(evalfile, fieldnames=cols)
+        writer.writeheader()
+        for i in range(0, 101, 1):
+            w_xq = i * 0.01
+            w_cls_score = 1.00 - w_xq
+            score_arr = np.multiply(XQ_arr, w_xq) + np.multiply(all_cls_score_arr, w_cls_score)
+            eval_dict = get_summary_statistics_wsum(score_arr, label_arr, thresh, score_id, "all", w_xq, w_cls_score)
+            # print("{} objects in total".format(len(score_arr)))
+            if eval_dict['fpr_at_95_tpr'] < min_fpr_95:
+                min_fpr_95 = eval_dict['fpr_at_95_tpr']
+                min_fpr_95_w = w_xq
+            if eval_dict['auroc'] > max_auroc:
+                max_auroc = eval_dict['auroc']
+                max_auroc_w = w_xq
+            if eval_dict['aupr_in'] > max_aupr:
+                max_aupr = eval_dict['aupr_in']
+                max_aupr_w = w_xq
+            if eval_dict['aupr_out'] > max_aupr_opposite:
+                max_aupr_opposite = eval_dict['aupr_out']
+                max_aupr_opposite_w = w_xq
+            cls_eval_dicts = []
+            writer.writerow(eval_dict)
+            for cls in range(3):
+                cls_name = cls_names[cls]
+                positions = np.where(cls_labels == cls)
+                cls_score_arr = score_arr[positions]
+                cls_tp_fp_arr = label_arr[positions]
+                cls_eval_dict = get_summary_statistics_wsum(cls_score_arr, cls_tp_fp_arr, thresh, score_id, cls_name, w_xq, w_cls_score)
+                if cls_eval_dict['fpr_at_95_tpr'] < min_fpr_95_cls[cls]:
+                    min_fpr_95_cls[cls] = cls_eval_dict['fpr_at_95_tpr']
+                    min_fpr_95_cls_w[cls] = w_xq
+                if cls_eval_dict['auroc'] > max_auroc_cls[cls]:
+                    max_auroc_cls[cls] = cls_eval_dict['auroc']
+                    max_auroc_cls_w[cls] = w_xq
+                if cls_eval_dict['aupr_in'] > max_aupr_cls[cls]:
+                    max_aupr_cls[cls] = cls_eval_dict['aupr_in']
+                    max_aupr_cls_w[cls] = w_xq
+                if cls_eval_dict['aupr_out'] > max_aupr_opposite_cls[cls]:
+                    max_aupr_opposite_cls[cls] = cls_eval_dict['aupr_out']
+                    max_aupr_opposite_cls_w[cls] = w_xq
+                cls_eval_dicts.append(eval_dict)
+                writer.writerow(cls_eval_dict)
+    result_dict = {
+        'min_fpr_95': min_fpr_95,
+        'max_aupr': max_aupr,
+        'max_aupr_opposite': max_aupr_opposite,
+        'max_auroc': max_auroc,
+        'min_fpr_95_cls': min_fpr_95_cls,
+        'max_aupr_cls': max_aupr_cls,
+        'max_aupr_opposite_cls': max_aupr_opposite_cls,
+        'max_auroc_cls': max_auroc_cls,
+        'min_fpr_95_w': min_fpr_95_w,
+        'max_aupr_w': max_aupr_w,
+        'max_aupr_opposite_w': max_aupr_opposite_w,
+        'max_auroc_w': max_auroc_w,
+        'min_fpr_95_cls_w': min_fpr_95_cls_w,
+        'max_aupr_cls_w': max_aupr_cls_w,
+        'max_aupr_opposite_cls_w': max_aupr_opposite_cls_w,
+        'max_auroc_cls_w': max_auroc_cls_w
+    }
+    for entry in result_dict:
+        print("{}: {}".format(entry, result_dict[entry]))
+
+
 def main():
     """
     important variables:
     :return:
     """
+    XQ_only = False
+    scatter_plot = True
+    comb_plot = True
+    w_sum_explore = False
+    dataset_name = "KITTI"
+    cls_name_list = []
+    if dataset_name == "KITTI":
+        cls_name_list = ['Car', 'Pedestrian', 'Cyclist']
+    elif dataset_name == "CADC":
+        cls_name_list = ['Car', 'Pedestrian', 'Truck']
     use_margin = True
     XAI_sum = False
     XAI_cnt = not XAI_sum
-    # ignore_thresh_list = [0.1]
-    ignore_thresh_list = [0.0, 0.0333, 0.0667, 0.1, 0.1333, 0.1667, 0.2]
+    ignore_thresh_list = [0.1]
+    # ignore_thresh_list = [0.0, 0.0333, 0.0667, 0.1, 0.1333, 0.1667, 0.2]
     start_time = time.time()
     max_obj_cnt = 50
     batches_to_analyze = 1
@@ -113,9 +273,14 @@ def main():
             XQ_list = []
             score_list = []
             TP_FP_label = []
+            cls_label_list = []
+            pts_list = []
+            dist_list = []
             found = False
             tp_name = "tp_xq_thresh{}.csv".format(thresh)
             fp_name = "fp_xq_thresh{}.csv".format(thresh)
+            tp_data = None
+            fp_data = None
             for root, dirs, files in os.walk(XQ_path):
                 # print('processing files: ')
                 for name in files:
@@ -127,80 +292,85 @@ def main():
                         XQ_list.append(tp_data['XQ'])
                         score_list.append(tp_data['class_score'])
                         TP_FP_label.append(np.ones(len(tp_data['XQ'])))
+                        cls_label_list.append(tp_data['class_label'])
+                        pts_list.append(tp_data['pts_in_box'])
+                        dist_list.append(tp_data['dist_to_ego'])
                     elif name == fp_name:
                         found = True
                         fp_data = pd.read_csv(os.path.join(root, name))
                         XQ_list.append(fp_data['XQ'])
                         score_list.append(fp_data['class_score'])
                         TP_FP_label.append(np.zeros(len(fp_data['XQ'])))
+                        cls_label_list.append(fp_data['class_label'])
+                        pts_list.append(fp_data['pts_in_box'])
+                        dist_list.append(fp_data['dist_to_ego'])
             if found:
                 XQ_arr = np.concatenate(XQ_list)
                 score_arr = np.concatenate(score_list)
                 TP_FP_arr = np.concatenate(TP_FP_label)
+                cls_label_arr = np.concatenate(cls_label_list)
+                pts_arr = np.concatenate(pts_list)
+                dist_arr = np.concatenate(dist_list)
                 print("len(XQ_arr): {}".format(len(XQ_arr)))
                 print("len(TP_FP_arr): {}".format(len(TP_FP_arr)))
+                if scatter_plot:
+                    # class score vs. XQ plot
+                    fig_name = "{}/XQ_class_score_density_thresh{}.png".format(metric_result_path, thresh)
+                    x_label = "class scores"
+                    tp_fp_density_plotting(XQ_arr, score_arr, tp_data['XQ'], tp_data['class_score'], fp_data['XQ'],
+                                           fp_data['class_score'], fig_name, x_label)
 
-                eval_cols = ['fpr_at_95_tpr', 'detection_error', 'auroc', 'aupr_out', 'aupr_in']
-                XQ_eval_dict = get_summary_statistics(XQ_arr, TP_FP_arr)
-                plot_roc(XQ_arr, TP_FP_arr, save_path=metric_result_path, thresh=thresh, measure='XQ')
-                plot_pr(XQ_arr, TP_FP_arr, save_path=metric_result_path, thresh=thresh, measure='XQ')
-                eval_file = os.path.join(metric_res_path_str, "XQ_eval_metrics_thresh{}.csv".format(thresh))
-                with open(eval_file, 'w') as evalfile:
-                    writer = csv.DictWriter(evalfile, fieldnames=eval_cols)
-                    writer.writeheader()
-                    writer.writerow(XQ_eval_dict)
+                    # distance to ego vs. XQ plot
+                    fig_name = "{}/XQ_distance_to_ego_thresh{}.png".format(metric_result_path, thresh)
+                    x_label = 'distance to ego'
+                    tp_fp_density_plotting(XQ_arr, dist_arr, tp_data['XQ'], tp_data['dist_to_ego'], fp_data['XQ'],
+                                           fp_data['dist_to_ego'], fig_name, x_label)
 
-                score_eval_dict = get_summary_statistics(score_arr, TP_FP_arr)
-                plot_roc(score_arr, TP_FP_arr, save_path=metric_result_path, thresh=thresh, measure='cls_score')
-                plot_pr(score_arr, TP_FP_arr, save_path=metric_result_path, thresh=thresh, measure='cls_score')
-                score_eval_file = os.path.join(metric_res_path_str, "class_score_eval_metrics.csv")
-                with open(score_eval_file, 'w') as evalfile:
-                    writer = csv.DictWriter(evalfile, fieldnames=eval_cols)
-                    writer.writeheader()
-                    writer.writerow(score_eval_dict)
+                    # num of lidar points in box vs. XQ plot
+                    fig_name = "{}/XQ_points_in_box_thresh{}.png".format(metric_result_path, thresh)
+                    x_label = 'points in box'
+                    tp_fp_density_plotting(XQ_arr, pts_arr, tp_data['XQ'], tp_data['pts_in_box'], fp_data['XQ'],
+                                           fp_data['pts_in_box'], fig_name, x_label, x_log=True)
 
-                score_XQ_euclidean_arr = -1 * np.sqrt(np.multiply(1-XQ_arr, 1-XQ_arr) + np.multiply(1-score_arr, 1-score_arr))
-                # max_val = np.max(score_XQ_euclidean_arr_raw)
-                # score_XQ_euclidean_arr = np.divide(score_XQ_euclidean_arr_raw, max_val)
-                euclidean_eval_dict = get_summary_statistics(score_XQ_euclidean_arr, TP_FP_arr)
-                plot_roc(score_XQ_euclidean_arr, TP_FP_arr, save_path=metric_result_path, thresh=thresh, measure='cls_score_XQ_euclidean')
-                plot_pr(score_XQ_euclidean_arr, TP_FP_arr, save_path=metric_result_path, thresh=thresh, measure='cls_score_XQ_euclidean')
-                euclidean_eval_file = os.path.join(metric_res_path_str, "cls_score_XQ_euclidean_eval_metrics_thresh{}.csv".format(thresh))
-                with open(euclidean_eval_file, 'w') as evalfile:
-                    writer = csv.DictWriter(evalfile, fieldnames=eval_cols)
-                    writer.writeheader()
-                    writer.writerow(euclidean_eval_dict)
+                eval_cols = ['XQ_thresh', 'measure', 'class', 'fpr_at_95_tpr', 'detection_error',
+                             'auroc', 'aupr_out', 'aupr_in']
+                XQ_eval_file = "XQ_eval_metrics_thresh{}.csv".format(thresh)
+                XQ_dict, XQ_cls_dicts = evaluate_metric(XQ_arr, TP_FP_arr, metric_result_path, XQ_eval_file,
+                                                       eval_cols, 'XQ', thresh,
+                                                       cls_name_list, cls_label_arr)
+                # cls_score_arr, XQ_arr, label_arr, save_path, file_name, cols, score_id, thresh, cls_names, cls_labels
+                if w_sum_explore:
+                    exp_cols = ['w_xq', 'w_cls_score', 'XQ_thresh', 'measure', 'class', 'fpr_at_95_tpr',
+                                'detection_error', 'auroc', 'aupr_out', 'aupr_in']
+                    w_sum_experiment_file = "cls_score_and_XQ_weighted_sum_experiment.csv"
+                    wsum_experiment(score_arr, XQ_arr, TP_FP_arr, metric_result_path, w_sum_experiment_file,
+                                    exp_cols, "weighted_sum", thresh, cls_name_list, cls_label_arr)
+                if not XQ_only:
+                    score_eval_file = "class_score_eval_metrics.csv"
+                    score_dict, score_cls_dicts = evaluate_metric(
+                        score_arr, TP_FP_arr, metric_result_path, score_eval_file, eval_cols, 'cls_score',
+                        thresh, cls_name_list, cls_label_arr)
 
-                XQ_w = 0.05
-                score_w = 0.95
-                score_XQ_wsum_arr = np.multiply(XQ_arr, XQ_w) + np.multiply(score_arr, score_w)
-                # max_val = np.max(score_XQ_wsum_arr)
-                wsum_eval_dict = get_summary_statistics(score_XQ_wsum_arr, TP_FP_arr)
-                plot_roc(score_XQ_wsum_arr, TP_FP_arr, save_path=metric_result_path, thresh=thresh,
-                         measure='cls_score_XQ_weighted_sum')
-                plot_pr(score_XQ_wsum_arr, TP_FP_arr, save_path=metric_result_path, thresh=thresh,
-                        measure='cls_score_XQ_weighted_sum')
-                wsum_eval_file = os.path.join(
-                    metric_res_path_str, "cls_score_{}_XQ_{}_weighted_sum_eval_metrics_thresh{}.csv".format(
-                        score_w, XQ_w, thresh))
-                with open(wsum_eval_file, 'w') as evalfile:
-                    writer = csv.DictWriter(evalfile, fieldnames=eval_cols)
-                    writer.writeheader()
-                    writer.writerow(wsum_eval_dict)
+                    score_XQ_euclidean_arr = -1 * np.sqrt(np.multiply(1-XQ_arr, 1-XQ_arr) + np.multiply(1-score_arr, 1-score_arr))
+                    euclidean_eval_file = "cls_score_XQ_euclidean_eval_metrics_thresh{}.csv".format(thresh)
+                    euc_dict, euc_cls_dicts = evaluate_metric(
+                        score_XQ_euclidean_arr, TP_FP_arr, metric_result_path, euclidean_eval_file,
+                        eval_cols, 'cls_score_XQ_euclidean', thresh, cls_name_list, cls_label_arr)
 
-                mult_arr = np.multiply(XQ_arr, score_arr)
-                # max_val = np.max(score_XQ_wsum_arr)
-                mult_eval_dict = get_summary_statistics(mult_arr, TP_FP_arr)
-                plot_roc(mult_arr, TP_FP_arr, save_path=metric_result_path, thresh=thresh,
-                         measure='cls_score_XQ_multiply')
-                plot_pr(mult_arr, TP_FP_arr, save_path=metric_result_path, thresh=thresh,
-                        measure='cls_score_XQ_multiply')
-                mult_file = os.path.join(
-                    metric_res_path_str, "cls_score_XQ_multiply_eval_metrics_thresh{}.csv".format(thresh))
-                with open(mult_file, 'w') as evalfile:
-                    writer = csv.DictWriter(evalfile, fieldnames=eval_cols)
-                    writer.writeheader()
-                    writer.writerow(mult_eval_dict)
+                    XQ_w = 0.11
+                    score_w = 0.89
+                    score_XQ_wsum_arr = np.multiply(XQ_arr, XQ_w) + np.multiply(score_arr, score_w)
+                    wsum_eval_file = "cls_score_{}_XQ_{}_weighted_sum_eval_metrics_thresh{}.csv".format(
+                            score_w, XQ_w, thresh)
+                    wsum_dict, wsum_cls_dicts = evaluate_metric(
+                        score_XQ_wsum_arr, TP_FP_arr, metric_result_path, wsum_eval_file,
+                        eval_cols, 'cls_score_XQ_weighted_sum', thresh, cls_name_list, cls_label_arr)
+
+                    mult_arr = np.multiply(XQ_arr, score_arr)
+                    mult_file = "cls_score_XQ_multiply_eval_metrics_thresh{}.csv".format(thresh)
+                    mult_dict, mult_cls_dicts = evaluate_metric(
+                        mult_arr, TP_FP_arr, metric_result_path, mult_file,
+                        eval_cols, 'cls_score_XQ_multiply', thresh, cls_name_list, cls_label_arr)
     finally:
         print("--- {} seconds ---".format(time.time() - start_time))
 

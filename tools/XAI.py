@@ -246,7 +246,8 @@ def main():
     :return:
     """
     box_debug = False
-    run_all = True
+    run_all = False
+    plot_enlarged_pred = False
     unmatched_TP_FP_pred = 0
     # use_anchor_directly = True
     FN_analysis = False
@@ -262,7 +263,7 @@ def main():
     misclassified_box_analyzed = 0
     start_time = time.time()
     max_obj_cnt = 100
-    batches_to_analyze = 460
+    batches_to_analyze = 2
     method = 'IG'
     ignore_thresh = 0.0
     verify_box = False
@@ -1019,9 +1020,10 @@ def main():
                                                 write_attr_to_csv(XAI_attr_csv_str, pos_grad, verts)
                                             elif attr_shown == "negative":
                                                 write_attr_to_csv(XAI_attr_csv_str, neg_grad, verts)
-                                    polys = patches.Polygon(box_explained,
-                                                            closed=True, fill=False, edgecolor='y', linewidth=1)
-                                    grad_viz[1].add_patch(polys)
+                                    if plot_enlarged_pred:
+                                        polys = patches.Polygon(box_explained,
+                                                                closed=True, fill=False, edgecolor='y', linewidth=1)
+                                        grad_viz[1].add_patch(polys)
                                     grad_viz[0].savefig(XAI_box_relative_path_str, bbox_inches='tight', pad_inches=0.0)
                                     plt.close('all')
                                     os.chmod(XAI_box_relative_path_str, 0o777)
