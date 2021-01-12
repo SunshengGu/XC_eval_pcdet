@@ -261,6 +261,18 @@ def plot_pr(preds, labels, title="Precision recall curve", save_path=None, thres
         plt.show()
 
 
+def get_val(arr, indices):
+    """
+    :param arr: the array where values are stored
+    :param indices: the indices we are interested in
+    :return: values corresponding to the indices
+    """
+    ret_list = []
+    for index in indices:
+        ret_list.append(arr[index])
+    return ret_list
+
+
 def plot_multi_pr(cls_name_list, preds, labels, preds_cls, labels_cls, title="Precision recall curve", save_path=None,
                   thresh=0.1, measure='XQ', cls_name="", flip=False):
     """Plot an Precision-Recall curve based on unthresholded predictions and true binary labels.
@@ -281,6 +293,9 @@ def plot_multi_pr(cls_name_list, preds, labels, preds_cls, labels_cls, title="Pr
     if flip:
         labels = [1-a for a in labels]
         preds = [-a for a in preds]
+        for i in range(3):
+            labels_cls[i] = [1-a for a in labels_cls[i]]
+            preds_cls[i] = [-a for a in preds_cls[i]]
     labels_0, labels_1, labels_2 = labels_cls
     preds_0, preds_1, preds_2 = preds_cls
 
@@ -293,6 +308,20 @@ def plot_multi_pr(cls_name_list, preds, labels, preds_cls, labels_cls, title="Pr
     prc_auc_1 = auc(recall_1, precision_1)
     precision_2, recall_2, _ = precision_recall_curve(labels_2, preds_2)
     prc_auc_2 = auc(recall_2, precision_2)
+
+    # find the label for the instance with top score
+
+    # top_score = np.argwhere(preds == np.amax(preds)).flatten().tolist()
+    # top_score_0 = np.argwhere(preds_0 == np.amax(preds_0)).flatten().tolist()
+    # top_score_1 = np.argwhere(preds_1 == np.amax(preds_1)).flatten().tolist()
+    # top_score_2 = np.argwhere(preds_2 == np.amax(preds_2)).flatten().tolist()
+    # top_label = get_val(labels, top_score)
+    # top_label_0 = get_val(labels_0, top_score_0)
+    # top_label_1 = get_val(labels_1, top_score_1)
+    # top_label_2 = get_val(labels_2, top_score_2)
+    # top_label_str = "top_score_label_for_all_{}_for_classes_{}_{}_{}".format(
+    #     top_label, top_label_0, top_label_1, top_label_2
+    # )
 
     plt.figure()
     lw = 1
@@ -319,7 +348,8 @@ def plot_multi_pr(cls_name_list, preds, labels, preds_cls, labels_cls, title="Pr
             fig_name += "{}_".format(cls_name)
         fig_name += "precision_recall_using_{}_".format(measure)
         if measure != 'cls_score':
-            fig_name += "thresh_{}".format(thresh)
+            fig_name += "thresh_{}_".format(thresh)
+        # fig_name += top_label_str
         fig_name += ".png"
         plt.savefig("{}/{}".format(save_path, fig_name))
         plt.close()

@@ -204,8 +204,8 @@ def main():
     important variables:
     :return:
     """
-    XQ_only = False
-    scatter_plot = True
+    XQ_only = True
+    scatter_plot = False
     comb_plot = True
     w_sum_explore = False
     dataset_name = "KITTI"
@@ -217,7 +217,7 @@ def main():
     use_margin = True
     XAI_sum = False
     XAI_cnt = not XAI_sum
-    ignore_thresh_list = [0.1]
+    ignore_thresh_list = [0.0]
     # ignore_thresh_list = [0.0, 0.0333, 0.0667, 0.1, 0.1333, 0.1667, 0.2]
     start_time = time.time()
     max_obj_cnt = 50
@@ -268,7 +268,7 @@ def main():
         2. Read in XQ from the FP file
         3. Concatenate into one array, with TP labeled 1 and FP labeled 0
         """
-        XQ_thresh_list = ['0.0333', '0.0667', '0.1', '0.1333', '0.1667', '0.2']
+        XQ_thresh_list = ['0.0', '0.0333', '0.0667', '0.1', '0.1333', '0.1667', '0.2']
         for thresh in XQ_thresh_list:
             XQ_list = []
             score_list = []
@@ -295,6 +295,10 @@ def main():
                         cls_label_list.append(tp_data['class_label'])
                         pts_list.append(tp_data['pts_in_box'])
                         dist_list.append(tp_data['dist_to_ego'])
+                        print("Number of TP instances for each class:")
+                        print("class 0: {}".format(np.count_nonzero(tp_data['class_label'] == 0)))
+                        print("class 1: {}".format(np.count_nonzero(tp_data['class_label'] == 1)))
+                        print("class 2: {}".format(np.count_nonzero(tp_data['class_label'] == 2)))
                     elif name == fp_name:
                         found = True
                         fp_data = pd.read_csv(os.path.join(root, name))
@@ -304,6 +308,10 @@ def main():
                         cls_label_list.append(fp_data['class_label'])
                         pts_list.append(fp_data['pts_in_box'])
                         dist_list.append(fp_data['dist_to_ego'])
+                        print("Number of FP instances for each class:")
+                        print("class 0: {}".format(np.count_nonzero(fp_data['class_label'] == 0)))
+                        print("class 1: {}".format(np.count_nonzero(fp_data['class_label'] == 1)))
+                        print("class 2: {}".format(np.count_nonzero(fp_data['class_label'] == 2)))
             if found:
                 XQ_arr = np.concatenate(XQ_list)
                 score_arr = np.concatenate(score_list)

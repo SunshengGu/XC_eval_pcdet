@@ -263,8 +263,9 @@ def main():
     misclassified_box_analyzed = 0
     start_time = time.time()
     max_obj_cnt = 100
-    batches_to_analyze = 2
+    batches_to_analyze = 30
     method = 'IG'
+    use_trapezoid = False
     ignore_thresh = 0.0
     verify_box = False
     attr_to_csv = False
@@ -896,10 +897,16 @@ def main():
                                             PseudoImage2D, target=target, additional_forward_args=batch_dict)
                                 if method == 'IG':
                                     if len(attributions[j][k].shape) == 1:  # compute attributions only when necessary
-                                        attributions[j][k] = ig2D.attribute(
-                                            PseudoImage2D, baselines=PseudoImage2D * 0, target=target,
-                                            additional_forward_args=batch_dict, n_steps=steps,
-                                            internal_batch_size=batch_dict['batch_size'])
+                                        if use_trapezoid:
+                                            attributions[j][k] = ig2D.attribute(
+                                                PseudoImage2D, baselines=PseudoImage2D * 0, target=target,
+                                                additional_forward_args=batch_dict, n_steps=steps,
+                                                internal_batch_size=batch_dict['batch_size'], method='riemann_trapezoid')
+                                        else:
+                                            attributions[j][k] = ig2D.attribute(
+                                                PseudoImage2D, baselines=PseudoImage2D * 0, target=target,
+                                                additional_forward_args=batch_dict, n_steps=steps,
+                                                internal_batch_size=batch_dict['batch_size'])
                                     # sign = "all"
                                     # sign = "positive"
                                 grad = np.transpose(attributions[j][k][i].squeeze().cpu().detach().numpy(), (1, 2, 0))

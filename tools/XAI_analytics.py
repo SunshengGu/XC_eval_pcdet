@@ -192,7 +192,7 @@ def main():
     use_margin = True
     XAI_sum = False
     XAI_cnt = not XAI_sum
-    ignore_thresh_list = [0.1]
+    ignore_thresh_list = [0.0]
     # ignore_thresh_list = [0.0333, 0.0667, 0.1, 0.1333, 0.1667, 0.2]
     box_cnt = 0
     start_time = time.time()
