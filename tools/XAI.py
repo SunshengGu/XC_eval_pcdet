@@ -247,7 +247,7 @@ def main():
     """
     box_debug = False
     run_all = False
-    plot_enlarged_pred = False
+    plot_enlarged_pred = True
     unmatched_TP_FP_pred = 0
     # use_anchor_directly = True
     FN_analysis = False
@@ -263,7 +263,7 @@ def main():
     misclassified_box_analyzed = 0
     start_time = time.time()
     max_obj_cnt = 100
-    batches_to_analyze = 30
+    batches_to_analyze = 55
     method = 'IG'
     use_trapezoid = False
     ignore_thresh = 0.0
@@ -483,6 +483,8 @@ def main():
             if (not run_all) and batch_num == batches_to_analyze:
                 break  # just process a limited number of batches
             print("\nbatch_num: {}\n".format(batch_num))
+            if batch_num != 49:
+                continue
             # check_list = [459]
             # if batch_num not in check_list:
             #     continue
