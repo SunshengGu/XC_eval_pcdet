@@ -188,7 +188,8 @@ def main():
             parameter to get higher dpi.
     :return:
     """
-    density_plot = True
+    small_margin = True
+    density_plot = False
     FN_analysis = False
     use_margin = True
     XAI_sum = False
@@ -317,6 +318,11 @@ def main():
             dist_list = []  # stores distance to ego vehicle
             label_list = []
             pts_count_list = []
+            XC_list = []
+            far_attr_cnt_list = []
+            PAP_list = []
+            PAP_norm_list = []
+            PAP_pt_list = []
             TP_cls_0_scores = []
             TP_cls_1_scores = []
             TP_cls_2_scores = []
@@ -325,6 +331,10 @@ def main():
             TP_dist_list = []
             TP_label_list = []
             TP_pts_count_list = []
+            TP_far_attr_cnt_list = []
+            TP_PAP_list = []
+            TP_PAP_norm_list = []
+            TP_PAP_pt_list = []
             FP_cls_0_scores = []
             FP_cls_1_scores = []
             FP_cls_2_scores = []
@@ -333,6 +343,10 @@ def main():
             FP_dist_list = []
             FP_label_list = []
             FP_pts_count_list = []
+            FP_far_attr_cnt_list = []
+            FP_PAP_list = []
+            FP_PAP_norm_list = []
+            FP_PAP_pt_list = []
             FN_cls_0_scores = []
             FN_cls_1_scores = []
             FN_cls_2_scores = []
@@ -341,7 +355,7 @@ def main():
             FN_dist_list = []
             FN_label_list = []
             FN_pts_count_list = []
-            XC_list = []
+            FN_far_attr_cnt_list = []
             for root, dirs, files in os.walk(XAI_attr_path):
                 # print('processing files: ')
                 for name in files:
@@ -351,24 +365,31 @@ def main():
                         label = 255
                         sign = None
                         vicinity = 0  # Search vicinity for the generate_box_mask function
+                        expand_ind = ""
 
                         if "Car" in name:
                             label = label_dict["Car"]
                             vicinity = vicinity_dict["Car"]
+                            expand_ind = "pred_boxes_expand_2_meter"
                         elif "Pedestrian" in name:
                             label = label_dict["Pedestrian"]
                             vicinity = vicinity_dict["Pedestrian"]
+                            expand_ind = "pred_boxes_expand_half_meter"
                         elif "Cyclist" in name:
                             label = label_dict["Cyclist"]
                             vicinity = vicinity_dict["Cyclist"]
+                            expand_ind = "pred_boxes_expand_1_meter"
                         elif "Truck" in name:
                             label = label_dict["Truck"]
                             vicinity = vicinity_dict["Truck"]
 
+                        if small_margin:
+                            expand_ind = "pred_boxes_expand"
+
                         sign = attr_shown
                         with h5py.File(os.path.join(root, name), 'r') as attr_data_file:
                             prediction_boxes = attr_data_file["pred_boxes"]
-                            expanded_pred_boxes = attr_data_file["pred_boxes_expand"]
+                            expanded_pred_boxes = attr_data_file[expand_ind]
                             pos_attr = attr_data_file["pos_attr"]
                             neg_attr = attr_data_file["neg_attr"]
                             boxes_type = attr_data_file["box_type"]
@@ -389,21 +410,32 @@ def main():
                                 box_y = pred_boxes_loc[j][1]
                                 dist_to_ego = np.sqrt(box_x * box_x + box_y * box_y)
                                 XC = 0
+                                distant_attr_cnt = 0
+                                PAP, PAP_norm, PAP_pt = 0.0, 0.0, 0.0
+                                PAP = get_PAP(pos_attr[j], neg_attr[j], sign)
+                                if num_pts_in_pred_box[j][0] == 0:
+                                    PAP_pt = PAP
+                                else:
+                                    PAP_pt = PAP/num_pts_in_pred_box[j][0]
                                 if XAI_sum:
-                                    XC = get_sum_XQ_analytics_fast(
+                                    XC, attr_in_box, dist_attr_sum, total_attr = get_sum_XQ_analytics_fast(
                                         pos_attr[j], neg_attr[j], pred_boxes[j], dataset_name, sign,
                                         ignore_thresh, pred_boxes_loc[j], vicinity)
-                                    # XC = get_sum_XQ_analytics(pos_attr[j], neg_attr[j], pred_boxes[j], dataset_name,
-                                    #                           sign, ignore_thresh, high_rez=high_rez,
-                                    #                           scaling_factor=scaling_factor)
+                                    if total_attr == 0.0:
+                                        total_attr = 0.0001
+                                    PAP_norm = PAP/total_attr
                                 if XAI_cnt:
-                                    XC = get_cnt_XQ_analytics_fast(
+                                    XC, attr_in_box, distant_attr_cnt, total_attr = get_cnt_XQ_analytics_fast(
                                         pos_attr[j], neg_attr[j], pred_boxes[j], dataset_name, sign,
                                         ignore_thresh, pred_boxes_loc[j], vicinity)
-                                    # XC = get_cnt_XQ_analytics(pos_attr[j], neg_attr[j], pred_boxes[j], dataset_name,
-                                    #                           sign, ignore_thresh, high_rez=high_rez,
-                                    #                           scaling_factor=scaling_factor)
+                                    if total_attr == 0:
+                                        total_attr = 1
+                                    PAP_norm = PAP/total_attr
                                 XC_list.append(XC)
+                                PAP_list.append(PAP)
+                                PAP_norm_list.append(PAP_norm)
+                                PAP_pt_list.append(PAP_pt)
+                                far_attr_cnt_list.append(distant_attr_cnt)
                                 pts_count_list.append(num_pts_in_pred_box[j][0])
                                 cls_score_list.append(pred_scores[j][0])
                                 cls_0_scores.append(pred_scores_all[j][0])
@@ -414,6 +446,10 @@ def main():
                                 box_cnt += 1
                                 if boxes_type[j] == 1:  # 1 is TP
                                     TP_XC_list.append(XC)
+                                    TP_far_attr_cnt_list.append(distant_attr_cnt)
+                                    TP_PAP_list.append(PAP)
+                                    TP_PAP_norm_list.append(PAP_norm)
+                                    TP_PAP_pt_list.append(PAP_pt)
                                     TP_pts_count_list.append(num_pts_in_pred_box[j][0])
                                     TP_score_list.append(pred_scores[j][0])
                                     TP_dist_list.append(dist_to_ego)
@@ -423,6 +459,10 @@ def main():
                                     TP_cls_2_scores.append(pred_scores_all[j][2])
                                 elif boxes_type[j] == 0:  # 0 is FP
                                     FP_XC_list.append(XC)
+                                    FP_far_attr_cnt_list.append(distant_attr_cnt)
+                                    FP_PAP_list.append(PAP)
+                                    FP_PAP_norm_list.append(PAP_norm)
+                                    FP_PAP_pt_list.append(PAP_pt)
                                     FP_pts_count_list.append(num_pts_in_pred_box[j][0])
                                     FP_score_list.append(pred_scores[j][0])
                                     FP_dist_list.append(dist_to_ego)
@@ -432,6 +472,7 @@ def main():
                                     FP_cls_2_scores.append(pred_scores_all[j][2])
                                 elif FN_analysis and boxes_type[j] <= 2:  # 2,3,4 are FN
                                     FN_XC_list.append(XC)
+                                    FN_far_attr_cnt_list.append(distant_attr_cnt)
                                     FN_pts_count_list.append(num_pts_in_pred_box[j][0])
                                     FN_score_list.append(pred_scores[j][0])
                                     FN_dist_list.append(dist_to_ego)
@@ -452,16 +493,18 @@ def main():
             fp_XC = XAI_res_path_str + "/fp_XC_thresh{}.csv".format(ignore_thresh)
             fn_XC = XAI_res_path_str + "/fn_XC_thresh{}.csv".format(ignore_thresh)
             fnames = ['class_score', 'XC', 'dist_to_ego', 'class_label', 'class_0_score', 'class_1_score',
-                      'class_2_score', 'pts_in_box']
+                      'class_2_score', 'pts_in_box', 'far_attr_cnt', 'PAP', 'PAP_norm', 'PAP_pt']
             write_to_csv(
                 all_XC, fnames, [cls_score_list, XC_list, dist_list, label_list, cls_0_scores, cls_1_scores,
-                                 cls_2_scores, pts_count_list])
+                                 cls_2_scores, pts_count_list, far_attr_cnt_list, PAP_list, PAP_norm_list, PAP_pt_list])
             write_to_csv(
                 tp_XC, fnames, [TP_score_list, TP_XC_list, TP_dist_list, TP_label_list, TP_cls_0_scores,
-                                TP_cls_1_scores, TP_cls_2_scores, TP_pts_count_list])
+                                TP_cls_1_scores, TP_cls_2_scores, TP_pts_count_list, TP_far_attr_cnt_list,
+                                TP_PAP_list, TP_PAP_norm_list, TP_PAP_pt_list])
             write_to_csv(
                 fp_XC, fnames, [FP_score_list, FP_XC_list, FP_dist_list, FP_label_list, FP_cls_0_scores,
-                                FP_cls_1_scores, FP_cls_2_scores, FP_pts_count_list])
+                                FP_cls_1_scores, FP_cls_2_scores, FP_pts_count_list, FP_far_attr_cnt_list,
+                                FP_PAP_list, FP_PAP_norm_list, FP_PAP_pt_list])
 
             if FN_analysis:
                 write_to_csv(fn_XC, fnames, [FN_score_list, FN_XC_list, FN_dist_list, FN_label_list])
