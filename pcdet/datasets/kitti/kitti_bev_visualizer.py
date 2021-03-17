@@ -18,10 +18,14 @@ import datetime
 
 class KITTI_BEV:
     def __init__(self, dataset, repo_dir='/root/pcdet', scale_to_pseudoimg=False,
-                 class_name=['Car', 'Pedestrian', 'Cyclist'],
+                 class_name=None,
                  result_path='output/kitti_models/pointpillar/default/eval/epoch_2/val/default/result.pkl',
                  output_path='data/kitti/', background='black', scale=5, cmap='jet',
-                 dpi_factor=20.0, margin=0.0):
+                 dpi_factor=20.0, margin_list=None):
+        if class_name is None:
+            class_name = ['Car', 'Pedestrian', 'Cyclist']
+        if margin_list is None:
+            margin_list = []
         self.repo_dir = repo_dir
         self.scale_to_pseudoimg = scale_to_pseudoimg
         self.class_name = class_name
@@ -43,7 +47,8 @@ class KITTI_BEV:
         dt_string = now.strftime("%b_%d_%Y_%H_%M_%S")
         output_path = output_path + '{}_bev_pred'.format(dt_string)
         self.output_path = os.path.join(repo_dir, output_path)
-        self.margin = margin
+        self.margins = margin_list
+        print("self.margins: {}".format(self.margins))
         self.lidar_data = None
         self.pred_boxes = None
         self.pred_boxes_for_cnt = None
@@ -272,29 +277,30 @@ class KITTI_BEV:
 
         for cuboid in predictions:
             x, y, z, w, l, h, yaw = cuboid
-            if self.margin != 0.0:
-                w_big = w + 2 * self.margin
-                l_big = l + 2 * self.margin
-                pred_poly_expand.append(self.cuboid_to_bev(x, y, z, w_big, l_big, h, yaw))
-
-            # if (x < fwd_range[0] or x > fwd_range[1] or y < side_range[0] or y > side_range[1]):
-            #     continue  # out of bounds
-
             pred_poly.append(self.cuboid_to_bev(x, y, z, w, l, h, yaw))
             pred_loc.append(np.array([x, y]))
-
+        #
+        # # generate the expanded boxes with various margins
+        if len(self.margins) != 0:
+            for margin in self.margins:
+                expanded_preds = []
+                for cuboid in predictions:
+                    x, y, z, w, l, h, yaw = cuboid
+                    w_big = w + 2 * margin
+                    l_big = l + 2 * margin
+                    expanded_preds.append(self.cuboid_to_bev(x, y, z, w_big, l_big, h, yaw))
+                pred_poly_expand.append(expanded_preds)
         # Transform all polygons so 0,0 is the minimum
         offset = np.array([[-side_range[0], -fwd_range[0]]] * 4)
 
         gt_poly = [poly + offset for poly in gt_poly]
         pred_poly = [poly + offset for poly in pred_poly]
-        pred_poly_expand = [poly + offset for poly in pred_poly_expand]
+        for i in range(len(pred_poly_expand)):
+            pred_poly_expand[i] = [poly + offset for poly in pred_poly_expand[i]]
         gt_loc = [loc + offset[0] for loc in gt_loc]
         self.pred_poly = pred_poly
-        if self.margin==0.0:
-            self.pred_poly_expand = pred_poly
-        else:
-            self.pred_poly_expand = pred_poly_expand
+        self.pred_poly_expand = pred_poly_expand
+        print("len(self.pred_poly_expand): {}".format(len(self.pred_poly_expand)))
         self.gt_poly = gt_poly
         self.gt_loc = gt_loc
         self.pred_loc = pred_loc

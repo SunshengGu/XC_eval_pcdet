@@ -133,14 +133,25 @@ XAI analytics command:
 - kitti: python XAI_analytics.py --cfg_file cfgs/kitti_models/pointpillar_xai.yaml --batch_size 1 --attr_path ~/pcdet/tools/XAI_attributions/Nov_29_2020_15_58_56_IG_KittiDataset_all_batches_dont_delete
 
 XQ metric command:
-- kitti: python XQ_eval.py --XQ_path ~/pcdet/tools/XAI_results/Nov_29_2020_15_58_56_IG_KittiDataset_all_batches_dont_delete_analytics_Dec_04_2020_02_08_56_positive_attr_by_counting
-- kitti: python XQ_eval.py --XQ_path ~/pcdet/tools/XAI_results/Nov_29_2020_15_58_56_IG_KittiDataset_all_batches_dont_delete_analytics_Dec_03_2020_19_30_26_positive_attr_by_counting
-- kitti: python XQ_eval.py --XQ_path ~/pcdet/tools/XAI_results/Nov_29_2020_15_58_56_IG_KittiDataset_all_batches_dont_delete_analytics_Dec_17_2020_21_54_49_positive_attr_by_summing
-- kitti: python binary_cls.py --XQ_path ~/pcdet/tools/XAI_results/Nov_29_2020_15_58_56_IG_KittiDataset_all_batches_dont_delete_analytics_ALL_XQ_with_1e-1_thresh
+- kitti: python XQ_eval.py --XC_path ~/pcdet/tools/XAI_results/Nov_29_2020_15_58_56_IG_KittiDataset_all_batches_dont_delete_analytics_Dec_04_2020_02_08_56_positive_attr_by_counting
+- kitti: python XQ_eval.py --XC_path ~/pcdet/tools/XAI_results/Nov_29_2020_15_58_56_IG_KittiDataset_all_batches_dont_delete_analytics_Dec_03_2020_19_30_26_positive_attr_by_counting
+- kitti: python XQ_eval.py --XC_path ~/pcdet/tools/XAI_results/Nov_29_2020_15_58_56_IG_KittiDataset_all_batches_dont_delete_analytics_Dec_17_2020_21_54_49_positive_attr_by_summing
+- kitti: python binary_cls.py --XC_path ~/pcdet/tools/XAI_results/Nov_29_2020_15_58_56_IG_KittiDataset_all_batches_dont_delete_analytics_ALL_XQ_with_1e-1_thresh
 
 XAI with 2 GPUs:
 - bash scripts/dist_explain.sh 2 \
     --cfg_file ~/pcdet/tools/cfgs/kitti_models/pointpillar.yaml --batch_size 4 --explained_cfg_file ~/pcdet/tools/cfgs/kitti_models/pointpillar_2DBackbone_DetHead.yaml --ckpt ~/pcdet/output/kitti_models/pointpillar/default/ckpt/checkpoint_epoch_2.pth
+
+pre-requisits for the visualization script (do these in the docker):
+pip install open3d-python
+apt install libgl1-mesa-glx
+pip install h5py
+
+Command to map port to host for jupyter:
+"docker run -it --gpus=all --ipc=host -e "DISPLAY=unix:0.0" -v="/tmp/.X11-unix:/tmp/.X11-unix:rw" --device /dev/dri --privileged --name wisepcdet -p 5000:8888 -p 5001:6006 scrin/dev-spconv"
+-p 5000:8888 -p 5001:6006 are used for jupyter notebook and tensorflow
+"docker run -it --gpus=all --ipc=host -e --name wisepcdet -p 5000:8888 -p 5001:6006 scrin/dev-spconv"
+jupyter notebook --ip 0.0.0.0 --no-browser --allow-root
 
 In pcdet/models/dense_heads/anchor_head_single.py, what is the difference between self.forward_ret_dict['cls_preds'] vs data_dict['batch_cls_preds']
 -   cls_preds data type: <class 'torch.Tensor'>
