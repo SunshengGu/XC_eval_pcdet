@@ -264,7 +264,7 @@ def main():
     misclassified_box_analyzed = 0
     start_time = time.time()
     max_obj_cnt = 100
-    batches_to_analyze = 1
+    batches_to_analyze = 57
     method = 'IG'
     use_trapezoid = False
     ignore_thresh = 0.0
@@ -486,9 +486,9 @@ def main():
             if (not run_all) and batch_num == batches_to_analyze:
                 break  # just process a limited number of batches
             print("\nbatch_num: {}\n".format(batch_num))
-            # check_list = [459]
-            # if batch_num not in check_list:
-            #     continue
+            check_list = [56]
+            if batch_num not in check_list:
+                continue
             # print('\nlen(batch_dict): {}\n'.format(len(batch_dict)))
             XAI_batch_path_str = XAI_res_path_str + '/batch_{}'.format(batch_num)
             os.mkdir(XAI_batch_path_str)
@@ -1004,6 +1004,7 @@ def main():
                                     FP_dist_list.append(dist_to_ego)
                                     FP_label_list.append(k)
                                     attr_file["box_type"][new_size - 1] = 0
+                                print("padded_pred_boxes_vertices[0][j]: {}".format(padded_pred_boxes_vertices[0][j]))
                                 box_explained = flip_xy(padded_pred_boxes_vertices[0][j])
 
                                 if channel_xai:  # generates channel-wise explanation
@@ -1059,6 +1060,7 @@ def main():
                                         polys = patches.Polygon(box_explained,
                                                                 closed=True, fill=False, edgecolor='y', linewidth=1)
                                         grad_viz[1].add_patch(polys)
+                                        print('box_explained: {}'.format(box_explained))
                                     grad_viz[0].savefig(XAI_box_relative_path_str, bbox_inches='tight', pad_inches=0.0)
                                     plt.close('all')
                                     os.chmod(XAI_box_relative_path_str, 0o777)

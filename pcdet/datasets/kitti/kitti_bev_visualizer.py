@@ -53,6 +53,7 @@ class KITTI_BEV:
         self.pred_boxes = None
         self.pred_boxes_for_cnt = None
         self.pred_labels = None
+        self.save_image = False
         if not os.path.exists(self.output_path):
             os.makedirs(self.output_path)
 
@@ -340,7 +341,8 @@ class KITTI_BEV:
         size = fig.get_size_inches() * fig.dpi
         # print('bev image size: {}'.format(size))
         plt.tight_layout(pad=0)  # must have this line to ensure that image margin is zero
-        fig.savefig(output_path, dpi=dpi, bbox_inches='tight', pad_inches=0.0)
+        if self.save_image:
+            fig.savefig(output_path, dpi=dpi, bbox_inches='tight', pad_inches=0.0)
         plt.close('all')
         return fig
 

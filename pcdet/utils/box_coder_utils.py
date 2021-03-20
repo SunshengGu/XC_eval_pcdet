@@ -37,7 +37,7 @@ class ResidualCoder(object):
             rt_sin = torch.sin(rg) - torch.sin(ra)
             rts = [rt_cos, rt_sin]
         else:
-            rts = [rg - ra]
+            rts = [rg - ra] # why not apply sin to this difference as in the PointPillars paper?
 
         cts = [g - a for g, a in zip(cgs, cas)]
         return torch.cat([xt, yt, zt, dxt, dyt, dzt, *rts, *cts], dim=-1)
