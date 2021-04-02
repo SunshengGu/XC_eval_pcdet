@@ -114,7 +114,8 @@ From: https://docs.python.org/3/tutorial/modules.html
 - The import statement uses the following convention: if a package’s __init__.py code defines a list named __all__, it is taken to be the list of module names that should be imported when from package import * is encountered.
 
 Train command (note: the --cfg_file arg has to start with the `cfg` folder or else the outout will be in some weird place):
-- cadc: python train.py --cfg_file cfgs/cadc_models/pointpillar.yaml --batch_size 4 --epochs 4
+- kitti: python train.py --cfg_file cfgs/kitti_models/pointpillar.yaml --batch_size 4 --epochs 1
+- kitti xai: python train_attr.py --cfg_file cfgs/kitti_models/pointpillar_attr_loss.yaml --explained_cfg_file cfgs/kitti_models/pointpillar_2DBackbone_DetHead_xai.yaml --pretrained_model ~/pcdet/output/kitti_models/pointpillar/default/ckpt/pointpillar_7728.pth --batch_size 4 --epochs 1
 
 Test command:
 - kitti: python test.py --cfg_file cfgs/kitti_models/pointpillar.yaml --batch_size 4 --ckpt ~/pcdet/output/kitti_models/pointpillar/default/ckpt/pointpillar_7728.pth
@@ -124,6 +125,17 @@ Test command:
 Test with 2 GPUs:
 - bash scripts/dist_test.sh 4 \
     --cfg_file ~/pcdet/tools/cfgs/kitti_models/pointpillar.yaml --batch_size 4 --ckpt ~/pcdet/output/kitti_models/pointpillar/default/ckpt/checkpoint_epoch_2.pth
+
+How to get multiple docker images running:
+- Build and run the docker as usual
+- In a separate terminal, run `docker ps` to get the container_id
+- Then in the same terminal, `docker exec -it <container_id> bash`
+
+To view tensorboard:
+- to get tensorboard working locally, need to install both tensorflow and tensorboard
+- get the training started in a docker image
+- then run `tensorboard --logdir /media/sg/02f4ed99-ea7d-47a9-9aed-3606f0fd7fda/tadenoud/Documents/WISEOpenLidarPerceptron/output/kitti_models/pointpillar_attr_loss/default/tensorboard`
+- or `tensorboard --logdir /media/sg/02f4ed99-ea7d-47a9-9aed-3606f0fd7fda/tadenoud/Documents/WISEOpenLidarPerceptron/output/kitti_models/pointpillar/default/tensorboard`
 
 XAI command:
 - kitti, new (after decoupling): python XAI.py --cfg_file cfgs/kitti_models/pointpillar_xai.yaml --explained_cfg_file cfgs/kitti_models/pointpillar_2DBackbone_DetHead_xai.yaml --batch_size 1 --ckpt ~/pcdet/output/kitti_models/pointpillar/default/ckpt/pointpillar_7728.pth
@@ -146,6 +158,7 @@ pre-requisits for the visualization script (do these in the docker):
 pip install open3d-python
 apt install libgl1-mesa-glx
 pip install h5py
+pip install tensorboard
 
 Command to map port to host for jupyter:
 "docker run -it --gpus=all --ipc=host -e "DISPLAY=unix:0.0" -v="/tmp/.X11-unix:/tmp/.X11-unix:rw" --device /dev/dri --privileged --name wisepcdet -p 5000:8888 -p 5001:6006 scrin/dev-spconv"

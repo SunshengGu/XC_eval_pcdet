@@ -245,6 +245,10 @@ def main():
             parameter to get higher dpi.
     :return:
     """
+    visualize_attr = False
+    compute_xc = False
+    compute_pap = True
+    use_multi_margin = False
     plotting = False
     box_debug = False
     run_all = False
@@ -264,7 +268,7 @@ def main():
     misclassified_box_analyzed = 0
     start_time = time.time()
     max_obj_cnt = 100
-    batches_to_analyze = 57
+    batches_to_analyze = 30
     method = 'IG'
     use_trapezoid = False
     ignore_thresh = 0.0
@@ -285,7 +289,10 @@ def main():
     FN_search_range = 5000
     color_map = 'jet'
     box_margin = 0.2
-    box_margin_list = [0.2, 0.5, 1, 1.5, 2, 3, 5]
+    box_margin_list = [0.2]
+    if use_multi_margin:
+        box_margin_list = [0.2, 0.5, 1, 1.5, 2, 3, 5]
+    # box_margin_list = [0.2, 0.5, 1, 1.5, 2, 3, 5]
     if gray_scale_overlay:
         color_map = 'gist_yarg'
     scaling_factor = 5.0
@@ -486,9 +493,9 @@ def main():
             if (not run_all) and batch_num == batches_to_analyze:
                 break  # just process a limited number of batches
             print("\nbatch_num: {}\n".format(batch_num))
-            check_list = [56]
-            if batch_num not in check_list:
-                continue
+            # check_list = [56]
+            # if batch_num not in check_list:
+            #     continue
             # print('\nlen(batch_dict): {}\n'.format(len(batch_dict)))
             XAI_batch_path_str = XAI_res_path_str + '/batch_{}'.format(batch_num)
             os.mkdir(XAI_batch_path_str)
@@ -803,18 +810,19 @@ def main():
                         "pred_boxes", (0, 4, 2), maxshape=(None, 4, 2), dtype="float32", chunks=True)
                     expanded_boxes = attr_file.create_dataset(
                         "pred_boxes_expand", (0, 4, 2), maxshape=(None, 4, 2), dtype="float32", chunks=True)
-                    expanded_boxes = attr_file.create_dataset(
-                        "pred_boxes_expand_half_meter", (0, 4, 2), maxshape=(None, 4, 2), dtype="float32", chunks=True)
-                    expanded_boxes = attr_file.create_dataset(
-                        "pred_boxes_expand_1_meter", (0, 4, 2), maxshape=(None, 4, 2), dtype="float32", chunks=True)
-                    expanded_boxes = attr_file.create_dataset(
-                        "pred_boxes_expand_1_half_meter", (0, 4, 2), maxshape=(None, 4, 2), dtype="float32", chunks=True)
-                    expanded_boxes = attr_file.create_dataset(
-                        "pred_boxes_expand_2_meter", (0, 4, 2), maxshape=(None, 4, 2), dtype="float32", chunks=True)
-                    expanded_boxes = attr_file.create_dataset(
-                        "pred_boxes_expand_3_meter", (0, 4, 2), maxshape=(None, 4, 2), dtype="float32", chunks=True)
-                    expanded_boxes = attr_file.create_dataset(
-                        "pred_boxes_expand_5_meter", (0, 4, 2), maxshape=(None, 4, 2), dtype="float32", chunks=True)
+                    if use_multi_margin:
+                        expanded_boxes = attr_file.create_dataset(
+                            "pred_boxes_expand_half_meter", (0, 4, 2), maxshape=(None, 4, 2), dtype="float32", chunks=True)
+                        expanded_boxes = attr_file.create_dataset(
+                            "pred_boxes_expand_1_meter", (0, 4, 2), maxshape=(None, 4, 2), dtype="float32", chunks=True)
+                        expanded_boxes = attr_file.create_dataset(
+                            "pred_boxes_expand_1_half_meter", (0, 4, 2), maxshape=(None, 4, 2), dtype="float32", chunks=True)
+                        expanded_boxes = attr_file.create_dataset(
+                            "pred_boxes_expand_2_meter", (0, 4, 2), maxshape=(None, 4, 2), dtype="float32", chunks=True)
+                        expanded_boxes = attr_file.create_dataset(
+                            "pred_boxes_expand_3_meter", (0, 4, 2), maxshape=(None, 4, 2), dtype="float32", chunks=True)
+                        expanded_boxes = attr_file.create_dataset(
+                            "pred_boxes_expand_5_meter", (0, 4, 2), maxshape=(None, 4, 2), dtype="float32", chunks=True)
                     # encode box types with numbers: 0-FP, 1-TP, 2-FN_missed, 3-FN_partially_missed, 4-FN_misclassified
                     boxes_type = attr_file.create_dataset(
                         "box_type", (0, 1), maxshape=(None, 1), dtype="uint8", chunks=True)
@@ -946,12 +954,13 @@ def main():
                                 attr_file["neg_attr"].resize(new_size, axis=0)
                                 attr_file["pred_boxes"].resize(new_size, axis=0)
                                 attr_file["pred_boxes_expand"].resize(new_size, axis=0)
-                                attr_file["pred_boxes_expand_half_meter"].resize(new_size, axis=0)
-                                attr_file["pred_boxes_expand_1_meter"].resize(new_size, axis=0)
-                                attr_file["pred_boxes_expand_1_half_meter"].resize(new_size, axis=0)
-                                attr_file["pred_boxes_expand_2_meter"].resize(new_size, axis=0)
-                                attr_file["pred_boxes_expand_3_meter"].resize(new_size, axis=0)
-                                attr_file["pred_boxes_expand_5_meter"].resize(new_size, axis=0)
+                                if use_multi_margin:
+                                    attr_file["pred_boxes_expand_half_meter"].resize(new_size, axis=0)
+                                    attr_file["pred_boxes_expand_1_meter"].resize(new_size, axis=0)
+                                    attr_file["pred_boxes_expand_1_half_meter"].resize(new_size, axis=0)
+                                    attr_file["pred_boxes_expand_2_meter"].resize(new_size, axis=0)
+                                    attr_file["pred_boxes_expand_3_meter"].resize(new_size, axis=0)
+                                    attr_file["pred_boxes_expand_5_meter"].resize(new_size, axis=0)
                                 attr_file["box_type"].resize(new_size, axis=0)
                                 attr_file["pred_boxes_loc"].resize(new_size, axis=0)
                                 attr_file["box_score"].resize(new_size, axis=0)
@@ -963,12 +972,13 @@ def main():
                                 attr_file["neg_attr"][new_size - 1] = neg_grad
                                 attr_file["pred_boxes"][new_size - 1] = pred_boxes_vertices[j]
                                 attr_file["pred_boxes_expand"][new_size - 1] = padded_pred_boxes_vertices[0][j]
-                                attr_file["pred_boxes_expand_half_meter"][new_size - 1] = padded_pred_boxes_vertices[1][j]
-                                attr_file["pred_boxes_expand_1_meter"][new_size - 1] = padded_pred_boxes_vertices[2][j]
-                                attr_file["pred_boxes_expand_1_half_meter"][new_size - 1] = padded_pred_boxes_vertices[3][j]
-                                attr_file["pred_boxes_expand_2_meter"][new_size - 1] = padded_pred_boxes_vertices[4][j]
-                                attr_file["pred_boxes_expand_3_meter"][new_size - 1] = padded_pred_boxes_vertices[5][j]
-                                attr_file["pred_boxes_expand_5_meter"][new_size - 1] = padded_pred_boxes_vertices[6][j]
+                                if use_multi_margin:
+                                    attr_file["pred_boxes_expand_half_meter"][new_size - 1] = padded_pred_boxes_vertices[1][j]
+                                    attr_file["pred_boxes_expand_1_meter"][new_size - 1] = padded_pred_boxes_vertices[2][j]
+                                    attr_file["pred_boxes_expand_1_half_meter"][new_size - 1] = padded_pred_boxes_vertices[3][j]
+                                    attr_file["pred_boxes_expand_2_meter"][new_size - 1] = padded_pred_boxes_vertices[4][j]
+                                    attr_file["pred_boxes_expand_3_meter"][new_size - 1] = padded_pred_boxes_vertices[5][j]
+                                    attr_file["pred_boxes_expand_5_meter"][new_size - 1] = padded_pred_boxes_vertices[6][j]
                                 attr_file["box_type"][new_size - 1] = box_type
                                 attr_file["pred_boxes_loc"][new_size - 1] = pred_boxes_loc[j]
                                 attr_file["box_score"][new_size - 1] = pred_scores[j]
@@ -981,10 +991,14 @@ def main():
                                 grad_copy = pos_grad_copy if attr_shown == "positive" else neg_grad_copy
                                 # print(
                                 #     "pred_boxes_vertices[j] prior to XQ calculation: {}".format(pred_boxes_vertices[j]))
-                                XQ = get_sum_XQ_analytics(pos_grad, neg_grad, padded_pred_boxes_vertices[0][j],
-                                                          dataset_name,
-                                                          sign, ignore_thresh=ignore_thresh, high_rez=high_rez,
-                                                          scaling_factor=scaling_factor, grad_copy=grad_copy)
+                                XQ = 0.2
+                                if compute_xc:
+                                    XQ = get_sum_XQ_analytics(pos_grad, neg_grad, padded_pred_boxes_vertices[0][j],
+                                                              dataset_name,
+                                                              sign, ignore_thresh=ignore_thresh, high_rez=high_rez,
+                                                              scaling_factor=scaling_factor, grad_copy=grad_copy)
+                                if compute_pap:
+                                    pap = get_PAP(pos_grad, neg_grad, sign)
                                 # print(
                                 #     "pred_boxes_vertices[j] after XQ calculation: {}".format(pred_boxes_vertices[j]))
                                 XQ_list.append(XQ)
@@ -1006,64 +1020,64 @@ def main():
                                     attr_file["box_type"][new_size - 1] = 0
                                 print("padded_pred_boxes_vertices[0][j]: {}".format(padded_pred_boxes_vertices[0][j]))
                                 box_explained = flip_xy(padded_pred_boxes_vertices[0][j])
+                                if visualize_attr:
+                                    if channel_xai:  # generates channel-wise explanation
+                                        # TODO: this part needs fixing
+                                        for c in range(num_channels_viz):
+                                            grad_viz = viz.visualize_image_attr(
+                                                grad[:, :, c], bev_image, method="blended_heat_map", sign=sign,
+                                                show_colorbar=True,
+                                                title="Overlaid {}".format(method),
+                                                alpha_overlay=overlay, fig_size=figure_size, upscale=high_rez)
+                                            XAI_sample_path_str = XAI_cls_path_str + '/sample_{}'.format(i)
+                                            if not os.path.exists(XAI_sample_path_str):
+                                                os.makedirs(XAI_sample_path_str)
+                                            os.chmod(XAI_sample_path_str, 0o777)
 
-                                if channel_xai:  # generates channel-wise explanation
-                                    # TODO: this part needs fixing
-                                    for c in range(num_channels_viz):
-                                        grad_viz = viz.visualize_image_attr(
-                                            grad[:, :, c], bev_image, method="blended_heat_map", sign=sign,
-                                            show_colorbar=True,
-                                            title="Overlaid {}".format(method),
-                                            alpha_overlay=overlay, fig_size=figure_size, upscale=high_rez)
-                                        XAI_sample_path_str = XAI_cls_path_str + '/sample_{}'.format(i)
-                                        if not os.path.exists(XAI_sample_path_str):
-                                            os.makedirs(XAI_sample_path_str)
-                                        os.chmod(XAI_sample_path_str, 0o777)
+                                            XAI_box_relative_path_str = XAI_sample_path_str.split("tools/", 1)[1] + \
+                                                                        '/box_{}_{}_channel_{}_XQ_{}.png'.format(
+                                                                            j, conf_mat[i][j], c, XQ)
+                                            # print('XAI_box_path_str: {}'.format(XAI_box_path_str))
+                                            grad_viz[0].savefig(XAI_box_relative_path_str, bbox_inches='tight',
+                                                                pad_inches=0.0)
+                                            os.chmod(XAI_box_relative_path_str, 0o777)
+                                    else:
+                                        grad_viz = viz.visualize_image_attr(grad, bev_image, method="blended_heat_map",
+                                                                            sign=sign,
+                                                                            show_colorbar=True,
+                                                                            title="Overlaid {}".format(method),
+                                                                            alpha_overlay=overlay,
+                                                                            fig_size=figure_size, upscale=high_rez)
+                                        iou_for_box = 0.0
+                                        if gt_exist[i]:
+                                            iou_for_box = pred_box_iou[i][j]
 
-                                        XAI_box_relative_path_str = XAI_sample_path_str.split("tools/", 1)[1] + \
-                                                                    '/box_{}_{}_channel_{}_XQ_{}.png'.format(
-                                                                        j, conf_mat[i][j], c, XQ)
-                                        # print('XAI_box_path_str: {}'.format(XAI_box_path_str))
-                                        grad_viz[0].savefig(XAI_box_relative_path_str, bbox_inches='tight',
-                                                            pad_inches=0.0)
+                                        XAI_box_relative_path_str = XAI_cls_path_str.split("tools/", 1)[1] + \
+                                                                    '/box_{}_{}_XQ_{}_points_{}_top_iou_{}_loc{}.png'.format(
+                                                                        j, conf_mat[i][j], XQ, num_pts,
+                                                                        iou_for_box, pred_boxes_loc[j])
+
+                                        XAI_attr_csv_str = XAI_cls_path_str + \
+                                                           '/box_{}_{}_XQ_{}.csv'.format(j, conf_mat[i][j], XQ)
+                                        verts = copy.deepcopy(padded_pred_boxes_vertices[0][j])
+                                        if high_rez:
+                                            verts = verts / scaling_factor
+                                        if attr_to_csv:
+                                            if verify_box:
+                                                write_attr_to_csv(XAI_attr_csv_str, grad_copy, verts)
+                                            else:
+                                                if attr_shown == "positive":
+                                                    write_attr_to_csv(XAI_attr_csv_str, pos_grad, verts)
+                                                elif attr_shown == "negative":
+                                                    write_attr_to_csv(XAI_attr_csv_str, neg_grad, verts)
+                                        if plot_enlarged_pred:
+                                            polys = patches.Polygon(box_explained,
+                                                                    closed=True, fill=False, edgecolor='y', linewidth=1)
+                                            grad_viz[1].add_patch(polys)
+                                            print('box_explained: {}'.format(box_explained))
+                                        grad_viz[0].savefig(XAI_box_relative_path_str, bbox_inches='tight', pad_inches=0.0)
+                                        plt.close('all')
                                         os.chmod(XAI_box_relative_path_str, 0o777)
-                                else:
-                                    grad_viz = viz.visualize_image_attr(grad, bev_image, method="blended_heat_map",
-                                                                        sign=sign,
-                                                                        show_colorbar=True,
-                                                                        title="Overlaid {}".format(method),
-                                                                        alpha_overlay=overlay,
-                                                                        fig_size=figure_size, upscale=high_rez)
-                                    iou_for_box = 0.0
-                                    if gt_exist[i]:
-                                        iou_for_box = pred_box_iou[i][j]
-
-                                    XAI_box_relative_path_str = XAI_cls_path_str.split("tools/", 1)[1] + \
-                                                                '/box_{}_{}_XQ_{}_points_{}_top_iou_{}_loc{}.png'.format(
-                                                                    j, conf_mat[i][j], XQ, num_pts,
-                                                                    iou_for_box, pred_boxes_loc[j])
-
-                                    XAI_attr_csv_str = XAI_cls_path_str + \
-                                                       '/box_{}_{}_XQ_{}.csv'.format(j, conf_mat[i][j], XQ)
-                                    verts = copy.deepcopy(padded_pred_boxes_vertices[0][j])
-                                    if high_rez:
-                                        verts = verts / scaling_factor
-                                    if attr_to_csv:
-                                        if verify_box:
-                                            write_attr_to_csv(XAI_attr_csv_str, grad_copy, verts)
-                                        else:
-                                            if attr_shown == "positive":
-                                                write_attr_to_csv(XAI_attr_csv_str, pos_grad, verts)
-                                            elif attr_shown == "negative":
-                                                write_attr_to_csv(XAI_attr_csv_str, neg_grad, verts)
-                                    if plot_enlarged_pred:
-                                        polys = patches.Polygon(box_explained,
-                                                                closed=True, fill=False, edgecolor='y', linewidth=1)
-                                        grad_viz[1].add_patch(polys)
-                                        print('box_explained: {}'.format(box_explained))
-                                    grad_viz[0].savefig(XAI_box_relative_path_str, bbox_inches='tight', pad_inches=0.0)
-                                    plt.close('all')
-                                    os.chmod(XAI_box_relative_path_str, 0o777)
 
                     if FN_analysis and gt_exist[i]:
                         # no need to do FN analysis when there're are no gt boxes in range

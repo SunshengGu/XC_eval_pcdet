@@ -61,6 +61,7 @@ class AxisAlignedTargetAssigner(object):
             target_list = []
             for anchor_class_name, anchors in zip(self.anchor_class_names, all_anchors):
                 if cur_gt_classes.shape[0] > 1:
+                    # from cur_gt_classes, selects out indices where the gt class matches the anchor_class_name
                     mask = torch.from_numpy(self.class_names[cur_gt_classes.cpu() - 1] == anchor_class_name)
                 else:
                     mask = torch.tensor([self.class_names[c - 1] == anchor_class_name
@@ -76,10 +77,12 @@ class AxisAlignedTargetAssigner(object):
                     else:
                         selected_classes = cur_gt_classes[mask]
                 else:
+                    # probably feature map for the amount of anchors: #cls x #anchors_horiz x #anchors_vert
                     feature_map_size = anchors.shape[:3]
+                    # reshape so that anchors.shape = (#anchors, dimension_of_one_anchor)
                     anchors = anchors.view(-1, anchors.shape[-1])
                     selected_classes = cur_gt_classes[mask]
-
+                # assign targets for one particular class of anchors using gt boxes from the same class
                 single_target = self.assign_targets_single(
                     anchors,
                     cur_gt[mask],
@@ -153,19 +156,26 @@ class AxisAlignedTargetAssigner(object):
 
             gt_to_anchor_argmax = torch.from_numpy(anchor_by_gt_overlap.cpu().numpy().argmax(axis=0)).cuda()
             gt_to_anchor_max = anchor_by_gt_overlap[gt_to_anchor_argmax, torch.arange(num_gt, device=anchors.device)]
-            empty_gt_mask = gt_to_anchor_max == 0
+            empty_gt_mask = gt_to_anchor_max == 0  # indices for gt boxes which do not have overlapping anchors
             gt_to_anchor_max[empty_gt_mask] = -1
 
+            # .nonzero() returns the indices for nonzero elements across different dimensions
+            # anchors that results in max_iou with gts get labels of corresponding gt
+            # ensuring each gt label is assigned to an anchor
             anchors_with_max_overlap = (anchor_by_gt_overlap == gt_to_anchor_max).nonzero()[:, 0]
             gt_inds_force = anchor_to_gt_argmax[anchors_with_max_overlap]
             labels[anchors_with_max_overlap] = gt_classes[gt_inds_force]
             gt_ids[anchors_with_max_overlap] = gt_inds_force.int()
 
+            # anchors that have max iou with gt exceeding matched_threshold get labels of the corresponding gt boxes
             pos_inds = anchor_to_gt_max >= matched_threshold
             gt_inds_over_thresh = anchor_to_gt_argmax[pos_inds]
             labels[pos_inds] = gt_classes[gt_inds_over_thresh]
             gt_ids[pos_inds] = gt_inds_over_thresh.int()
             bg_inds = (anchor_to_gt_max < unmatched_threshold).nonzero()[:, 0]
+
+            # need both of the previous blocks so that anchors overlapping the same gt may all get the label of this gt
+            # may miss some anchors with high IoU with gts if we only do the first block
         else:
             bg_inds = torch.arange(num_anchors, device=anchors.device)
 
@@ -191,6 +201,7 @@ class AxisAlignedTargetAssigner(object):
                 labels[bg_inds] = 0
                 labels[anchors_with_max_overlap] = gt_classes[gt_inds_force]
 
+        # creates a new tensor with the same data type as the `anchors` tensor with the specified size
         bbox_targets = anchors.new_zeros((num_anchors, self.box_coder.code_size))
         if len(gt_boxes) > 0 and anchors.shape[0] > 0:
             fg_gt_boxes = gt_boxes[anchor_to_gt_argmax[fg_inds], :]

@@ -8,7 +8,7 @@ from .target_assigner.atss_target_assigner import ATSSTargetAssigner
 from .target_assigner.axis_aligned_target_assigner import AxisAlignedTargetAssigner
 
 
-class AnchorHeadTemplate(nn.Module):
+class AnchorHeadTemplateNewLoss(nn.Module):
     def __init__(self, model_cfg, num_class, class_names, grid_size, point_cloud_range, predict_boxes_when_training):
         super().__init__()
         self.model_cfg = model_cfg
@@ -133,6 +133,7 @@ class AnchorHeadTemplate(nn.Module):
         tb_dict = {
             'rpn_loss_cls': cls_loss.item()
         }
+        # print("\ncls_loss: {}\n".format(cls_loss))
         return cls_loss, tb_dict
 
     @staticmethod
@@ -211,6 +212,7 @@ class AnchorHeadTemplate(nn.Module):
             dir_loss = dir_loss * self.model_cfg.LOSS_CONFIG.LOSS_WEIGHTS['dir_weight']
             box_loss += dir_loss
             tb_dict['rpn_loss_dir'] = dir_loss.item()
+        # print("\nbox_loss: {}\n".format(box_loss))
         return box_loss, tb_dict
 
     def get_loss(self):
@@ -218,7 +220,10 @@ class AnchorHeadTemplate(nn.Module):
         box_loss, tb_dict_box = self.get_box_reg_layer_loss()
         tb_dict.update(tb_dict_box)
         rpn_loss = cls_loss + box_loss
-
+        # print("\nin pcdet/models/dense_heads/anchor_head_template_new_loss.py, get_loss(),"
+        #       "rpn_loss.shape: {}\n".format(rpn_loss.shape))
+        # print("rpn_loss: {}".format(rpn_loss))
+        # print("rpn_loss data type: {}\n".format(type(rpn_loss)))
         tb_dict['rpn_loss'] = rpn_loss.item()
         return rpn_loss, tb_dict
 
