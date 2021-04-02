@@ -293,18 +293,6 @@ def get_cnt_XQ_analytics_fast(pos_grad, neg_grad, box_vertices, dataset_name, si
     return XQ, attr_in_box, distant_attr_cnt, total_attr
 
 
-def get_PAP(pos_grad, neg_grad, sign):
-    grad = None
-    if sign == 'positive':
-        grad = pos_grad
-    elif sign == 'negative':
-        grad = neg_grad
-    diff_1 = grad[1:, :] - grad[:-1, :]
-    diff_2 = grad[:, 1:] - grad[:, :-1]
-    pap_loss = np.sum(np.abs(diff_1)) + np.sum(np.abs(diff_2))
-    return pap_loss
-
-
 def get_cnt_XQ(grad, box_vertices, dataset_name, box_w, box_l, sign, high_rez=False, scaling_factor=1,
                grad_copy=None):
     """

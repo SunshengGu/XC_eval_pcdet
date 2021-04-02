@@ -48,7 +48,8 @@ from captum.attr import visualization as viz
 
 
 class AttributionGenerator:
-    def __init__(self, model_ckpt, model_cfg_file, data_set, xai_method, output_path, ig_steps=24, boxes=5, margin=0.2):
+    def __init__(self, model_ckpt, model_cfg_file, data_set, xai_method, output_path, ig_steps=24, margin=0.2,
+                 num_boxes=3, selection='top', ignore_thresh=0.1):
         """
         You should have the data loader ready and the specific batch dictionary available before computing any
         attributions.
@@ -62,12 +63,26 @@ class AttributionGenerator:
         :param ig_steps: number of intermediate steps to use for IG
         :param boxes: number of boxes to explain per frame
         :param margin: margin appended to box boundaries for XC computation
+        :param num_boxes: number of predicted boxes for which we are generating explanations for
+        :param selection: whether to compute XC for the most confident ('top')  or least confident ('bottom') boxes
         """
 
         # Load model configurations
         cfg_from_yaml_file(model_cfg_file, cfg)
         self.cfg = cfg
         self.dataset_name = cfg.DATA_CONFIG.DATASET
+        self.class_name_list = cfg.CLASS_NAMES
+
+        self.label_dict = None  # maps class name to label
+        self.vicinity_dict = None  # Search vicinity for the generate_box_mask function
+        if self.dataset_name == 'KittiDataset':
+            self.label_dict = {"Car": 0, "Pedestrian": 1, "Cyclist": 2}
+            self.vicinity_dict = {"Car": 20, "Pedestrian": 5, "Cyclist": 9}
+        elif self.dataset_name == 'CadcDataset':
+            self.label_dict = {"Car": 0, "Pedestrian": 1, "Truck": 2}
+            self.vicinity_dict = {"Car": 13, "Pedestrian": 3, "Truck": 19}
+        else:
+            raise NotImplementedError
 
         # Create output directories, not very useful, just to be compatible with the load_params_from_file
         # method defined in pcdet/models/detectors/detector3d_template.py, which requires a logger
@@ -89,11 +104,15 @@ class AttributionGenerator:
         self.margin = margin
         self.output_path = output_path
         self.ig_steps = ig_steps
+        self.num_boxes = num_boxes
+        self.selection = selection
+        self.ignore_thresh = ignore_thresh
         self.batch_dict = {}
         self.pred_boxes = None
         self.pred_labels = None
         self.pred_scores = None
         self.pred_vertices = None # vertices of predicted boxes with a specified margin
+        self.pred_loc = None
         self.explainer = None
         if xai_method == 'Saliency':
             self.explainer = Saliency(self.model)
@@ -188,21 +207,15 @@ class AttributionGenerator:
         self.pred_scores = None
         self.pred_vertices = None
 
-    def get_attr(self, batch_dict, target):
+    def get_attr(self, target):
         """
         Unless the batch_size is 1, there will be repeated work done in a batch since the same target is being applied
         to all samples in the same batch
         """
-
-        # get the predictions
-        self.batch_dict = batch_dict
-        self.get_preds()
-
-        # get the attributions
-        PseudoImage2D = batch_dict['spatial_features']
+        PseudoImage2D = self.batch_dict['spatial_features']
         batch_grad = self.explainer.attribute(PseudoImage2D, baselines=PseudoImage2D * 0, target=target,
-                                              additional_forward_args=batch_dict, n_steps=self.ig_steps,
-                                              internal_batch_size=batch_dict['batch_size'])
+                                              additional_forward_args=self.batch_dict, n_steps=self.ig_steps,
+                                              internal_batch_size=self.batch_dict['batch_size'])
         grad = np.transpose(batch_grad[0].squeeze().cpu().detach().numpy(), (1, 2, 0))
         pos_grad = np.sum((grad > 0) * grad, axis=2)
         neg_grad = np.sum(-1 * (grad < 0) * grad, axis=2)
@@ -216,11 +229,13 @@ class AttributionGenerator:
 
         # Generate the vertices
         expanded_preds = []
+        pred_loc = []
         for cuboid in self.pred_boxes:
             x, y, z, w, l, h, yaw = cuboid
             w_big = w + 2 * self.margin
             l_big = l + 2 * self.margin
             expanded_preds.append(self.cuboid_to_bev(x, y, z, w_big, l_big, h, yaw))
+            pred_loc.append(np.array([x, y]))
 
         # Limiting the viewing range
         s1, s2, f1, f2 = 0, 0, 0, 0
@@ -235,3 +250,112 @@ class AttributionGenerator:
         offset = np.array([[-side_range[0], -fwd_range[0]]] * 4)
         expanded_preds = [poly + offset for poly in expanded_preds]
         self.pred_vertices = expanded_preds
+        self.pred_loc = pred_loc
+
+    def generate_targets(self):
+        """
+        Generates targets for explanation given the batch
+        Note that the class label target for each box corresponds to the top confidence predicted class
+        :return:
+        """
+        # Get pred labels
+        cared_labels = None
+        cared_box_vertices = None
+        if self.num_boxes >= len(self.pred_labels):
+            cared_labels = self.pred_labels
+            cared_box_vertices = self.pred_vertices
+        elif self.selection == "top":
+            cared_labels = self.pred_labels[:self.num_boxes]
+            cared_box_vertices = self.pred_vertices[:self.num_boxes]
+        elif self.selection == "bottom":
+            cared_labels = self.pred_labels[-1*self.num_boxes:]
+            cared_box_vertices = self.pred_vertices[-1*self.num_boxes:]
+
+        # Generate targets
+        target_list = []
+        for ind, label in enumerate(cared_labels):
+            target_list.append((ind, label))
+        return target_list, cared_box_vertices
+
+    def compute_xc_single(self, pos_grad, neg_grad, box_vertices, dataset_name, sign, ignore_thresh, box_loc,
+                          vicinity, method):
+        """
+        :param vicinity: search vicinity w.r.t. the box_center, class dependent
+        :param ignore_thresh: the threshold below which the attributions would be ignored
+        :param box_loc: location of the predicted box
+        :param sign: indicates the type of attributions shown, positive or negative
+        :param neg_grad: numpy array containing sum of negative gradients at each location
+        :param pos_grad: numpy array containing sum of positive gradients at each location
+        :param dataset_name:
+        :param box_vertices: The vertices of the predicted box
+        :param method: either "cnt" or "sum"
+        :return: XC for a single box
+        """
+        if method == "cnt":
+            XC, attr_in_box, far_attr, total_attr = get_cnt_XQ_analytics_fast(
+                pos_grad, neg_grad, box_vertices, dataset_name, sign, ignore_thresh, box_loc, vicinity)
+        elif method == "sum":
+            XC, attr_in_box, far_attr, total_attr = get_sum_XQ_analytics_fast(
+                pos_grad, neg_grad, box_vertices, dataset_name, sign, ignore_thresh, box_loc, vicinity)
+        return XC, far_attr
+
+    def get_PAP_single(self, pos_grad, neg_grad, sign):
+        grad = None
+        if sign == 'positive':
+            grad = pos_grad
+        elif sign == 'negative':
+            grad = neg_grad
+        diff_1 = grad[1:, :] - grad[:-1, :]
+        diff_2 = grad[:, 1:] - grad[:, :-1]
+        pap_loss = np.sum(np.abs(diff_1)) + np.sum(np.abs(diff_2))
+        return pap_loss
+
+    def compute_xc(self, batch_dict, method="cnt", sign="positive"):
+        """
+        This is the ONLY function that the user should call
+
+        :param batch_dict: The input batch for which we are generating explanations
+        :param method: Either by counting ("cnt") or by summing ("sum")
+        :param sign: Analyze either the positive or the negative attributions
+        :return:
+        """
+        # Get the predictions, compute box vertices, and generate targets
+        self.batch_dict = batch_dict
+        self.get_preds()
+        self.compute_pred_box_vertices()
+        targets, cared_vertices = self.generate_targets()
+
+        # Compute gradients, XC, and pap
+        total_XC, total_far_attr, total_pap = 0, 0, 0
+        for i in range(len(targets)):
+            pos_grad, neg_grad = self.get_attr(targets[i])
+            class_name = self.class_name_list[targets[i][1]]
+            vicinity = self.vicinity_dict[class_name]
+            XC, far_attr = self.compute_xc_single(
+                pos_grad, neg_grad, self.pred_vertices[i], self.dataset_name, sign, self.ignore_thresh,
+                self.pred_loc[i], vicinity, method)
+            pap = self.get_PAP_single(pos_grad, neg_grad, sign)
+            total_XC += XC
+            total_far_attr += far_attr
+            total_pap += pap
+
+        return total_XC, total_far_attr, total_pap
+
+    def compute_PAP(self, batch_dict, method="cnt", sign="positive"):
+        """
+        User shall call the function if they wish to not compute XC, just PAP only
+        :return:
+        """
+        # Get the predictions, compute box vertices, and generate targets
+        self.batch_dict = batch_dict
+        self.get_preds()
+        self.compute_pred_box_vertices()
+        targets, cared_vertices = self.generate_targets()
+
+        # Compute gradients, XC, and pap
+        total_pap = 0
+        for i in range(len(targets)):
+            pos_grad, neg_grad = self.get_attr(targets[i])
+            pap = self.get_PAP_single(pos_grad, neg_grad, sign)
+            total_pap += pap
+        return total_pap
