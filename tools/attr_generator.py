@@ -1,62 +1,33 @@
-import os
-import copy
-import torch
-from tensorboardX import SummaryWriter
-import time
-import glob
 import re
-import h5py
 import datetime
-import argparse
-import csv
-import math
 from pathlib import Path
-import torch.distributed as dist
-from pcdet.datasets import build_dataloader
-from pcdet.models import build_network
-from pcdet.utils import common_utils
-from pcdet.config import cfg, cfg_from_list, cfg_from_yaml_file, log_config_to_file
-from pcdet.datasets.kitti.kitti_bev_visualizer import KITTI_BEV
-from pcdet.datasets.cadc.cadc_bev_visualizer import CADC_BEV
-from pcdet.utils import box_utils
-from eval_utils import eval_utils
-from XAI_utils.bbox_utils import *
-from XAI_utils.tp_fp import *
-from XAI_utils.XQ_utils import *
-from pcdet.models import load_data_to_gpu
-from pcdet.datasets.kitti.kitti_dataset import KittiDataset
-from pcdet.datasets.cadc.cadc_dataset import CadcDataset
-from pcdet.datasets.kitti.kitti_object_eval_python.eval import d3_box_overlap
 
 # XAI related imports
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
 import numpy as np
-
 import torch
-import torchvision
-import torchvision.transforms as transforms
-import torchvision.transforms.functional as TF
+from scipy.spatial.transform import Rotation as R
 
-from torchvision import models
-
-from captum.attr import IntegratedGradients
-from captum.attr import Saliency
+from XAI_utils.XQ_utils import *
 from captum.attr import GuidedBackprop
 from captum.attr import GuidedGradCam
-from captum.attr import visualization as viz
+from captum.attr import IntegratedGradients
+from captum.attr import Saliency
+from pcdet.config import cfg, cfg_from_yaml_file
+from pcdet.models import build_network
+from pcdet.models import load_data_to_gpu
 
 
 class AttributionGenerator:
-    def __init__(self, model_ckpt, model_cfg_file, data_set, xai_method, output_path, ig_steps=24, margin=0.2,
-                 num_boxes=3, selection='top', ignore_thresh=0.1):
+    def __init__(self, model_ckpt, full_model_cfg_file, model_cfg_file, data_set, xai_method, output_path, ig_steps=24,
+                 margin=0.2, num_boxes=3, selection='top', ignore_thresh=0.1, double_model=True):
         """
         You should have the data loader ready and the specific batch dictionary available before computing any
         attributions.
         Also, you need to have the folder XAI_utils in the `tools` folder as well for this object to work
 
         :param model_ckpt: directory for the model checkpoint
-        :param model_cfg_file: directory for the model config file
+        :param full_model_cfg_file: directory for the full model config file
+        :param model_cfg_file: directory for the model config file (model to be explained)
         :param data_set:
         :param xai_method: a string indicating which explanation technique to use
         :param output_path: directory for storing relevant outputs
@@ -68,10 +39,17 @@ class AttributionGenerator:
         """
 
         # Load model configurations
+        full_cfg = copy.deepcopy(cfg)
         cfg_from_yaml_file(model_cfg_file, cfg)
+        cfg.TAG = Path(model_cfg_file).stem
+        cfg.EXP_GROUP_PATH = '/'.join(model_cfg_file.split('/')[1:-1])  # remove 'cfgs' and 'xxxx.yaml'
         self.cfg = cfg
         self.dataset_name = cfg.DATA_CONFIG.DATASET
         self.class_name_list = cfg.CLASS_NAMES
+        self.double_model = double_model
+
+        cfg_from_yaml_file(full_model_cfg_file, full_cfg)
+        self.full_cfg = full_cfg
 
         self.label_dict = None  # maps class name to label
         self.vicinity_dict = None  # Search vicinity for the generate_box_mask function
@@ -89,6 +67,20 @@ class AttributionGenerator:
         output_dir = cfg.ROOT_DIR / 'output' / cfg.EXP_GROUP_PATH / cfg.TAG / 'default'
         output_dir.mkdir(parents=True, exist_ok=True)
         eval_output_dir = output_dir / 'eval'
+        eval_all = False
+        eval_tag = 'default'
+
+        if not eval_all:
+            num_list = re.findall(r'\d+', model_ckpt) if model_ckpt is not None else []
+            epoch_id = num_list[-1] if num_list.__len__() > 0 else 'no_number'
+            eval_output_dir = eval_output_dir / ('epoch_%s' % epoch_id) / cfg.DATA_CONFIG.DATA_SPLIT['test']
+        else:
+            eval_output_dir = eval_output_dir / 'eval_all_default'
+
+        if eval_tag is not None:
+            eval_output_dir = eval_output_dir / eval_tag
+
+        eval_output_dir.mkdir(parents=True, exist_ok=True)
 
         # Create logger, not very useful, just to be compatible with PCDet's structures
         log_file = eval_output_dir / ('log_eval_%s.txt' % datetime.datetime.now().strftime('%Y%m%d-%H%M%S'))
@@ -99,6 +91,11 @@ class AttributionGenerator:
         self.model.load_params_from_file(filename=model_ckpt, logger=logger, to_cpu=False)
         self.model.cuda()
         self.model.eval()
+        if self.double_model:
+            self.full_model = build_network(model_cfg=full_cfg.MODEL, num_class=len(full_cfg.CLASS_NAMES), dataset=data_set)
+            self.full_model.load_params_from_file(filename=model_ckpt, logger=logger, to_cpu=False)
+            self.full_model.cuda()
+            self.full_model.eval()
 
         # Other initialization stuff
         self.margin = margin
@@ -107,12 +104,13 @@ class AttributionGenerator:
         self.num_boxes = num_boxes
         self.selection = selection
         self.ignore_thresh = ignore_thresh
-        self.batch_dict = {}
+        self.batch_dict = None
         self.pred_boxes = None
         self.pred_labels = None
         self.pred_scores = None
         self.pred_vertices = None # vertices of predicted boxes with a specified margin
         self.pred_loc = None
+        self.selected_anchors = None
         self.explainer = None
         if xai_method == 'Saliency':
             self.explainer = Saliency(self.model)
@@ -189,6 +187,11 @@ class AttributionGenerator:
         return poly
 
     def get_preds(self):
+        # # Debug message
+        # print("keys in self.batch_dict:")
+        # for key in self.batch_dict:
+        #     print('key: {}'.format(key))
+
         pred_dicts = self.batch_dict['pred_dicts']
         pred_boxes = pred_dicts[0]['pred_boxes'].cpu().numpy()
         for i in range(len(pred_boxes)):
@@ -196,16 +199,19 @@ class AttributionGenerator:
         self.pred_boxes = pred_boxes
         self.pred_labels = pred_dicts[0]['pred_labels'].cpu().numpy() - 1
         self.pred_scores = pred_dicts[0]['pred_scores'].cpu().numpy()
+        self.selected_anchors = self.batch_dict['anchor_selections'][0]
 
     def reset(self):
         """
         Call this when you have finished using this object for a specific batch
         """
-        self.batch_dict = {}
+        self.batch_dict = None
         self.pred_boxes = None
         self.pred_labels = None
         self.pred_scores = None
         self.pred_vertices = None
+        self.pred_loc = None
+        self.selected_anchors = None
 
     def get_attr(self, target):
         """
@@ -261,21 +267,25 @@ class AttributionGenerator:
         # Get pred labels
         cared_labels = None
         cared_box_vertices = None
+        cared_loc = None
         if self.num_boxes >= len(self.pred_labels):
             cared_labels = self.pred_labels
             cared_box_vertices = self.pred_vertices
+            cared_loc = self.pred_loc
         elif self.selection == "top":
             cared_labels = self.pred_labels[:self.num_boxes]
             cared_box_vertices = self.pred_vertices[:self.num_boxes]
+            cared_loc = self.pred_loc[:self.num_boxes]
         elif self.selection == "bottom":
             cared_labels = self.pred_labels[-1*self.num_boxes:]
             cared_box_vertices = self.pred_vertices[-1*self.num_boxes:]
+            cared_loc = self.pred_loc[-1*self.num_boxes:]
 
         # Generate targets
         target_list = []
         for ind, label in enumerate(cared_labels):
-            target_list.append((ind, label))
-        return target_list, cared_box_vertices
+            target_list.append((self.selected_anchors[ind], label))
+        return target_list, cared_box_vertices, cared_loc
 
     def compute_xc_single(self, pos_grad, neg_grad, box_vertices, dataset_name, sign, ignore_thresh, box_loc,
                           vicinity, method):
@@ -291,6 +301,7 @@ class AttributionGenerator:
         :param method: either "cnt" or "sum"
         :return: XC for a single box
         """
+        XC, attr_in_box, far_attr, total_attr = 0.0, 0.0, 0.0, 0.0
         if method == "cnt":
             XC, attr_in_box, far_attr, total_attr = get_cnt_XQ_analytics_fast(
                 pos_grad, neg_grad, box_vertices, dataset_name, sign, ignore_thresh, box_loc, vicinity)
@@ -321,9 +332,15 @@ class AttributionGenerator:
         """
         # Get the predictions, compute box vertices, and generate targets
         self.batch_dict = batch_dict
+        load_data_to_gpu(self.batch_dict)
+        dummy_tensor = 0
+        if self.double_model:
+            with torch.no_grad():
+                # run the model once to populate the batch dict
+                anchor_scores = self.full_model(dummy_tensor, self.batch_dict)
         self.get_preds()
         self.compute_pred_box_vertices()
-        targets, cared_vertices = self.generate_targets()
+        targets, cared_vertices, cared_locs = self.generate_targets()
 
         # Compute gradients, XC, and pap
         total_XC, total_far_attr, total_pap = 0, 0, 0
@@ -332,22 +349,29 @@ class AttributionGenerator:
             class_name = self.class_name_list[targets[i][1]]
             vicinity = self.vicinity_dict[class_name]
             XC, far_attr = self.compute_xc_single(
-                pos_grad, neg_grad, self.pred_vertices[i], self.dataset_name, sign, self.ignore_thresh,
-                self.pred_loc[i], vicinity, method)
+                pos_grad, neg_grad, cared_vertices[i], self.dataset_name, sign, self.ignore_thresh,
+                cared_locs[i], vicinity, method)
             pap = self.get_PAP_single(pos_grad, neg_grad, sign)
             total_XC += XC
             total_far_attr += far_attr
             total_pap += pap
+            # debug message
+            print("\nPred_box id: {} XC: {}".format(targets[i][0], XC))
 
         return total_XC, total_far_attr, total_pap
 
-    def compute_PAP(self, batch_dict, method="cnt", sign="positive"):
+    def compute_PAP(self, batch_dict, sign="positive"):
         """
         User shall call the function if they wish to not compute XC, just PAP only
         :return:
         """
         # Get the predictions, compute box vertices, and generate targets
         self.batch_dict = batch_dict
+        dummy_tensor = 0
+        if self.double_model:
+            with torch.no_grad():
+                # run the model once to populate the batch dict
+                anchor_scores = self.full_model(dummy_tensor, self.batch_dict)
         self.get_preds()
         self.compute_pred_box_vertices()
         targets, cared_vertices = self.generate_targets()

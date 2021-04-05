@@ -177,8 +177,8 @@ def get_sum_XQ_analytics_fast(pos_grad, neg_grad, box_vertices, dataset_name, si
     masked_attr = grad[box_mask == 1]
     attr_in_box = np.sum(masked_attr[masked_attr >= ignore_thresh])
     if total_attr == 0:
-        # print("No attributions present!")
-        return 0
+        print("No attributions present!")
+        return 0, 0, 0, 0
     XQ = attr_in_box / total_attr
     dist_attr_sum = total_attr - attr_in_box
     # print("XQ: {}".format(XQ))
@@ -285,8 +285,8 @@ def get_cnt_XQ_analytics_fast(pos_grad, neg_grad, box_vertices, dataset_name, si
     masked_attr = grad[box_mask == 1]
     attr_in_box = np.count_nonzero(masked_attr[masked_attr >= ignore_thresh])
     if total_attr == 0:
-        # print("No attributions present!")
-        return 0
+        print("No attributions present!")
+        return 0, 0, 0, 0
     XQ = attr_in_box / total_attr
     distant_attr_cnt = total_attr - attr_in_box
     # print("XQ: {}".format(XQ))
