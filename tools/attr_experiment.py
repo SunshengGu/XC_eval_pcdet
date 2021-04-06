@@ -30,13 +30,13 @@ def main():
     # model checkpoint, change to your checkpoint, make sure it's a well-trained model
     ckpt = '../output/kitti_models/pointpillar/default/ckpt/pointpillar_7728.pth'
 
-    num_batchs = 13
+    num_batchs = 6
 
     '''________________________User Input End________________________'''
     # data set prepration, use the validation set (called 'test_set' here)
     # arguments for dataloader
-    batch_size = 1
-    workers = 4
+    batch_size = 2
+    workers = 2
     dist_test = False
     cfg_from_yaml_file(explained_cfg_file, cfg)
     test_set, test_loader, sampler = build_dataloader(

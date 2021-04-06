@@ -1,20 +1,52 @@
+import os
+import copy
+import torch
+from tensorboardX import SummaryWriter
+import time
+import glob
 import re
+import h5py
 import datetime
+import argparse
+import csv
+import math
 from pathlib import Path
+import torch.distributed as dist
+from pcdet.datasets import build_dataloader
+from pcdet.models import build_network
+from pcdet.utils import common_utils
+from pcdet.config import cfg, cfg_from_list, cfg_from_yaml_file, log_config_to_file
+from pcdet.datasets.kitti.kitti_bev_visualizer import KITTI_BEV
+from pcdet.datasets.cadc.cadc_bev_visualizer import CADC_BEV
+from pcdet.utils import box_utils
+from eval_utils import eval_utils
+from XAI_utils.bbox_utils import *
+from XAI_utils.tp_fp import *
+from XAI_utils.XQ_utils import *
+from pcdet.models import load_data_to_gpu
+from pcdet.datasets.kitti.kitti_dataset import KittiDataset
+from pcdet.datasets.cadc.cadc_dataset import CadcDataset
+from pcdet.datasets.kitti.kitti_object_eval_python.eval import d3_box_overlap
 
 # XAI related imports
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 import numpy as np
-import torch
-from scipy.spatial.transform import Rotation as R
 
-from XAI_utils.XQ_utils import *
-from captum.attr import GuidedBackprop
-from captum.attr import GuidedGradCam
+import torch
+import torchvision
+import torchvision.transforms as transforms
+import torchvision.transforms.functional as TF
+
+from torchvision import models
+
 from captum.attr import IntegratedGradients
 from captum.attr import Saliency
-from pcdet.config import cfg, cfg_from_yaml_file
-from pcdet.models import build_network
-from pcdet.models import load_data_to_gpu
+from captum.attr import DeepLift
+from captum.attr import NoiseTunnel
+from captum.attr import visualization as viz
+
+from scipy.spatial.transform import Rotation as R
 
 
 class AttributionGenerator:
@@ -48,8 +80,9 @@ class AttributionGenerator:
         self.class_name_list = cfg.CLASS_NAMES
         self.double_model = double_model
 
-        cfg_from_yaml_file(full_model_cfg_file, full_cfg)
-        self.full_cfg = full_cfg
+        if self.double_model:
+            cfg_from_yaml_file(full_model_cfg_file, full_cfg)
+            self.full_cfg = full_cfg
 
         self.label_dict = None  # maps class name to label
         self.vicinity_dict = None  # Search vicinity for the generate_box_mask function
@@ -112,6 +145,7 @@ class AttributionGenerator:
         self.pred_loc = None
         self.selected_anchors = None
         self.explainer = None
+        self.batch_size = 1
         if xai_method == 'Saliency':
             self.explainer = Saliency(self.model)
         elif xai_method == 'IntegratedGradients':
@@ -186,13 +220,7 @@ class AttributionGenerator:
         poly = np.array([[-1 * y1, x1], [-1 * y2, x2], [-1 * y4, x4], [-1 * y3, x3]])
         return poly
 
-    def get_preds(self):
-        # # Debug message
-        # print("keys in self.batch_dict:")
-        # for key in self.batch_dict:
-        #     print('key: {}'.format(key))
-
-        pred_dicts = self.batch_dict['pred_dicts']
+    def get_preds_single_frame(self, pred_dicts):
         pred_boxes = pred_dicts[0]['pred_boxes'].cpu().numpy()
         for i in range(len(pred_boxes)):
             pred_boxes[i][6] += np.pi / 2
@@ -200,6 +228,31 @@ class AttributionGenerator:
         self.pred_labels = pred_dicts[0]['pred_labels'].cpu().numpy() - 1
         self.pred_scores = pred_dicts[0]['pred_scores'].cpu().numpy()
         self.selected_anchors = self.batch_dict['anchor_selections'][0]
+
+    def get_preds(self):
+        # # Debug message
+        # print("keys in self.batch_dict:")
+        # for key in self.batch_dict:
+        #     print('key: {}'.format(key))
+
+        pred_dicts = self.batch_dict['pred_dicts']
+        self.batch_size = self.batch_dict['batch_size']
+        if self.batch_size == 1:
+            self.get_preds_single_frame(pred_dicts)
+        else:
+            pred_boxes, pred_labels, pred_scores, selected_anchors = [], [], [], []
+            for i in range(self.batch_size):
+                frame_pred_boxes = pred_dicts[i]['pred_boxes'].cpu().numpy()
+                for j in range(len(frame_pred_boxes)):
+                    frame_pred_boxes[j][6] += np.pi / 2
+                pred_boxes.append(frame_pred_boxes)
+                pred_labels.append(pred_dicts[i]['pred_labels'].cpu().numpy() - 1)
+                pred_scores.append(pred_dicts[i]['pred_scores'].cpu().numpy())
+                selected_anchors.append(self.batch_dict['anchor_selections'][i])
+            self.pred_boxes = pred_boxes
+            self.pred_labels = pred_labels
+            self.pred_scores = pred_scores
+            self.selected_anchors = selected_anchors
 
     def reset(self):
         """
@@ -222,17 +275,17 @@ class AttributionGenerator:
         batch_grad = self.explainer.attribute(PseudoImage2D, baselines=PseudoImage2D * 0, target=target,
                                               additional_forward_args=self.batch_dict, n_steps=self.ig_steps,
                                               internal_batch_size=self.batch_dict['batch_size'])
-        grad = np.transpose(batch_grad[0].squeeze().cpu().detach().numpy(), (1, 2, 0))
-        pos_grad = np.sum((grad > 0) * grad, axis=2)
-        neg_grad = np.sum(-1 * (grad < 0) * grad, axis=2)
+        if self.batch_size == 1:
+            grad = np.transpose(batch_grad[0].squeeze().cpu().detach().numpy(), (1, 2, 0))
+            pos_grad = np.sum((grad > 0) * grad, axis=2)
+            neg_grad = np.sum(-1 * (grad < 0) * grad, axis=2)
+        else:
+            grads = [np.transpose(gradients.squeeze().cpu().detach().numpy(), (1, 2, 0)) for gradients in batch_grad]
+            pos_grad = [np.sum((grad > 0) * grad, axis=2) for grad in grads]
+            neg_grad = [np.sum(-1 * (grad < 0) * grad, axis=2) for grad in grads]
         return pos_grad, neg_grad
 
-    def compute_pred_box_vertices(self):
-        """
-        Given the predicted boxes in [x, y, z, w, l, h, yaw] format, return the expanded predicted boxes in terms of
-        box vertices: np.array([[x1, y1], [x2,y2], ...[x4,y4]])
-        """
-
+    def compute_pred_box_vertices_single_frame(self):
         # Generate the vertices
         expanded_preds = []
         pred_loc = []
@@ -258,13 +311,45 @@ class AttributionGenerator:
         self.pred_vertices = expanded_preds
         self.pred_loc = pred_loc
 
-    def generate_targets(self):
+    def compute_pred_box_vertices(self):
         """
-        Generates targets for explanation given the batch
-        Note that the class label target for each box corresponds to the top confidence predicted class
-        :return:
+        Given the predicted boxes in [x, y, z, w, l, h, yaw] format, return the expanded predicted boxes in terms of
+        box vertices: np.array([[x1, y1], [x2,y2], ...[x4,y4]])
         """
-        # Get pred labels
+        if self.batch_size == 1:
+            self.compute_pred_box_vertices_single_frame()
+        else:
+            batch_expanded_preds = []
+            batch_pred_loc = []
+            # Generate the vertices
+            for i in range(self.batch_size):
+                expanded_preds = []
+                pred_loc = []
+                for cuboid in self.pred_boxes[i]:
+                    x, y, z, w, l, h, yaw = cuboid
+                    w_big = w + 2 * self.margin
+                    l_big = l + 2 * self.margin
+                    expanded_preds.append(self.cuboid_to_bev(x, y, z, w_big, l_big, h, yaw))
+                    pred_loc.append(np.array([x, y]))
+                # Limiting the viewing range
+                s1, s2, f1, f2 = 0, 0, 0, 0
+                if self.dataset_name == 'KittiDataset':
+                    s1, s2, f1, f2 = 39.68, 39.68, 0.0, 69.12
+                elif self.dataset_name == 'CadcDataset':
+                    s1, s2, f1, f2 = 50.0, 50.0, 50.0, 50.0
+                else:
+                    raise NotImplementedError
+                side_range = [-s1, s2]
+                fwd_range = [-f1, f2]
+                offset = np.array([[-side_range[0], -fwd_range[0]]] * 4)
+                expanded_preds = [poly + offset for poly in expanded_preds]
+                batch_expanded_preds.append(expanded_preds)
+                batch_pred_loc.append(pred_loc)
+            self.pred_vertices = batch_expanded_preds
+            self.pred_loc = batch_pred_loc
+
+    def generate_targets_single_frame(self):
+        target_list = []
         cared_labels = None
         cared_box_vertices = None
         cared_loc = None
@@ -277,15 +362,54 @@ class AttributionGenerator:
             cared_box_vertices = self.pred_vertices[:self.num_boxes]
             cared_loc = self.pred_loc[:self.num_boxes]
         elif self.selection == "bottom":
-            cared_labels = self.pred_labels[-1*self.num_boxes:]
-            cared_box_vertices = self.pred_vertices[-1*self.num_boxes:]
-            cared_loc = self.pred_loc[-1*self.num_boxes:]
+            cared_labels = self.pred_labels[-1 * self.num_boxes:]
+            cared_box_vertices = self.pred_vertices[-1 * self.num_boxes:]
+            cared_loc = self.pred_loc[-1 * self.num_boxes:]
 
         # Generate targets
-        target_list = []
         for ind, label in enumerate(cared_labels):
             target_list.append((self.selected_anchors[ind], label))
         return target_list, cared_box_vertices, cared_loc
+
+    def generate_targets(self):
+        """
+        Generates targets for explanation given the batch
+        Note that the class label target for each box corresponds to the top confidence predicted class
+        :return:
+        """
+        # Get pred labels
+        batch_target_list = []
+        batch_cared_labels = []
+        batch_cared_box_vertices = []
+        batch_cared_loc = []
+        if self.batch_size == 1:
+            batch_target_list, batch_cared_box_vertices, batch_cared_loc = self.generate_targets_single_frame()
+        else:
+            target_list = []
+            cared_labels = None
+            cared_box_vertices = None
+            cared_loc = None
+            for i in range(self.batch_size):
+                if self.num_boxes >= len(self.pred_labels[i]):
+                    cared_labels = self.pred_labels[i]
+                    cared_box_vertices = self.pred_vertices[i]
+                    cared_loc = self.pred_loc[i]
+                elif self.selection == "top":
+                    cared_labels = self.pred_labels[i][:self.num_boxes]
+                    cared_box_vertices = self.pred_vertices[i][:self.num_boxes]
+                    cared_loc = self.pred_loc[i][:self.num_boxes]
+                elif self.selection == "bottom":
+                    cared_labels = self.pred_labels[i][-1*self.num_boxes:]
+                    cared_box_vertices = self.pred_vertices[i][-1*self.num_boxes:]
+                    cared_loc = self.pred_loc[i][-1*self.num_boxes:]
+
+                # Generate targets
+                for ind, label in enumerate(cared_labels):
+                    target_list.append((self.selected_anchors[ind], label))
+                batch_target_list.append(target_list)
+                batch_cared_box_vertices.append(cared_box_vertices)
+                batch_cared_loc.append(cared_loc)
+        return batch_target_list, batch_cared_box_vertices, batch_cared_loc
 
     def compute_xc_single(self, pos_grad, neg_grad, box_vertices, dataset_name, sign, ignore_thresh, box_loc,
                           vicinity, method):
@@ -302,12 +426,27 @@ class AttributionGenerator:
         :return: XC for a single box
         """
         XC, attr_in_box, far_attr, total_attr = 0.0, 0.0, 0.0, 0.0
-        if method == "cnt":
-            XC, attr_in_box, far_attr, total_attr = get_cnt_XQ_analytics_fast(
-                pos_grad, neg_grad, box_vertices, dataset_name, sign, ignore_thresh, box_loc, vicinity)
-        elif method == "sum":
-            XC, attr_in_box, far_attr, total_attr = get_sum_XQ_analytics_fast(
-                pos_grad, neg_grad, box_vertices, dataset_name, sign, ignore_thresh, box_loc, vicinity)
+        if self.batch_size == 1:
+            if method == "cnt":
+                XC, attr_in_box, far_attr, total_attr = get_cnt_XQ_analytics_fast(
+                    pos_grad, neg_grad, box_vertices, dataset_name, sign, ignore_thresh, box_loc, vicinity)
+            elif method == "sum":
+                XC, attr_in_box, far_attr, total_attr = get_sum_XQ_analytics_fast(
+                    pos_grad, neg_grad, box_vertices, dataset_name, sign, ignore_thresh, box_loc, vicinity)
+        else:
+            for i in range(self.batch_size):
+                if method == "cnt":
+                    XC_, attr_in_box_, far_attr_, total_attr_ = get_cnt_XQ_analytics_fast(
+                        pos_grad[i], neg_grad[i], box_vertices[i], dataset_name, sign, ignore_thresh, box_loc[i],
+                        vicinity[i])
+                elif method == "sum":
+                    XC_, attr_in_box_, far_attr_, total_attr_ = get_sum_XQ_analytics_fast(
+                        pos_grad[i], neg_grad[i], box_vertices[i], dataset_name, sign, ignore_thresh, box_loc[i],
+                        vicinity[i])
+                XC += XC_
+                far_attr += far_attr_
+                # debug message
+                print("frame id in batch: {} XC: {}".format(i, XC_))
         return XC, far_attr
 
     def get_PAP_single(self, pos_grad, neg_grad, sign):
@@ -344,20 +483,48 @@ class AttributionGenerator:
 
         # Compute gradients, XC, and pap
         total_XC, total_far_attr, total_pap = 0, 0, 0
-        for i in range(len(targets)):
-            pos_grad, neg_grad = self.get_attr(targets[i])
-            class_name = self.class_name_list[targets[i][1]]
-            vicinity = self.vicinity_dict[class_name]
-            XC, far_attr = self.compute_xc_single(
-                pos_grad, neg_grad, cared_vertices[i], self.dataset_name, sign, self.ignore_thresh,
-                cared_locs[i], vicinity, method)
-            pap = self.get_PAP_single(pos_grad, neg_grad, sign)
-            total_XC += XC
-            total_far_attr += far_attr
-            total_pap += pap
-            # debug message
-            print("\nPred_box id: {} XC: {}".format(targets[i][0], XC))
-
+        if self.batch_size == 1:
+            for i in range(len(targets)):
+                pos_grad, neg_grad = self.get_attr(targets[i])
+                class_name = self.class_name_list[targets[i][1]]
+                vicinity = self.vicinity_dict[class_name]
+                XC, far_attr = self.compute_xc_single(
+                    pos_grad, neg_grad, cared_vertices[i], self.dataset_name, sign, self.ignore_thresh,
+                    cared_locs[i], vicinity, method)
+                pap = self.get_PAP_single(pos_grad, neg_grad, sign)
+                total_XC += XC
+                total_far_attr += far_attr
+                total_pap += pap
+                # debug message
+                print("\nPred_box id: {} XC: {}".format(targets[i][0], XC))
+        else:
+            min_num_preds = 10000
+            for i in range(self.batch_size):
+                # In case some frames doesn't have enough predictions to match number of predictions in other frames
+                # of the same batch
+                min_num_preds = min(len(targets[i]), min_num_preds)
+            for i in range(min_num_preds):
+                new_targets = targets[:, i]  # The i-th target for each frame in the batch
+                print("type(new_targets): {}".format(type(new_targets)))  # Should be List
+                pos_grad, neg_grad = self.get_attr(new_targets)
+                class_names, vicinities = [], []
+                for target in new_targets:
+                    cls_name = self.class_name_list[target[1]]
+                    vici = self.vicinity_dict[cls_name]
+                    class_names.append(cls_name)
+                    vicinities.append(vici)
+                print("pred_box_id: {}".format(i))
+                XC, far_attr = self.compute_xc_single(
+                    pos_grad, neg_grad, cared_vertices[:, i], self.dataset_name, sign, self.ignore_thresh,
+                    cared_locs[:, i], vicinities, method)
+                pap = self.get_PAP_single(pos_grad, neg_grad, sign)
+                total_XC += XC
+                total_far_attr += far_attr
+                total_pap += pap
+            # normalizing by the batch size
+            total_XC = total_XC / self.batch_size
+            total_far_attr = total_far_attr / self.batch_size
+            total_pap = total_pap / self.batch_size
         return total_XC, total_far_attr, total_pap
 
     def compute_PAP(self, batch_dict, sign="positive"):
