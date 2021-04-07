@@ -48,7 +48,7 @@ from captum.attr import visualization as viz
 
 from scipy.spatial.transform import Rotation as R
 
-class AttributionGenerator:
+class AttributionGeneratorTrain:
     def __init__(self, model_ckpt, full_model_cfg_file, model_cfg_file, data_set, xai_method, output_path, ig_steps=24,
                  margin=0.2, num_boxes=3, selection='top', ignore_thresh=0.1, double_model=True, debug=False):
         """
@@ -432,7 +432,7 @@ class AttributionGenerator:
         :param method: either "cnt" or "sum"
         :return: XC for a single box
         """
-        XC, attr_in_box, far_attr, total_attr = None, None, None, None
+        XC, attr_in_box, far_attr, total_attr = 0.0, 0.0, 0.0, 0.0
         if self.batch_size == 1:
             if method == "cnt":
                 XC, attr_in_box, far_attr, total_attr = get_cnt_XQ_analytics_fast(
@@ -441,7 +441,6 @@ class AttributionGenerator:
                 XC, attr_in_box, far_attr, total_attr = get_sum_XQ_analytics_fast(
                     pos_grad, neg_grad, box_vertices, dataset_name, sign, ignore_thresh, box_loc, vicinity)
         else:
-            XC_lst, far_attr_lst = [], []
             for i in range(self.batch_size):
                 if method == "cnt":
                     XC_, attr_in_box_, far_attr_, total_attr_ = get_cnt_XQ_analytics_fast(
@@ -451,13 +450,11 @@ class AttributionGenerator:
                     XC_, attr_in_box_, far_attr_, total_attr_ = get_sum_XQ_analytics_fast(
                         pos_grad[i], neg_grad[i], box_vertices[i], dataset_name, sign, ignore_thresh, box_loc[i],
                         vicinity[i])
-                XC_lst.append(XC_)
-                far_attr_lst.append(far_attr_)
+                XC += XC_
+                far_attr += far_attr_
                 # debug message
                 if self.debug:
                     print("frame id in batch: {} XC: {}".format(i, XC_))
-            XC = np.asarray(XC_lst)
-            far_attr = np.asarray(far_attr_lst)
         return XC, far_attr
 
     def get_PAP_single(self, pos_grad, neg_grad, sign):
@@ -506,8 +503,7 @@ class AttributionGenerator:
             print("len(targets): {} len(cared_vertices): {} len(cared_locs): {}".format(
                 len(targets), len(cared_vertices), len(cared_locs)))
         # Compute gradients, XC, and pap
-        total_XC_lst, total_far_attr_lst, total_pap_lst = [], [], []
-        total_XC, total_far_attr, total_pap = None, None, None
+        total_XC, total_far_attr, total_pap = 0, 0, 0
         if self.batch_size == 1:
             for i in range(len(targets)):
                 pos_grad, neg_grad = self.get_attr(targets[i])
@@ -517,9 +513,9 @@ class AttributionGenerator:
                     pos_grad, neg_grad, cared_vertices[i], self.dataset_name, sign, self.ignore_thresh,
                     cared_locs[i], vicinity, method)
                 pap = self.get_PAP_single(pos_grad, neg_grad, sign)
-                total_XC_lst.append(XC)
-                total_far_attr_lst.append(far_attr)
-                total_pap_lst.append(pap)
+                total_XC += XC
+                total_far_attr += far_attr
+                total_pap += pap
                 # debug message
                 if self.debug:
                     print("\nPred_box id: {} XC: {}".format(targets[i][0], XC))
@@ -551,16 +547,13 @@ class AttributionGenerator:
                     pos_grad, neg_grad, new_cared_vertices, self.dataset_name, sign, self.ignore_thresh,
                     new_cared_locs, vicinities, method)
                 pap = self.get_PAP_single(pos_grad, neg_grad, sign)
-                total_XC_lst.append(XC)
-                total_far_attr_lst.append(far_attr)
-                total_pap_lst.append(pap)
-        total_XC = np.asarray(total_XC_lst)
-        total_far_attr = np.asarray(total_far_attr_lst)
-        total_pap = np.asarray(total_pap_lst)
-        if self.batch_size > 1:
-            total_XC = np.transpose(total_XC)
-            total_far_attr = np.transpose(total_far_attr)
-            total_pap = np.transpose(total_pap)
+                total_XC += XC
+                total_far_attr += far_attr
+                total_pap += pap
+            # normalizing by the batch size
+            total_XC = total_XC / self.batch_size
+            total_far_attr = total_far_attr / self.batch_size
+            total_pap = total_pap / self.batch_size
         return total_XC, total_far_attr, total_pap
 
     def compute_PAP(self, batch_dict, sign="positive"):

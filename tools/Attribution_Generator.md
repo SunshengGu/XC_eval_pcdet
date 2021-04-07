@@ -72,9 +72,14 @@ to generate explanations for, whether to choose the most or least confident pred
 to explain and many more settings. See `attr_generator.py` for details.
 
 Besides the constructor, the only 3 methods you should call are:
-- `compute_xc`: Computes XC, far_attr, and PAP. Since you can get PAP almost for free, 
+- `compute_xc`: Computes `XC`, `far_attr`, and `PAP`. Since you can get PAP almost for free, 
   so why not? Also, far_attr is already obtained in the process of computing XC, may
   as well get it too.
+  
+  When batch_size = 1, `XC` is a numpy array of shape (#_of_boxes_explained_per_frame).
+  When batch_size > 1, `XC` is a numpy array of shape (batch_size, #_of_boxes_explained_per_frame)
+  
+  The same can be said for `far_attr`, and `PAP`.
 - `compute_pap` : Computes PAP only, in case XC computation gets prohibitively slow.
 - `reset`: Resets batch-wise parameters after processing a batch.
 
