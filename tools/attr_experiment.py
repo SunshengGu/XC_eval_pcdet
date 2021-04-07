@@ -30,13 +30,13 @@ def main():
     # model checkpoint, change to your checkpoint, make sure it's a well-trained model
     ckpt = '../output/kitti_models/pointpillar/default/ckpt/pointpillar_7728.pth'
 
-    num_batchs = 13
+    num_batchs = 6
 
     '''________________________User Input End________________________'''
     # data set prepration, use the validation set (called 'test_set' here)
     # arguments for dataloader
-    batch_size = 1
-    workers = 4
+    batch_size = 2
+    workers = 2
     dist_test = False
     cfg_from_yaml_file(explained_cfg_file, cfg)
     test_set, test_loader, sampler = build_dataloader(
@@ -49,13 +49,14 @@ def main():
     myXCCalculator = AttributionGenerator(model_ckpt=ckpt, full_model_cfg_file=cfg_file,
                                           model_cfg_file=explained_cfg_file,
                                           data_set=test_set, xai_method=method, output_path="unspecified",
-                                          ignore_thresh=0.0)
+                                          ignore_thresh=0.0, debug=True)
 
     for batch_num, batch_dictionary in enumerate(test_loader):
         if batch_num == num_batchs:
             break
         print("\nAnalyzing the {}th batch".format(batch_num))
         batch_XC, batch_far_attr, batch_total_pap = myXCCalculator.compute_xc(batch_dictionary, method="sum")
+        print("\nXC values for the batch:\n {}".format(batch_XC))
         myXCCalculator.reset()
 
 
