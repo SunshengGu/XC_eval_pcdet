@@ -17,7 +17,7 @@ from pcdet.models import build_network, model_fn_decorator
 from pcdet.utils import common_utils
 from train_utils.optimization import build_optimizer, build_scheduler
 from train_utils.train_utils_new_loss import train_model
-from XAI_utils.attr_util import attr_func
+from attr_util import attr_func
 
 # from captum.attr import IntegratedGradients
 # from captum.attr import Saliency
@@ -73,7 +73,7 @@ def parse_config():
 
 def main():
     args, cfg, x_cfg = parse_config()
-    xai_method = 'IG'
+    xai_method = 'IntegratedGradients'
     attr_shown = 'positive'  # show positive or negative attributions
     # IG specific parameters
     mult_by_inputs = True  # whether to show attributions only at where some input exists

@@ -49,17 +49,16 @@ from captum.attr import visualization as viz
 from scipy.spatial.transform import Rotation as R
 
 class AttributionGeneratorTrain:
-    def __init__(self, model_ckpt, full_model_cfg_file, model_cfg_file, data_set, xai_method, output_path, ig_steps=24,
-                 margin=0.2, num_boxes=3, selection='top', ignore_thresh=0.1, double_model=True, debug=False):
+    def __init__(self, model, dataset_name, class_name_list, xai_method, output_path, ig_steps=24,
+                 margin=0.2, num_boxes=3, selection='top', ignore_thresh=0.1, debug=False):
         """
         You should have the data loader ready and the specific batch dictionary available before computing any
         attributions.
         Also, you need to have the folder XAI_utils in the `tools` folder as well for this object to work
 
-        :param model_ckpt: directory for the model checkpoint
-        :param full_model_cfg_file: directory for the full model config file
-        :param model_cfg_file: directory for the model config file (model to be explained)
-        :param data_set:
+        :param model: the model for which we are generating explanations for
+        :param dataset_name:
+        :param class_name_list: the list of cared classes of objects
         :param xai_method: a string indicating which explanation technique to use
         :param output_path: directory for storing relevant outputs
         :param ig_steps: number of intermediate steps to use for IG
@@ -68,24 +67,13 @@ class AttributionGeneratorTrain:
         :param num_boxes: number of predicted boxes for which we are generating explanations for
         :param selection: whether to compute XC for the most confident ('top')  or least confident ('bottom') boxes
         :param ignore_thresh: used in XC calculation to filter out small attributions
-        :param double_model: indicates whether a secondary model (in the case of PointPillars, that would be the full
-         model) is required as well
         :param debug: whether to show debug messages
         """
 
         # Load model configurations
-        full_cfg = copy.deepcopy(cfg)
-        cfg_from_yaml_file(model_cfg_file, cfg)
-        cfg.TAG = Path(model_cfg_file).stem
-        cfg.EXP_GROUP_PATH = '/'.join(model_cfg_file.split('/')[1:-1])  # remove 'cfgs' and 'xxxx.yaml'
-        self.cfg = cfg
-        self.dataset_name = cfg.DATA_CONFIG.DATASET
-        self.class_name_list = cfg.CLASS_NAMES
-        self.double_model = double_model
-
-        if self.double_model:
-            cfg_from_yaml_file(full_model_cfg_file, full_cfg)
-            self.full_cfg = full_cfg
+        self.model = model
+        self.dataset_name = dataset_name
+        self.class_name_list = class_name_list
 
         self.label_dict = None  # maps class name to label
         self.vicinity_dict = None  # Search vicinity for the generate_box_mask function
@@ -97,41 +85,6 @@ class AttributionGeneratorTrain:
             self.vicinity_dict = {"Car": 13, "Pedestrian": 3, "Truck": 19}
         else:
             raise NotImplementedError
-
-        # Create output directories, not very useful, just to be compatible with the load_params_from_file
-        # method defined in pcdet/models/detectors/detector3d_template.py, which requires a logger
-        output_dir = cfg.ROOT_DIR / 'output' / cfg.EXP_GROUP_PATH / cfg.TAG / 'default'
-        output_dir.mkdir(parents=True, exist_ok=True)
-        eval_output_dir = output_dir / 'eval'
-        eval_all = False
-        eval_tag = 'default'
-
-        if not eval_all:
-            num_list = re.findall(r'\d+', model_ckpt) if model_ckpt is not None else []
-            epoch_id = num_list[-1] if num_list.__len__() > 0 else 'no_number'
-            eval_output_dir = eval_output_dir / ('epoch_%s' % epoch_id) / cfg.DATA_CONFIG.DATA_SPLIT['test']
-        else:
-            eval_output_dir = eval_output_dir / 'eval_all_default'
-
-        if eval_tag is not None:
-            eval_output_dir = eval_output_dir / eval_tag
-
-        eval_output_dir.mkdir(parents=True, exist_ok=True)
-
-        # Create logger, not very useful, just to be compatible with PCDet's structures
-        log_file = eval_output_dir / ('log_eval_%s.txt' % datetime.datetime.now().strftime('%Y%m%d-%H%M%S'))
-        logger = common_utils.create_logger(log_file, rank=cfg.LOCAL_RANK)
-
-        # Build the model
-        self.model = build_network(model_cfg=cfg.MODEL, num_class=len(cfg.CLASS_NAMES), dataset=data_set)
-        self.model.load_params_from_file(filename=model_ckpt, logger=logger, to_cpu=False)
-        self.model.cuda()
-        self.model.eval()
-        if self.double_model:
-            self.full_model = build_network(model_cfg=full_cfg.MODEL, num_class=len(full_cfg.CLASS_NAMES), dataset=data_set)
-            self.full_model.load_params_from_file(filename=model_ckpt, logger=logger, to_cpu=False)
-            self.full_model.cuda()
-            self.full_model.eval()
 
         # Other initialization stuff
         self.debug = debug
@@ -442,6 +395,7 @@ class AttributionGeneratorTrain:
                     pos_grad, neg_grad, box_vertices, dataset_name, sign, ignore_thresh, box_loc, vicinity)
         else:
             for i in range(self.batch_size):
+                XC_, far_attr_ = 0.0, 0.0
                 if method == "cnt":
                     XC_, attr_in_box_, far_attr_, total_attr_ = get_cnt_XQ_analytics_fast(
                         pos_grad[i], neg_grad[i], box_vertices[i], dataset_name, sign, ignore_thresh, box_loc[i],
@@ -478,12 +432,7 @@ class AttributionGeneratorTrain:
     def xc_preprocess(self, batch_dict):
         # Get the predictions, compute box vertices, and generate targets
         self.batch_dict = batch_dict
-        load_data_to_gpu(self.batch_dict)
-        dummy_tensor = 0
-        if self.double_model:
-            with torch.no_grad():
-                # run the model once to populate the batch dict
-                anchor_scores = self.full_model(dummy_tensor, self.batch_dict)
+        # load_data_to_gpu(self.batch_dict)
         self.get_preds()
         self.compute_pred_box_vertices()
         return self.generate_targets()
