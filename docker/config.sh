@@ -12,7 +12,7 @@ PCDET_ROOT=/root/pcdet
 NUSC_ROOT=/root/nusc
 CADC_ROOT=/root/cadc
 KITTI_ROOT=/root/kitti
-CAPTUM_ROOT=/root/captum
+#CAPTUM_ROOT=/root/captum
 LOGDIR=/root/logdir
 
 # Workspace structure on host machine
@@ -21,5 +21,5 @@ HOST_PCDET_ROOT=/media/sg/02f4ed99-ea7d-47a9-9aed-3606f0fd7fda/tadenoud/Document
 HOST_NUSC_ROOT=/media/sg/02f4ed99-ea7d-47a9-9aed-3606f0fd7fda/tadenoud/Documents/WISEOpenLidarPerceptron/pcdet/datasets/nuscenes
 HOST_CADC_ROOT=/media/sg/02f4ed99-ea7d-47a9-9aed-3606f0fd7fda/tadenoud/Documents/WISEOpenLidarPerceptron/data/cadc
 HOST_KITTI_ROOT=/media/sg/02f4ed99-ea7d-47a9-9aed-3606f0fd7fda/tadenoud/Documents/WISEOpenLidarPerceptron/data/kitti
-HOST_CAPTUM_ROOT=/media/sg/02f4ed99-ea7d-47a9-9aed-3606f0fd7fda/tadenoud/Documents/captum
+#HOST_CAPTUM_ROOT=/media/sg/02f4ed99-ea7d-47a9-9aed-3606f0fd7fda/tadenoud/Documents/captum
 HOST_LOGDIR=/media/sg/02f4ed99-ea7d-47a9-9aed-3606f0fd7fda/tadenoud/Documents/WISEOpenLidarPerceptron/output

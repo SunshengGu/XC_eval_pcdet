@@ -199,12 +199,12 @@ class AttributionGeneratorTrain:
         else:
             pred_boxes, pred_labels, pred_scores, selected_anchors = [], [], [], []
             for i in range(self.batch_size):
-                frame_pred_boxes = pred_dicts[i]['pred_boxes'].cpu().numpy()
+                frame_pred_boxes = pred_dicts[i]['pred_boxes'].detach().cpu().numpy()
                 for j in range(len(frame_pred_boxes)):
                     frame_pred_boxes[j][6] += np.pi / 2
                 pred_boxes.append(frame_pred_boxes)
-                pred_labels.append(pred_dicts[i]['pred_labels'].cpu().numpy() - 1)
-                pred_scores.append(pred_dicts[i]['pred_scores'].cpu().numpy())
+                pred_labels.append(pred_dicts[i]['pred_labels'].detach().cpu().numpy() - 1)
+                pred_scores.append(pred_dicts[i]['pred_scores'].detach().cpu().numpy())
                 selected_anchors.append(self.batch_dict['anchor_selections'][i])
             self.pred_boxes = pred_boxes
             self.pred_labels = pred_labels

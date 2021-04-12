@@ -474,6 +474,157 @@ class Detector3DTemplate(nn.Module):
         # print('\n finishing the post_processing() function')
         return boxes_with_cls_scores
 
+    def post_processing_v2(self, batch_dict, box_limit=30):
+        """
+        Args:
+            batch_dict:
+                batch_size:
+                batch_cls_preds: (B, num_boxes, num_classes | 1) or (N1+N2+..., num_classes | 1)
+                batch_box_preds: (B, num_boxes, 7+C) or (N1+N2+..., 7+C)
+                cls_preds_normalized: indicate whether batch_cls_preds is normalized
+                batch_index: optional (N1+N2+...)
+                roi_labels: (B, num_rois)  1 .. num_classes
+        Returns:
+        :param box_limit:
+        :param batch_dict:
+        :param tensor_values:
+
+        """
+        # print('\n starting the post_processing() function')
+        # tensor_values is just for compatibility with Captum, only useful when in explain mode
+        post_process_cfg = self.model_cfg.POST_PROCESSING
+        batch_size = batch_dict['batch_size']
+        recall_dict = {}
+        pred_dicts = []
+        boxes_with_cls_scores = []
+        # all_anchor_boxes = []
+        # boxes_params = []
+        anchor_selections = []
+        batch_dict['box_count'] = {}  # store the number of boxes for each image in the sample
+        batch_dict['sigmoid_anchor_scores'] = []
+        output_anchor = post_process_cfg.OUTPUT_ANCHOR_BOXES  # indicates if we output anchor boxes
+        anchor_scores = []  # store class scores for individual anchor boxes
+        anchor_boxes = []
+        anchor_labels = []
+        # max_box_ind = 0 # index of the input in the batch with most number of boxes
+        max_num_boxes = box_limit
+        for index in range(batch_size):
+            # the 'None' here just means return None if key not found
+            if batch_dict.get('batch_index', None) is not None:
+                # print('\n batch_dict has the \'bactch_index\' entry!')
+                # print('\n shape of batch_dict[\'batch_cls_preds\']' + str(batch_dict['batch_cls_preds'].shape))
+                assert batch_dict['batch_cls_preds'].shape.__len__() == 2
+                batch_mask = (batch_dict['batch_index'] == index)
+            else:
+                # print('\n batch_dict does NOT have the \'bactch_index\' entry!')
+                # print('\n shape of batch_dict[\'batch_cls_preds\']' + str(batch_dict['batch_cls_preds'].shape))
+                assert batch_dict['batch_cls_preds'].shape.__len__() == 3
+                batch_mask = index
+
+            # inside the for loop, we only care about one particular sample, not the entire mini-batch
+            box_preds = batch_dict['batch_box_preds'][batch_mask]
+            cls_preds = batch_dict['batch_cls_preds'][batch_mask]
+
+            src_cls_preds = cls_preds
+            src_box_preds = box_preds
+            # print("src_box_preds.shape: {}".format(src_box_preds.shape))
+
+            anchor_scores.append(src_cls_preds)
+            anchor_boxes.append(src_box_preds)
+            # print('src_box_preds.shape before nms: {}'.format(src_box_preds.shape))
+            # print('src_cls_preds.shape before nms: {}'.format(src_cls_preds.shape))
+            # the second dimension of cls_preds should be the same as the number of classes
+            assert cls_preds.shape[1] in [1, self.num_class]
+
+            if not batch_dict['cls_preds_normalized']:
+                cls_preds = torch.sigmoid(cls_preds)
+                batch_dict['sigmoid_anchor_scores'].append(torch.sigmoid(src_cls_preds))
+            else:
+                batch_dict['sigmoid_anchor_scores'].append(src_cls_preds)
+
+            if post_process_cfg.NMS_CONFIG.MULTI_CLASSES_NMS:
+                raise NotImplementedError
+            else:
+                # in python, -1 means the last dimension
+                # torch.max(input, dim, keepdim=False, out=None) returns a tuple:
+                # 1. the maximum values in the indicated dimension
+                # 2. the indices of the maximum values in the indicated dimension
+                # now, for each box, we have a class prediction
+                cls_preds, label_preds = torch.max(cls_preds, dim=-1)
+                # orig_label_preds = label_preds + 1
+                # orig_cls_preds = cls_preds
+                anchor_labels.append(label_preds)
+                label_preds = batch_dict['roi_labels'][index] if batch_dict.get('has_class_labels',
+                                                                                False) else label_preds + 1
+                if batch_dict.get('has_class_labels', False):
+                    print('\n no key named \'has_class_labels\' in batch_dict')
+                # print('\n shape of label_preds after: ' + str(label_preds.shape))
+
+                selected, selected_scores = model_nms_utils.class_agnostic_nms(
+                    box_scores=cls_preds, box_preds=box_preds,
+                    nms_config=post_process_cfg.NMS_CONFIG,
+                    score_thresh=post_process_cfg.SCORE_THRESH
+                )
+                anchor_selections.append(selected)
+
+                if post_process_cfg.OUTPUT_RAW_SCORE:  # no need to worry about this, false by default
+                    max_cls_preds, _ = torch.max(src_cls_preds, dim=-1)
+                    selected_scores = max_cls_preds[selected]
+
+                final_scores = selected_scores # this is the original code
+                final_labels = label_preds[selected]
+                final_boxes = box_preds[selected]
+
+                batch_dict['box_count'][index] = final_scores.shape[0]
+
+            recall_dict = self.generate_recall_record(
+                box_preds=final_boxes if 'rois' not in batch_dict else src_box_preds,
+                recall_dict=recall_dict, batch_index=index, data_dict=batch_dict,
+                thresh_list=post_process_cfg.RECALL_THRESH_LIST
+            )
+
+            record_dict = {
+                'pred_boxes': final_boxes,
+                'pred_scores': final_scores,
+                'pred_labels': final_labels
+            }
+            pred_dicts.append(record_dict)
+
+            # print('src_cls_pred[selected] data type: ' + str(type(src_cls_preds[selected])))
+            # print('src_cls_pred[selected] shape: ' + str(src_cls_preds[selected].shape))
+            boxes_with_cls_scores.append(src_cls_preds[selected])
+            # boxes_params.append(src_box_preds[selected])
+        batch_dict['pred_dicts'] = pred_dicts
+        batch_dict['recall_dict'] = recall_dict
+        batch_dict['anchor_selections'] = anchor_selections
+        # # note: torch.stack only works if every dimension except for dimension 0 matches
+        # boxes_with_cls_scores = torch.stack(boxes_with_cls_scores)
+
+        if output_anchor:
+            anchor_scores = torch.stack(anchor_scores)
+            batch_dict['anchor_boxes'] = anchor_boxes
+            batch_dict['anchor_labels'] = anchor_labels
+            return anchor_scores
+
+        # pad each output in the batch to match dimensions with the maximum length output
+        # then stack the individual outputs together to get a tensor as the batch outout
+        for i in range(len(boxes_with_cls_scores)):
+            if boxes_with_cls_scores[i].shape[0] > max_num_boxes:
+                # more than max_num_boxes boxes detected
+                boxes_with_cls_scores[i] = boxes_with_cls_scores[i][:max_num_boxes]
+            elif boxes_with_cls_scores[i].shape[0] < max_num_boxes:
+                # less than max_num_boxes boxes detected
+                padding_size = max_num_boxes - boxes_with_cls_scores[i].shape[0]
+                padding = torch.zeros(padding_size, 3)
+                padding = padding.float().cuda()  # load `padding` to GPU
+                boxes_with_cls_scores[i] = torch.cat((boxes_with_cls_scores[i], padding), 0)
+            else:
+                continue
+        boxes_with_cls_scores = torch.stack(boxes_with_cls_scores)
+        # boxes_params = torch.stack(boxes_params)
+        # print('\n finishing the post_processing() function')
+        return boxes_with_cls_scores
+
     @staticmethod
     def generate_recall_record(box_preds, recall_dict, batch_index, data_dict=None, thresh_list=None):
         if 'gt_boxes' not in data_dict:
