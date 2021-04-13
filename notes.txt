@@ -8,9 +8,15 @@ Use the server to train:
 - The `~` directory is `\home\<your_id>`, do everything there
 - Git clone the WISEOpenPCDet directory
 - In `docker\run.sh`, comment out the `--gpu=all`
-- When running `.\run.sh`, add `--gpus='"device=0"'` as extra argument
+- Then `.\run.sh --gpus='"device=0"'`
 - This is just for avoiding using too many gpus at once
 - To make sure the same batches are repeated in each epoch, `--fix_random_seed True` when training
+- Path to KITTI: `/home/c276huan/datasets/kitti`
+
+Viewing Tensorboard while ssh into a remote machine:
+- The mapping for `--logdir`
+- The mapping for remote vs. host port
+- In run.sh, the mapping is remote host to docker, or local host to docker?
 
 build_network:
 - In tools/test.py and tools/train.py, the model is built by build_network()
