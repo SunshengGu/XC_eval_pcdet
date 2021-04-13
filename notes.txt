@@ -1,3 +1,17 @@
+Use the server to train:
+- `sudo openconnect -v cn-vpn.uwaterloo.ca`
+- Enter "UW-Campus" for Group
+- Enter UW id and password
+- For the second password, just type "push" and then enter
+- In a new terminal, enter `ssh <your_account>`
+- Password `123qwe890`
+- The `~` directory is `\home\<your_id>`, do everything there
+- Git clone the WISEOpenPCDet directory
+- In `docker\run.sh`, comment out the `--gpu=all`
+- When running `.\run.sh`, add `--gpus='"device=0"'` as extra argument
+- This is just for avoiding using too many gpus at once
+- To make sure the same batches are repeated in each epoch, `--fix_random_seed True` when training
+
 build_network:
 - In tools/test.py and tools/train.py, the model is built by build_network()
 - This function is found in pcdet/models/__init__.py

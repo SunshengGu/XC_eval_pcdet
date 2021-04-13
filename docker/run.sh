@@ -3,7 +3,7 @@ source config.sh
 
 docker run \
     --name="pcdet-standalone.$(whoami).$RANDOM" \
-    --gpus=all \
+#    --gpus='"device=0"' \
     --rm \
     -it \
     -v "${HOST_PCDET_ROOT}":"${PCDET_ROOT}" \
