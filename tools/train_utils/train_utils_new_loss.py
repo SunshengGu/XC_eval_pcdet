@@ -37,8 +37,8 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
         model.train()
         optimizer.zero_grad()
 
-        # Loading parameters from the training model to the explained model
-        explained_model.load_state_dict(model.state_dict(), strict=False)
+        # # Loading parameters from the training model to the explained model
+        # explained_model.load_state_dict(model.state_dict(), strict=False)
 
         loss, tb_dict, disp_dict = model_func(model, batch)
         # print("\nin tools/train_utils/train_utils_new_loss.py, train_one_epoch, loss.shape {}".format(loss.shape)

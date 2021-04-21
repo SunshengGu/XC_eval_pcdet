@@ -10,7 +10,24 @@ class PointPillarXAI(Detector3DTemplate):
         # use batch_dict only when not in explanation mode
         for cur_module in self.module_list:
             tensor_values, batch_dict = cur_module(tensor_values, batch_dict)
-        return self.post_processing_xai(tensor_values, batch_dict)
+
+        if self.training:
+            loss, tb_dict, disp_dict = self.get_training_loss()
+
+            ret_dict = {
+                'loss': loss
+            }
+            self.post_processing_v2(batch_dict)
+            return ret_dict, tb_dict, disp_dict
+        else:
+            pred_dicts, recall_dicts = self.post_processing_tensor(tensor_values, batch_dict)
+            return pred_dicts, recall_dicts
+
+    def forward_model2D(self, tensor_values, batch_dict):
+        out_put, out_batch_dict = self.backbone_2d(tensor_values, batch_dict)
+        out_put, out_batch_dict = self.dense_head(out_put, out_batch_dict)
+        out_put = self.post_processing_xai(out_put, batch_dict)
+        return out_put
 
     def get_training_loss(self):
         disp_dict = {}

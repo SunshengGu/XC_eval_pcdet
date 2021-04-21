@@ -123,15 +123,20 @@ class AttributionGenerator:
         logger = common_utils.create_logger(log_file, rank=cfg.LOCAL_RANK)
 
         # Build the model
-        self.model = build_network(model_cfg=cfg.MODEL, num_class=len(cfg.CLASS_NAMES), dataset=data_set)
-        self.model.load_params_from_file(filename=model_ckpt, logger=logger, to_cpu=False)
-        self.model.cuda()
-        self.model.eval()
-        if self.double_model:
-            self.full_model = build_network(model_cfg=full_cfg.MODEL, num_class=len(full_cfg.CLASS_NAMES), dataset=data_set)
-            self.full_model.load_params_from_file(filename=model_ckpt, logger=logger, to_cpu=False)
-            self.full_model.cuda()
-            self.full_model.eval()
+        self.full_model = build_network(model_cfg=full_cfg.MODEL, num_class=len(full_cfg.CLASS_NAMES), dataset=data_set)
+        self.full_model.load_params_from_file(filename=model_ckpt, logger=logger, to_cpu=False)
+        self.full_model.cuda()
+        self.full_model.eval()
+        self.model = self.full_model.forward_model2D
+        # self.model = build_network(model_cfg=cfg.MODEL, num_class=len(cfg.CLASS_NAMES), dataset=data_set)
+        # self.model.load_params_from_file(filename=model_ckpt, logger=logger, to_cpu=False)
+        # self.model.cuda()
+        # self.model.eval()
+        # if self.double_model:
+        #     self.full_model = build_network(model_cfg=full_cfg.MODEL, num_class=len(full_cfg.CLASS_NAMES), dataset=data_set)
+        #     self.full_model.load_params_from_file(filename=model_ckpt, logger=logger, to_cpu=False)
+        #     self.full_model.cuda()
+        #     self.full_model.eval()
 
         # Other initialization stuff
         self.debug = debug
