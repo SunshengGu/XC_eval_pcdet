@@ -3,6 +3,7 @@ import copy
 import torch
 from tensorboardX import SummaryWriter
 import time
+import timeit
 import glob
 import re
 import h5py
@@ -155,6 +156,7 @@ class AttributionGenerator:
         self.selected_anchors = None
         self.explainer = None
         self.batch_size = 1
+        self.time_study = False
         if xai_method == 'Saliency':
             self.explainer = Saliency(self.model)
         elif xai_method == 'IntegratedGradients':
@@ -283,10 +285,15 @@ class AttributionGenerator:
         Unless the batch_size is 1, there will be repeated work done in a batch since the same target is being applied
         to all samples in the same batch
         """
+        start1 = timeit.default_timer()
         PseudoImage2D = self.batch_dict['spatial_features']
         batch_grad = self.explainer.attribute(PseudoImage2D, baselines=PseudoImage2D * 0, target=target,
                                               additional_forward_args=self.batch_dict, n_steps=self.ig_steps,
                                               internal_batch_size=self.batch_dict['batch_size'])
+        end1 = timeit.default_timer()
+        attr_time = end1 - start1
+
+        start2 = timeit.default_timer()
         if self.batch_size == 1:
             grad = np.transpose(batch_grad[0].squeeze().cpu().detach().numpy(), (1, 2, 0))
             pos_grad = np.sum((grad > 0) * grad, axis=2)
@@ -295,6 +302,10 @@ class AttributionGenerator:
             grads = [np.transpose(gradients.squeeze().cpu().detach().numpy(), (1, 2, 0)) for gradients in batch_grad]
             pos_grad = [np.sum((grad > 0) * grad, axis=2) for grad in grads]
             neg_grad = [np.sum(-1 * (grad < 0) * grad, axis=2) for grad in grads]
+        end2 = timeit.default_timer()
+        aggr_time = end2 - start2
+        if self.time_study:
+            return pos_grad, neg_grad, attr_time, aggr_time
         return pos_grad, neg_grad
 
     def compute_pred_box_vertices_single_frame(self):
@@ -506,13 +517,18 @@ class AttributionGenerator:
         :return:
         """
         # Get the predictions, compute box vertices, and generate targets
+        start_time = timeit.default_timer()
         targets, cared_vertices, cared_locs = self.xc_preprocess(batch_dict)
+        after_preprocess = timeit.default_timer()
+        xc_preprocess_time = after_preprocess - start_time
         if self.debug:
             print("len(targets): {} len(cared_vertices): {} len(cared_locs): {}".format(
                 len(targets), len(cared_vertices), len(cared_locs)))
         # Compute gradients, XC, and pap
         total_XC_lst, total_far_attr_lst, total_pap_lst = [], [], []
         total_XC, total_far_attr, total_pap = None, None, None
+
+        attr_time, aggr_time, xc_time, pap_time, misc_time = 0.0, 0.0, 0.0, 0.0, 0.0
         if self.batch_size == 1:
             for i in range(len(targets)):
                 pos_grad, neg_grad = self.get_attr(targets[i])
@@ -541,7 +557,14 @@ class AttributionGenerator:
                 new_targets = [frame_targets[i] for frame_targets in targets]
                 if self.debug:
                     print("type(new_targets): {}".format(type(new_targets)))  # Should be List
-                pos_grad, neg_grad = self.get_attr(new_targets)
+
+                if self.time_study:
+                    pos_grad, neg_grad, attr_time_i, aggr_time_i = self.get_attr(new_targets)
+                    attr_time += attr_time_i
+                    aggr_time += aggr_time_i
+                else:
+                    pos_grad, neg_grad = self.get_attr(new_targets)
+
                 class_names, vicinities = [], []
                 for target in new_targets:
                     cls_name = self.class_name_list[target[1]]
@@ -552,10 +575,19 @@ class AttributionGenerator:
                     print("pred_box_id: {}".format(i))
                 new_cared_vertices = [frame_vertices[i] for frame_vertices in cared_vertices]
                 new_cared_locs = [frame_locs[i] for frame_locs in cared_locs]
+
+                xc_start = timeit.default_timer()
                 XC, far_attr = self.compute_xc_single(
                     pos_grad, neg_grad, new_cared_vertices, self.dataset_name, sign, self.ignore_thresh,
                     new_cared_locs, vicinities, method)
+                xc_end = timeit.default_timer()
+                xc_time += xc_end - xc_start
+
+                pap_start = timeit.default_timer()
                 pap = self.get_PAP_single(pos_grad, neg_grad, sign)
+                pap_end = timeit.default_timer()
+                pap_time += pap_end - pap_start
+
                 total_XC_lst.append(XC)
                 total_far_attr_lst.append(far_attr)
                 total_pap_lst.append(pap)
@@ -566,6 +598,13 @@ class AttributionGenerator:
             total_XC = np.transpose(total_XC)
             total_far_attr = np.transpose(total_far_attr)
             total_pap = np.transpose(total_pap)
+        end_time = timeit.default_timer()
+        total_time = end_time - start_time
+        misc_time = total_time - attr_time - xc_time - pap_time - xc_preprocess_time - aggr_time
+        if self.time_study:
+            print("XC preprocessing: {}".format(xc_preprocess_time))
+            print("attr generation: {} \nattr aggregation: {} \nxc: {} \npap: {} \nmiscellaneous: {}".format(
+                attr_time, aggr_time, xc_time, pap_time, misc_time))
         return total_XC, total_far_attr, total_pap
 
     def compute_PAP(self, batch_dict, sign="positive"):

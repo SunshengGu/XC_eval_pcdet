@@ -13,6 +13,11 @@ Use the server to train:
 - To make sure the same batches are repeated in each epoch, `--fix_random_seed True` when training
 - Path to KITTI: `/home/c276huan/datasets/kitti`
 
+Transferring files between local and remote servers:
+- Go to file explorer
+- Choose to connect to remote server
+- Enter a command like this: sftp://sg@wise09.eng
+
 Viewing Tensorboard while ssh into a remote machine:
 - The mapping for `--logdir`
 - The mapping for remote vs. host port
@@ -135,7 +140,7 @@ From: https://docs.python.org/3/tutorial/modules.html
 
 Train command (note: the --cfg_file arg has to start with the `cfg` folder or else the outout will be in some weird place):
 - kitti: python train.py --cfg_file cfgs/kitti_models/pointpillar.yaml --batch_size 4 --epochs 1
-- kitti xai: python train_attr.py --cfg_file cfgs/kitti_models/pointpillar_attr_loss.yaml --explained_cfg_file cfgs/kitti_models/pointpillar_2DBackbone_DetHead_xai.yaml --pretrained_model ~/pcdet/output/kitti_models/pointpillar/default/ckpt/pointpillar_7728.pth --batch_size 2 --epochs 1
+- kitti xai: python train_attr.py --cfg_file cfgs/kitti_models/pointpillar_xai.yaml --attr_loss xc --pretrained_model ~/pcdet/output/kitti_models/pointpillar/default/ckpt/pointpillar_7728.pth --batch_size 2 --epochs 1
 
 Test command:
 - kitti: python test.py --cfg_file cfgs/kitti_models/pointpillar.yaml --batch_size 4 --ckpt ~/pcdet/output/kitti_models/pointpillar/default/ckpt/pointpillar_7728.pth

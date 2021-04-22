@@ -13,7 +13,7 @@ from tensorboardX import SummaryWriter
 
 from pcdet.config import cfg, cfg_from_list, cfg_from_yaml_file, log_config_to_file
 from pcdet.datasets import build_dataloader
-from pcdet.models import build_network, model_fn_decorator
+from pcdet.models import build_network, model_fn_decorator_xai
 from pcdet.utils import common_utils
 from train_utils.optimization import build_optimizer, build_scheduler
 from train_utils.train_utils_new_loss import train_model
@@ -28,6 +28,7 @@ from attr_util import attr_func
 def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('--cfg_file', type=str, default=None, help='specify the config for training')
+    parser.add_argument('--attr_loss', type=str, default='XC', help='specify the attribution loss')
     parser.add_argument('--explained_cfg_file', type=str, default=None,
                         help='specify the config for model to be explained')
     parser.add_argument('--batch_size', type=int, default=None, required=False, help='batch size for training')
@@ -52,27 +53,28 @@ def parse_config():
     parser.add_argument('--save_to_file', action='store_true', default=False, help='')
 
     args = parser.parse_args()
-    x_cfg = copy.deepcopy(cfg)
+    # x_cfg = copy.deepcopy(cfg)
 
     cfg_from_yaml_file(args.cfg_file, cfg)
     cfg.TAG = Path(args.cfg_file).stem
     cfg.EXP_GROUP_PATH = '/'.join(args.cfg_file.split('/')[1:-1])  # remove 'cfgs' and 'xxxx.yaml'
-    # the model being used to make prediction is the same as the model being explained, unless otherwise specified
-    if args.explained_cfg_file is not None:
-        print('\n processing the config of the model being explained')
-        cfg_from_yaml_file(args.explained_cfg_file, x_cfg)
-        x_cfg.TAG = Path(args.explained_cfg_file).stem
-        x_cfg.EXP_GROUP_PATH = '/'.join(args.explained_cfg_file.split('/')[1:-1])  # remove 'cfgs' and 'xxxx.yaml'
-    else:
-        x_cfg = copy.deepcopy(cfg)
+    # # the model being used to make prediction is the same as the model being explained, unless otherwise specified
+    # if args.explained_cfg_file is not None:
+    #     print('\n processing the config of the model being explained')
+    #     cfg_from_yaml_file(args.explained_cfg_file, x_cfg)
+    #     x_cfg.TAG = Path(args.explained_cfg_file).stem
+    #     x_cfg.EXP_GROUP_PATH = '/'.join(args.explained_cfg_file.split('/')[1:-1])  # remove 'cfgs' and 'xxxx.yaml'
+    # else:
+    #     x_cfg = copy.deepcopy(cfg)
     if args.set_cfgs is not None:
         cfg_from_list(args.set_cfgs, cfg)
 
-    return args, cfg, x_cfg
+    return args, cfg
 
 
 def main():
-    args, cfg, x_cfg = parse_config()
+    args, cfg = parse_config()
+    attr_loss = args.attr_loss
     xai_method = 'IntegratedGradients'
     attr_shown = 'positive'  # show positive or negative attributions
     # IG specific parameters
@@ -156,11 +158,12 @@ def main():
     )
 
     model = build_network(model_cfg=cfg.MODEL, num_class=len(cfg.CLASS_NAMES), dataset=train_set)
-    model2D = build_network(model_cfg=x_cfg.MODEL, num_class=len(x_cfg.CLASS_NAMES), dataset=train_set)
+    model2D = model.forward_model2D
+    # model2D = build_network(model_cfg=x_cfg.MODEL, num_class=len(x_cfg.CLASS_NAMES), dataset=train_set)
     if args.sync_bn:
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model.cuda()
-    model2D.cuda()
+    # model2D.cuda()
 
     #TODO: solve the problem of reinitializing IG every time model2D's parameter changes
 
@@ -176,7 +179,7 @@ def main():
     last_epoch = -1
     if args.pretrained_model is not None:
         model.load_params_from_file(filename=args.pretrained_model, to_cpu=dist, logger=logger)
-        model2D.load_params_from_file(filename=args.pretrained_model, to_cpu=dist, logger=logger)
+        # model2D.load_params_from_file(filename=args.pretrained_model, to_cpu=dist, logger=logger)
     # note: the functionalities of load_params_from_file and load_params_with_optimizer do not overlap
     if args.ckpt is not None:
         it, start_epoch = model.load_params_with_optimizer(args.ckpt, to_cpu=dist, optimizer=optimizer, logger=logger)
@@ -210,7 +213,7 @@ def main():
         explained_model=model2D,
         explainer=explainer,
         attr_func=attr_func,
-        model_func=model_fn_decorator(),
+        model_func=model_fn_decorator_xai(),
         lr_scheduler=lr_scheduler,
         optim_cfg=cfg.OPTIMIZATION,
         start_epoch=start_epoch,
@@ -225,7 +228,8 @@ def main():
         max_ckpt_save_num=args.max_ckpt_save_num,
         merge_all_iters_to_one_epoch=args.merge_all_iters_to_one_epoch,
         cls_names=cfg.CLASS_NAMES,
-        dataset_name=cfg.DATA_CONFIG.DATASET
+        dataset_name=cfg.DATA_CONFIG.DATASET,
+        attr_loss=attr_loss
     )
 
     logger.info('**********************End training %s/%s(%s)**********************\n\n\n'

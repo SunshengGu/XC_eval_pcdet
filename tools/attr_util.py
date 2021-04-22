@@ -42,12 +42,11 @@ def attr_func(explained_model, explainer, batch, dataset_name, cls_names, pap_on
     :param batch: the batch of input data we are explaining
     :return:
     '''
-    myExplainer = AttributionGeneratorTrain(explained_model, dataset_name, cls_names, explainer['method'], None, \
+    myExplainer = AttributionGeneratorTrain(explained_model, dataset_name, cls_names, explainer['method'], None,
                                             debug=True)
     if not pap_only:
         XC, far_attr, pap = myExplainer.compute_xc(batch, method="sum", sign="positive")
-        XC_loss = 1 / XC  # smaller XC, bigger loss
-        return XC, XC_loss, far_attr, pap
+        return XC, far_attr, pap
     else:
         pap = myExplainer.compute_PAP(batch, sign="positive")
         return pap

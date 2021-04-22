@@ -178,12 +178,12 @@ class AttributionGeneratorTrain:
         return poly
 
     def get_preds_single_frame(self, pred_dicts):
-        pred_boxes = pred_dicts[0]['pred_boxes'].cpu().numpy()
+        pred_boxes = pred_dicts[0]['pred_boxes'].cpu().detach().numpy()
         for i in range(len(pred_boxes)):
             pred_boxes[i][6] += np.pi / 2
         self.pred_boxes = pred_boxes
-        self.pred_labels = pred_dicts[0]['pred_labels'].cpu().numpy() - 1
-        self.pred_scores = pred_dicts[0]['pred_scores'].cpu().numpy()
+        self.pred_labels = pred_dicts[0]['pred_labels'].cpu().detach().numpy() - 1
+        self.pred_scores = pred_dicts[0]['pred_scores'].cpu().detach().numpy()
         self.selected_anchors = self.batch_dict['anchor_selections'][0]
 
     def get_preds(self):

@@ -8,7 +8,7 @@ from torch.nn.utils import clip_grad_norm_
 
 def train_one_epoch(model, optimizer, train_loader, model_func, explained_model, explainer, attr_func,
                     lr_scheduler, accumulated_iter, optim_cfg, rank, tbar, total_it_each_epoch, dataloader_iter,
-                    cls_names, dataset_name, tb_log=None, leave_pbar=False):
+                    cls_names, dataset_name, attr_loss, tb_log=None, leave_pbar=False):
     if total_it_each_epoch == len(train_loader):
         dataloader_iter = iter(train_loader)
 
@@ -43,19 +43,20 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
         loss, tb_dict, disp_dict = model_func(model, batch)
         # print("\nin tools/train_utils/train_utils_new_loss.py, train_one_epoch, loss.shape {}".format(loss.shape)
         # print("loss data type is {}\n".format(type(loss)))
-        pap_only = True
-        if not pap_only:
-            xc, xc_loss, far_attr, pap = attr_func(explained_model, explainer, batch, dataset_name, cls_names)
-        else:
-            pap = attr_func(explained_model, explainer, batch, dataset_name, cls_names, pap_only=True)
+        xc, far_attr, pap = attr_func(explained_model, explainer, batch, dataset_name, cls_names)
+
         # print("xc_loss: {}".format(xc_loss))
         # print("far_attr: {}".format(far_attr))
         # print("pap: {}".format(pap))
+        xc_loss = 1 / xc  # smaller XC, bigger loss
         pap_loss = 0.001 * pap
-        if not pap_only:
+        far_attr_loss = 0.03 * far_attr
+        if attr_loss == 'xc' or attr_loss == 'XC':
             loss += xc_loss
-        else:
+        elif attr_loss == 'pap' or attr_loss == 'PAP':
             loss += pap_loss
+        else:
+            loss += far_attr_loss
         # print("loss: {}".format(loss))
         loss.backward()
         clip_grad_norm_(model.parameters(), optim_cfg.GRAD_NORM_CLIP)
@@ -73,10 +74,9 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
 
             if tb_log is not None:
                 tb_log.add_scalar('train/loss', loss, accumulated_iter)
-                if not pap_only:
-                    tb_log.add_scalar('train/xc', xc, accumulated_iter)
-                    tb_log.add_scalar('train/xc_loss', xc_loss, accumulated_iter)
-                    tb_log.add_scalar('train/far_attr', far_attr, accumulated_iter)
+                tb_log.add_scalar('train/xc', xc, accumulated_iter)
+                tb_log.add_scalar('train/xc_loss', xc_loss, accumulated_iter)
+                tb_log.add_scalar('train/far_attr', far_attr, accumulated_iter)
                 tb_log.add_scalar('train/pap_loss', pap_loss, accumulated_iter)
                 tb_log.add_scalar('meta_data/learning_rate', cur_lr, accumulated_iter)
                 for key, val in tb_dict.items():
@@ -90,8 +90,11 @@ def train_model(model, optimizer, train_loader, model_func, explained_model, exp
                 lr_scheduler, optim_cfg, start_epoch, total_epochs, start_iter, rank, tb_log, ckpt_save_dir,
                 train_sampler=None, lr_warmup_scheduler=None, ckpt_save_interval=1, max_ckpt_save_num=50,
                 merge_all_iters_to_one_epoch=False, cls_names=['Car', 'Pedestrian', 'Cyclist'],
-                dataset_name="KittiDataset"):
+                dataset_name="KittiDataset", attr_loss="XC"):
     accumulated_iter = start_iter
+    if not (attr_loss == "XC" or attr_loss == "xc" or attr_loss == "PAP" or attr_loss == "pap" or
+            attr_loss == "far_attr"):
+        raise NotImplementedError
     with tqdm.trange(start_epoch, total_epochs, desc='epochs', dynamic_ncols=True, leave=(rank == 0)) as tbar:
         total_it_each_epoch = len(train_loader)
         if merge_all_iters_to_one_epoch:
@@ -117,7 +120,7 @@ def train_model(model, optimizer, train_loader, model_func, explained_model, exp
                 leave_pbar=(cur_epoch + 1 == total_epochs),
                 total_it_each_epoch=total_it_each_epoch,
                 dataloader_iter=dataloader_iter,
-                cls_names=cls_names, dataset_name=dataset_name
+                cls_names=cls_names, dataset_name=dataset_name, attr_loss=attr_loss
             )
 
             # save trained model

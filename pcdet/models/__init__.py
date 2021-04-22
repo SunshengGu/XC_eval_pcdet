@@ -38,3 +38,23 @@ def model_fn_decorator():
         return ModelReturn(loss, tb_dict, disp_dict)
 
     return model_func
+
+
+def model_fn_decorator_xai():
+    ModelReturn = namedtuple('ModelReturn', ['loss', 'tb_dict', 'disp_dict'])
+
+    def model_func(model, batch_dict):
+        # a dummy tensor used to be compatible the new pointpillars architecture
+        tensor_values = 0
+        load_data_to_gpu(batch_dict)
+        ret_dict, tb_dict, disp_dict = model(tensor_values, batch_dict)
+
+        loss = ret_dict['loss'].mean()
+        if hasattr(model, 'update_global_step'):
+            model.update_global_step()
+        else:
+            model.module.update_global_step()
+
+        return ModelReturn(loss, tb_dict, disp_dict)
+
+    return model_func
