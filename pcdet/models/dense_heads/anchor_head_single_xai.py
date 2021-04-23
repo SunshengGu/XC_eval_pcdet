@@ -67,8 +67,6 @@ class AnchorHeadSingleXAI(AnchorHeadTemplate):
         else:
             dir_cls_preds = None
 
-        '''
-        # previous code:
         if self.training:
             targets_dict = self.assign_targets(
                 gt_boxes=data_dict['gt_boxes']
@@ -76,7 +74,8 @@ class AnchorHeadSingleXAI(AnchorHeadTemplate):
             # The update() method updates the dictionary with the elements from the another dictionary object or from
             # an iterable of key / value pairs.
             self.forward_ret_dict.update(targets_dict)
-
+        '''
+        # previous code:
         if not self.training or self.predict_boxes_when_training:
             batch_cls_preds, batch_box_preds = self.generate_predicted_boxes(
                 batch_size=data_dict['batch_size'],
@@ -103,6 +102,7 @@ class AnchorHeadSingleXAI(AnchorHeadTemplate):
         data_dict['cls_preds_normalized'] = False
         # end of new code
 
-        if str(type(tensor_values)) == 'torch.Tensor':
-            tensor_values = batch_cls_preds
+        # if str(type(tensor_values)) == 'torch.Tensor':
+        #     tensor_values = batch_cls_preds
+        tensor_values = batch_cls_preds
         return tensor_values, data_dict
