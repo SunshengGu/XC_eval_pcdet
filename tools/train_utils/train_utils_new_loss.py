@@ -24,7 +24,7 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
             batch = next(dataloader_iter)
             print('new iters')
 
-        lr_scheduler.step(accumulated_iter)
+        # lr_scheduler.step(accumulated_iter)
 
         try:
             cur_lr = float(optimizer.lr)
