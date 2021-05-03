@@ -153,7 +153,7 @@ From: https://docs.python.org/3/tutorial/modules.html
 - The import statement uses the following convention: if a package’s __init__.py code defines a list named __all__, it is taken to be the list of module names that should be imported when from package import * is encountered.
 
 Train command (note: the --cfg_file arg has to start with the `cfg` folder or else the outout will be in some weird place):
-- kitti: python train.py --cfg_file cfgs/kitti_models/pointpillar.yaml --batch_size 4 --epochs 1
+- kitti: python train.py --cfg_file cfgs/kitti_models/pointpillar.yaml --batch_size 2 --epochs 1 --pretrained_model ~/pcdet/output/kitti_models/pointpillar/default/ckpt/pointpillar_7728.pth
 - kitti xai: python train_attr.py --cfg_file cfgs/kitti_models/pointpillar_xai.yaml --attr_loss xc --pretrained_model ~/pcdet/output/kitti_models/pointpillar/default/ckpt/pointpillar_7728.pth --batch_size 2 --epochs 1
 - kitti xai on wise09: python train_attr.py --cfg_file cfgs/kitti_models/pointpillar_xai.yaml --attr_loss xc --pretrained_model ~/pcdet/output/pretrained_models/pointpillar_7728.pth --batch_size 2 --epochs 1
 

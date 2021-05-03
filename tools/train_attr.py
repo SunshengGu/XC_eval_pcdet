@@ -40,7 +40,7 @@ def parse_config():
     parser.add_argument('--launcher', choices=['none', 'pytorch', 'slurm'], default='none')
     parser.add_argument('--tcp_port', type=int, default=18888, help='tcp port for distrbuted training')
     parser.add_argument('--sync_bn', action='store_true', default=False, help='whether to use sync bn')
-    parser.add_argument('--fix_random_seed', action='store_true', default=False, help='')
+    parser.add_argument('--fix_random_seed', action='store_true', default=True, help='')
     parser.add_argument('--ckpt_save_interval', type=int, default=1, help='number of training epochs')
     parser.add_argument('--local_rank', type=int, default=0, help='local rank for distributed training')
     parser.add_argument('--max_ckpt_save_num', type=int, default=30, help='max number of saved checkpoint')
@@ -75,7 +75,7 @@ def parse_config():
 def main():
     args, cfg = parse_config()
     attr_loss = args.attr_loss
-    xai_method = 'IntegratedGradients'
+    xai_method = 'Saliency'
     attr_shown = 'positive'  # show positive or negative attributions
     # IG specific parameters
     mult_by_inputs = True  # whether to show attributions only at where some input exists
@@ -223,7 +223,7 @@ def main():
         tb_log=tb_log,
         ckpt_save_dir=ckpt_dir,
         train_sampler=train_sampler,
-        lr_warmup_scheduler=None,
+        lr_warmup_scheduler=lr_warmup_scheduler,
         ckpt_save_interval=args.ckpt_save_interval,
         max_ckpt_save_num=args.max_ckpt_save_num,
         merge_all_iters_to_one_epoch=args.merge_all_iters_to_one_epoch,

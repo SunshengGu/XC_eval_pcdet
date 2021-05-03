@@ -10,7 +10,7 @@ from .learning_schedules_fastai import CosineWarmupLR, OneCycle
 
 def build_optimizer(model, optim_cfg):
     if optim_cfg.OPTIMIZER == 'adam':
-        optimizer = optim.Adam(model.parameters(), lr=optim_cfg.LR, weight_decay=optim_cfg.WEIGHT_DECAY)
+        optimizer = optim.Adam(model.parameters(), lr=optim_cfg.LR, weight_decay=optim_cfg.WEIGHT_DECAY) #, betas=(0.95, 0.95)
     elif optim_cfg.OPTIMIZER == 'sgd':
         optimizer = optim.SGD(
             model.parameters(), lr=optim_cfg.LR, weight_decay=optim_cfg.WEIGHT_DECAY,

@@ -24,12 +24,17 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
             batch = next(dataloader_iter)
             print('new iters')
 
-        # lr_scheduler.step(accumulated_iter)
+        lr_scheduler.step(accumulated_iter)
 
         try:
             cur_lr = float(optimizer.lr)
         except:
             cur_lr = optimizer.param_groups[0]['lr']
+
+        try:
+            beta1, beta2 = float(optimizer.betas[0]), float(optimizer.betas[1])
+        except:
+            beta1, beta2 = optimizer.param_groups[0]['betas'][0], optimizer.param_groups[0]['betas'][1]
 
         if tb_log is not None:
             tb_log.add_scalar('meta_data/learning_rate', cur_lr, accumulated_iter)
@@ -79,6 +84,8 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
                 tb_log.add_scalar('train/far_attr', far_attr, accumulated_iter)
                 tb_log.add_scalar('train/pap_loss', pap_loss, accumulated_iter)
                 tb_log.add_scalar('meta_data/learning_rate', cur_lr, accumulated_iter)
+                tb_log.add_scalar('meta_data/beta1', beta1, accumulated_iter)
+                tb_log.add_scalar('meta_data/beta2', beta1, accumulated_iter)
                 for key, val in tb_dict.items():
                     tb_log.add_scalar('train/' + key, val, accumulated_iter)
     if rank == 0:
