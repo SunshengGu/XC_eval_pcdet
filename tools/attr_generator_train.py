@@ -103,6 +103,7 @@ class AttributionGeneratorTrain:
         self.selected_anchors = None
         self.explainer = None
         self.batch_size = 1
+        self.xai_method = xai_method
         if xai_method == 'Saliency':
             self.explainer = Saliency(self.model)
         elif xai_method == 'IntegratedGradients':
@@ -232,9 +233,12 @@ class AttributionGeneratorTrain:
         to all samples in the same batch
         """
         PseudoImage2D = self.batch_dict['spatial_features']
-        batch_grad = self.explainer.attribute(PseudoImage2D, baselines=PseudoImage2D * 0, target=target,
-                                              additional_forward_args=self.batch_dict, n_steps=self.ig_steps,
-                                              internal_batch_size=self.batch_dict['batch_size'])
+        if self.xai_method == "IntegratedGradients":
+            batch_grad = self.explainer.attribute(PseudoImage2D, baselines=PseudoImage2D * 0, target=target,
+                                                  additional_forward_args=self.batch_dict, n_steps=self.ig_steps,
+                                                  internal_batch_size=self.batch_dict['batch_size'])
+        elif self.xai_method == "Saliency":
+            batch_grad = self.explainer.attribute(PseudoImage2D, target=target, additional_forward_args=self.batch_dict)
         if self.batch_size == 1:
             grad = np.transpose(batch_grad[0].squeeze().cpu().detach().numpy(), (1, 2, 0))
             pos_grad = np.sum((grad > 0) * grad, axis=2)
