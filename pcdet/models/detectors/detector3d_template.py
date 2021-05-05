@@ -854,17 +854,22 @@ class Detector3DTemplate(nn.Module):
         self.load_state_dict(checkpoint['model_state'])
 
         if optimizer is not None:
+            print("optimizer argument present!")
             if 'optimizer_state' in checkpoint and checkpoint['optimizer_state'] is not None:
                 logger.info('==> Loading optimizer parameters from checkpoint %s to %s'
                             % (filename, 'CPU' if to_cpu else 'GPU'))
                 optimizer.load_state_dict(checkpoint['optimizer_state'])
             else:
+                print("optimizer_state NOT in checkpoint!")
                 assert filename[-4] == '.', filename
                 src_file, ext = filename[:-4], filename[-3:]
                 optimizer_filename = '%s_optim.%s' % (src_file, ext)
                 if os.path.exists(optimizer_filename):
+                    print("optimizer_filename {} exists!".format(optimizer_filename))
                     optimizer_ckpt = torch.load(optimizer_filename, map_location=loc_type)
                     optimizer.load_state_dict(optimizer_ckpt['optimizer_state'])
+                else:
+                    print("optimizer_filename {} does not exist!".format(optimizer_filename))
 
         if 'version' in checkpoint:
             print('==> Checkpoint trained from version: %s' % checkpoint['version'])

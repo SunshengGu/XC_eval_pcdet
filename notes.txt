@@ -29,6 +29,9 @@ HOST_CADC_ROOT=/path/to/cadc
 HOST_KITTI_ROOT=/home/c276huan/datasets/kitti
 HOST_LOGDIR=/home/sg/WISEPCDet/output
 
+config.sh on wise13:
+HOST_KITTI_ROOT=/home/va/datasets/kitti
+
 build.sh on wise09:
 --build-arg CAPTUM_ROOT=${CAPTUM_ROOT} \
 
@@ -178,6 +181,11 @@ How to get multiple docker images running:
 - Build and run the docker as usual
 - In a separate terminal, run `docker ps` to get the container_id
 - Then in the same terminal, `docker exec -it <container_id> bash`
+
+Docker: continue training when ssh connection breaks:
+- after training starts, do ctrl + p then ctrl + q in the same docker
+- to view progress: docker attach <docker_id>
+- Note that you can't start training in after `docker exec` command
 
 To view tensorboard:
 - to get tensorboard working locally, need to install both tensorflow and tensorboard
