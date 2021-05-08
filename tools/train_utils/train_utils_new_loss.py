@@ -8,7 +8,7 @@ from torch.nn.utils import clip_grad_norm_
 
 def train_one_epoch(model, optimizer, train_loader, model_func, explained_model, explainer, attr_func,
                     lr_scheduler, accumulated_iter, optim_cfg, rank, tbar, total_it_each_epoch, dataloader_iter,
-                    cls_names, dataset_name, attr_loss, tb_log=None, leave_pbar=False):
+                    cls_names, dataset_name, attr_loss, gt_infos, score_thresh, tb_log=None, leave_pbar=False):
     if total_it_each_epoch == len(train_loader):
         dataloader_iter = iter(train_loader)
 
@@ -48,7 +48,8 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
         loss, tb_dict, disp_dict = model_func(model, batch)
         # print("\nin tools/train_utils/train_utils_new_loss.py, train_one_epoch, loss.shape {}".format(loss.shape)
         # print("loss data type is {}\n".format(type(loss)))
-        xc, far_attr, pap = attr_func(explained_model, explainer, batch, dataset_name, cls_names)
+        xc, far_attr, pap = attr_func(
+            explained_model, explainer, batch, dataset_name, cls_names, cur_it, gt_infos, score_thresh)
 
         # print("xc_loss: {}".format(xc_loss))
         # print("far_attr: {}".format(far_attr))
@@ -94,8 +95,8 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
 
 
 def train_model(model, optimizer, train_loader, model_func, explained_model, explainer, attr_func,
-                lr_scheduler, optim_cfg, start_epoch, total_epochs, start_iter, rank, tb_log, ckpt_save_dir,
-                train_sampler=None, lr_warmup_scheduler=None, ckpt_save_interval=1, max_ckpt_save_num=50,
+                lr_scheduler, optim_cfg, start_epoch, total_epochs, start_iter, rank, tb_log, ckpt_save_dir, gt_infos,
+                score_thresh, train_sampler=None, lr_warmup_scheduler=None, ckpt_save_interval=1, max_ckpt_save_num=50,
                 merge_all_iters_to_one_epoch=False, cls_names=['Car', 'Pedestrian', 'Cyclist'],
                 dataset_name="KittiDataset", attr_loss="XC"):
     accumulated_iter = start_iter
@@ -127,7 +128,8 @@ def train_model(model, optimizer, train_loader, model_func, explained_model, exp
                 leave_pbar=(cur_epoch + 1 == total_epochs),
                 total_it_each_epoch=total_it_each_epoch,
                 dataloader_iter=dataloader_iter,
-                cls_names=cls_names, dataset_name=dataset_name, attr_loss=attr_loss
+                cls_names=cls_names, dataset_name=dataset_name, attr_loss=attr_loss, gt_infos=gt_infos,
+                score_thresh=score_thresh
             )
 
             # save trained model

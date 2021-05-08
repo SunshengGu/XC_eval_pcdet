@@ -245,9 +245,9 @@ def main():
             parameter to get higher dpi.
     :return:
     """
-    visualize_attr = False
-    compute_xc = False
-    compute_pap = True
+    visualize_attr = True
+    compute_xc = True
+    compute_pap = False
     use_multi_margin = False
     plotting = False
     box_debug = False
@@ -268,8 +268,8 @@ def main():
     misclassified_box_analyzed = 0
     start_time = time.time()
     max_obj_cnt = 100
-    batches_to_analyze = 30
-    method = 'IG'
+    batches_to_analyze = 3
+    method = 'Saliency'
     use_trapezoid = False
     ignore_thresh = 0.0
     verify_box = False
@@ -393,7 +393,7 @@ def main():
         dataset_cfg=cfg.DATA_CONFIG,
         class_names=cfg.CLASS_NAMES,
         batch_size=args.batch_size,
-        dist=dist_test, workers=args.workers, logger=logger, training=False
+        dist=dist_test, workers=args.workers, logger=logger, training=True
     )
     print("grid size for 2D pseudoimage: {}".format(test_set.grid_size))
     class_name_list = cfg.CLASS_NAMES
@@ -406,22 +406,24 @@ def main():
                           result_path='output/kitti_models/pointpillar/default/eval/epoch_7728/val/default/result.pkl',
                           scale=scaling_factor, cmap=color_map, dpi_factor=dpi_division_factor,
                           margin_list=box_margin_list)
-    print('\n \n building the 2d network')
-    model2D = build_network(model_cfg=x_cfg.MODEL, num_class=len(x_cfg.CLASS_NAMES), dataset=test_set)
+
     print('\n \n building the full network')
     model = build_network(model_cfg=cfg.MODEL, num_class=len(cfg.CLASS_NAMES), dataset=test_set)
+    print('\n \n loading parameters for the full network')
+    model.load_params_from_file(filename=args.ckpt, logger=logger, to_cpu=dist_test)
+    print('\n \n building the 2d network')
+    model2D = model.forward_model2D
 
     saliency2D = Saliency(model2D)
     saliency = Saliency(model)
     ig2D = IntegratedGradients(model2D, multiply_by_inputs=mult_by_inputs)
     steps = 24  # number of steps for IG
     # load checkpoint
-    print('\n \n loading parameters for the 2d network')
-    model2D.load_params_from_file(filename=args.ckpt, logger=logger, to_cpu=dist_test)
-    model2D.cuda()
-    model2D.eval()
-    print('\n \n loading parameters for the full network')
-    model.load_params_from_file(filename=args.ckpt, logger=logger, to_cpu=dist_test)
+    # print('\n \n loading parameters for the 2d network')
+    # model2D.load_params_from_file(filename=args.ckpt, logger=logger, to_cpu=dist_test)
+    # model2D.cuda()
+    # model2D.eval()
+
     model.cuda()
     model.eval()
 
@@ -593,7 +595,7 @@ def main():
                 batch_pred_labels.append(pred_labels)
                 batch_pred_scores.append(pred_scores)
 
-                scores_for_anchors = anchors_scores[i].cpu().detach().numpy()
+                scores_for_anchors = anchors_scores[i] #.cpu().detach().numpy()
                 # print("\nscores_for_anchors.shape: {}\n".format(scores_for_anchors.shape))
                 # # print("type(gt_dict[i]['boxes']) before filtering: {}".format(type(gt_dict[i]['boxes'])))
                 # print("type(gt_dict[i]['labels']) before filtering: {}".format(type(gt_dict[i]['labels'])))

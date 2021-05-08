@@ -34,19 +34,21 @@ def attr_func_draft(explained_model, explainer, batch):
     return 0.00002
 
 
-def attr_func(explained_model, explainer, batch, dataset_name, cls_names, pap_only=False):
+def attr_func(explained_model, explainer, batch, dataset_name, cls_names, cur_it, gt_infos, score_thresh, pap_only=False):
     '''
 
     :param explained_model: the model being explained
     :param explainer: parameters for the attribution generator
     :param batch: the batch of input data we are explaining
+    :param cur_it: the current batch id, starting from 0
+    :param score_thresh: the threshold to filter out low confidence predictions
     :return:
     '''
     myExplainer = AttributionGeneratorTrain(explained_model, dataset_name, cls_names, explainer['method'], None,
-                                            debug=True)
+                                            gt_infos,score_thresh, debug=True)
     if not pap_only:
-        XC, far_attr, pap = myExplainer.compute_xc(batch, method="sum", sign="positive")
+        XC, far_attr, pap = myExplainer.compute_xc(batch, cur_it, method="sum", sign="positive")
         return XC, far_attr, pap
     else:
-        pap = myExplainer.compute_PAP(batch, sign="positive")
+        pap = myExplainer.compute_PAP(batch, cur_it, sign="positive")
         return pap

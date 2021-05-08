@@ -18,6 +18,7 @@ from pcdet.utils import common_utils
 from train_utils.optimization import build_optimizer, build_scheduler
 from train_utils.train_utils_new_loss import train_model
 from attr_util import attr_func
+from XAI_utils.tp_fp import get_gt_infos
 
 # from captum.attr import IntegratedGradients
 # from captum.attr import Saliency
@@ -43,7 +44,7 @@ def parse_config():
     parser.add_argument('--fix_random_seed', action='store_true', default=True, help='')
     parser.add_argument('--ckpt_save_interval', type=int, default=1, help='number of training epochs')
     parser.add_argument('--local_rank', type=int, default=0, help='local rank for distributed training')
-    parser.add_argument('--max_ckpt_save_num', type=int, default=30, help='max number of saved checkpoint')
+    parser.add_argument('--max_ckpt_save_num', type=int, default=80, help='max number of saved checkpoint')
     parser.add_argument('--merge_all_iters_to_one_epoch', action='store_true', default=False, help='')
     parser.add_argument('--set', dest='set_cfgs', default=None, nargs=argparse.REMAINDER,
                         help='set extra config keys if needed')
@@ -157,6 +158,9 @@ def main():
         total_epochs=args.epochs
     )
 
+    gt_infos = get_gt_infos(cfg, train_set)
+    score_thresh = cfg.MODEL.POST_PROCESSING.SCORE_THRESH
+
     model = build_network(model_cfg=cfg.MODEL, num_class=len(cfg.CLASS_NAMES), dataset=train_set)
     model2D = model.forward_model2D
     # model2D = build_network(model_cfg=x_cfg.MODEL, num_class=len(x_cfg.CLASS_NAMES), dataset=train_set)
@@ -222,6 +226,8 @@ def main():
         rank=cfg.LOCAL_RANK,
         tb_log=tb_log,
         ckpt_save_dir=ckpt_dir,
+        gt_infos=gt_infos,
+        score_thresh=score_thresh,
         train_sampler=train_sampler,
         lr_warmup_scheduler=lr_warmup_scheduler,
         ckpt_save_interval=args.ckpt_save_interval,

@@ -29,7 +29,9 @@ class KITTI_BEV:
         self.repo_dir = repo_dir
         self.scale_to_pseudoimg = scale_to_pseudoimg
         self.class_name = class_name
+        # root_dir = '/root'
         self.result_path = os.path.join(repo_dir, result_path)
+        # self.result_path = os.path.join(root_dir, result_path)
         self.dataset = dataset
         self.results = np.load(self.result_path, allow_pickle=True)
         self.background = background
