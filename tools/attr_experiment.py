@@ -15,7 +15,7 @@ from attr_generator import *
 def main():
     '''________________________User Input Begin________________________'''
     dataset_name = 'KittiDataset'  # change to your dataset, follow naming convention in the config yaml files in PCDet
-    method = 'IntegratedGradients'  # explanation method
+    method = 'Saliency'  # explanation method
     attr_shown = 'positive'  # show positive or negative attributions
 
     # IG specific parameters
@@ -30,7 +30,7 @@ def main():
     # model checkpoint, change to your checkpoint, make sure it's a well-trained model
     ckpt = '../output/kitti_models/pointpillar/default/ckpt/pointpillar_7728.pth'
 
-    num_batchs = 6
+    num_batchs = 12
 
     '''________________________User Input End________________________'''
     # data set prepration, use the validation set (called 'test_set' here)
@@ -50,12 +50,14 @@ def main():
                                           model_cfg_file=explained_cfg_file,
                                           data_set=test_set, xai_method=method, output_path="unspecified",
                                           ignore_thresh=0.0, debug=True)
-
+    epoch_obj_cnt = {}
+    for i in range(3):
+        epoch_obj_cnt[i] = 0
     for batch_num, batch_dictionary in enumerate(test_loader):
         if batch_num == num_batchs:
             break
         print("\nAnalyzing the {}th batch".format(batch_num))
-        batch_XC, batch_far_attr, batch_total_pap = myXCCalculator.compute_xc(batch_dictionary, method="sum")
+        batch_XC, batch_far_attr, batch_total_pap = myXCCalculator.compute_xc(batch_dictionary, epoch_obj_cnt, method="sum")
         print("\nXC values for the batch:\n {}".format(batch_XC))
         myXCCalculator.reset()
 

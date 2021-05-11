@@ -6,7 +6,7 @@ import tqdm
 from torch.nn.utils import clip_grad_norm_
 
 
-def train_one_epoch(model, optimizer, train_loader, model_func, explained_model, explainer, attr_func,
+def train_one_epoch(model, optimizer, train_loader, model_func, explained_model, explainer, attr_func, epoch_obj_cnt,
                     lr_scheduler, accumulated_iter, optim_cfg, rank, tbar, total_it_each_epoch, dataloader_iter,
                     cls_names, dataset_name, attr_loss, tb_log=None, leave_pbar=False):
     if total_it_each_epoch == len(train_loader):
@@ -15,6 +15,9 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
     if rank == 0:
         pbar = tqdm.tqdm(total=total_it_each_epoch, leave=leave_pbar, desc='train', dynamic_ncols=True)
 
+    # set to False in case we want verify something without altering the model
+    enable_training = True
+    constant_lr = False
     for cur_it in range(total_it_each_epoch):
         print("\nThe {}th batch\n".format(cur_it))
         try:
@@ -24,7 +27,8 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
             batch = next(dataloader_iter)
             print('new iters')
 
-        lr_scheduler.step(accumulated_iter)
+        if not constant_lr:
+            lr_scheduler.step(accumulated_iter)
 
         try:
             cur_lr = float(optimizer.lr)
@@ -39,6 +43,7 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
         if tb_log is not None:
             tb_log.add_scalar('meta_data/learning_rate', cur_lr, accumulated_iter)
         print("\nIn tools/train_utils/train_utils_new_loss.py, type(batch): {}".format(type(batch)))
+
         model.train()
         optimizer.zero_grad()
 
@@ -48,7 +53,7 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
         loss, tb_dict, disp_dict = model_func(model, batch)
         # print("\nin tools/train_utils/train_utils_new_loss.py, train_one_epoch, loss.shape {}".format(loss.shape)
         # print("loss data type is {}\n".format(type(loss)))
-        xc, far_attr, pap = attr_func(explained_model, explainer, batch, dataset_name, cls_names)
+        xc, far_attr, pap = attr_func(explained_model, explainer, batch, dataset_name, cls_names, epoch_obj_cnt)
 
         # print("xc_loss: {}".format(xc_loss))
         # print("far_attr: {}".format(far_attr))
@@ -63,9 +68,10 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
         else:
             loss += far_attr_loss
         # print("loss: {}".format(loss))
-        loss.backward()
-        clip_grad_norm_(model.parameters(), optim_cfg.GRAD_NORM_CLIP)
-        optimizer.step()
+        if enable_training:
+            loss.backward()
+            clip_grad_norm_(model.parameters(), optim_cfg.GRAD_NORM_CLIP)
+            optimizer.step()
 
         accumulated_iter += 1
         disp_dict.update({'loss': loss.item(), 'lr': cur_lr})
@@ -93,7 +99,7 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
     return accumulated_iter
 
 
-def train_model(model, optimizer, train_loader, model_func, explained_model, explainer, attr_func,
+def train_model(model, optimizer, train_loader, logger, model_func, explained_model, explainer, attr_func,
                 lr_scheduler, optim_cfg, start_epoch, total_epochs, start_iter, rank, tb_log, ckpt_save_dir,
                 train_sampler=None, lr_warmup_scheduler=None, ckpt_save_interval=1, max_ckpt_save_num=50,
                 merge_all_iters_to_one_epoch=False, cls_names=['Car', 'Pedestrian', 'Cyclist'],
@@ -110,17 +116,19 @@ def train_model(model, optimizer, train_loader, model_func, explained_model, exp
             total_it_each_epoch = len(train_loader) // max(total_epochs, 1)
 
         dataloader_iter = iter(train_loader)
+        epoch_obj_cnt = {}
+        for i in range(len(cls_names)):
+            epoch_obj_cnt[i] = 0
         for cur_epoch in tbar:
             if train_sampler is not None:
                 train_sampler.set_epoch(cur_epoch)
-
             # train one epoch
             if lr_warmup_scheduler is not None and cur_epoch < optim_cfg.WARMUP_EPOCH:
                 cur_scheduler = lr_warmup_scheduler
             else:
                 cur_scheduler = lr_scheduler
             accumulated_iter = train_one_epoch(
-                model, optimizer, train_loader, model_func, explained_model, explainer, attr_func,
+                model, optimizer, train_loader, model_func, explained_model, explainer, attr_func, epoch_obj_cnt,
                 lr_scheduler=cur_scheduler,
                 accumulated_iter=accumulated_iter, optim_cfg=optim_cfg,
                 rank=rank, tbar=tbar, tb_log=tb_log,
@@ -129,7 +137,10 @@ def train_model(model, optimizer, train_loader, model_func, explained_model, exp
                 dataloader_iter=dataloader_iter,
                 cls_names=cls_names, dataset_name=dataset_name, attr_loss=attr_loss
             )
-
+            # log object count
+            logger.info("{}:{} {}:{} {}:{} after training for {} epochs".format(
+                cls_names[0], epoch_obj_cnt[0], cls_names[1], epoch_obj_cnt[1], cls_names[2], epoch_obj_cnt[2],
+                cur_epoch))
             # save trained model
             trained_epoch = cur_epoch + 1
             if trained_epoch % ckpt_save_interval == 0 and rank == 0:

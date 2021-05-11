@@ -180,10 +180,11 @@ class AttributionGeneratorTrain:
 
     def get_preds_single_frame(self, pred_dicts):
         pred_boxes = pred_dicts[0]['pred_boxes'].cpu().detach().numpy()
+        pred_labels = pred_dicts[0]['pred_labels'].cpu().detach().numpy() - 1
         for i in range(len(pred_boxes)):
             pred_boxes[i][6] += np.pi / 2
         self.pred_boxes = pred_boxes
-        self.pred_labels = pred_dicts[0]['pred_labels'].cpu().detach().numpy() - 1
+        self.pred_labels = pred_labels
         self.pred_scores = pred_dicts[0]['pred_scores'].cpu().detach().numpy()
         self.selected_anchors = self.batch_dict['anchor_selections'][0]
 
@@ -201,16 +202,18 @@ class AttributionGeneratorTrain:
             pred_boxes, pred_labels, pred_scores, selected_anchors = [], [], [], []
             for i in range(self.batch_size):
                 frame_pred_boxes = pred_dicts[i]['pred_boxes'].detach().cpu().numpy()
+                frame_pred_labels = pred_dicts[i]['pred_labels'].detach().cpu().numpy() - 1
                 for j in range(len(frame_pred_boxes)):
                     frame_pred_boxes[j][6] += np.pi / 2
                 pred_boxes.append(frame_pred_boxes)
-                pred_labels.append(pred_dicts[i]['pred_labels'].detach().cpu().numpy() - 1)
+                pred_labels.append(frame_pred_labels)
                 pred_scores.append(pred_dicts[i]['pred_scores'].detach().cpu().numpy())
                 selected_anchors.append(self.batch_dict['anchor_selections'][i])
             self.pred_boxes = pred_boxes
             self.pred_labels = pred_labels
             self.pred_scores = pred_scores
             self.selected_anchors = selected_anchors
+
             # # debug message
             # print("len(selected_anchors): {}".format(len(selected_anchors)))
             # print("len(selected_anchors[0]): {}".format(len(selected_anchors[0])))
@@ -312,7 +315,7 @@ class AttributionGeneratorTrain:
             self.pred_vertices = batch_expanded_preds
             self.pred_loc = batch_pred_loc
 
-    def generate_targets_single_frame(self):
+    def generate_targets_single_frame(self, epoch_obj_cnt):
         target_list = []
         cared_labels = None
         cared_box_vertices = None
@@ -330,12 +333,14 @@ class AttributionGeneratorTrain:
             cared_box_vertices = self.pred_vertices[-1 * self.num_boxes:]
             cared_loc = self.pred_loc[-1 * self.num_boxes:]
 
+        for k in range(len(self.class_name_list)):
+            epoch_obj_cnt[k] += np.count_nonzero(cared_labels == k)
         # Generate targets
         for ind, label in enumerate(cared_labels):
             target_list.append((self.selected_anchors[ind], label))
         return target_list, cared_box_vertices, cared_loc
 
-    def generate_targets(self):
+    def generate_targets(self, epoch_obj_cnt):
         """
         Generates targets for explanation given the batch
         Note that the class label target for each box corresponds to the top confidence predicted class
@@ -347,7 +352,7 @@ class AttributionGeneratorTrain:
         batch_cared_box_vertices = []
         batch_cared_loc = []
         if self.batch_size == 1:
-            batch_target_list, batch_cared_box_vertices, batch_cared_loc = self.generate_targets_single_frame()
+            batch_target_list, batch_cared_box_vertices, batch_cared_loc = self.generate_targets_single_frame(epoch_obj_cnt)
         else:
             for i in range(self.batch_size):
                 target_list = []
@@ -367,6 +372,10 @@ class AttributionGeneratorTrain:
                     cared_box_vertices = self.pred_vertices[i][-1*self.num_boxes:]
                     cared_loc = self.pred_loc[i][-1*self.num_boxes:]
 
+                for k in range(len(self.class_name_list)):
+                    epoch_obj_cnt[k] += np.count_nonzero(cared_labels == k)
+                if self.debug:
+                    print("epoch_obj_cnt: {}".format(epoch_obj_cnt))
                 # Generate targets
                 for ind, label in enumerate(cared_labels):
                     target_list.append((self.selected_anchors[i][ind], label))
@@ -433,25 +442,26 @@ class AttributionGeneratorTrain:
                 pap_loss += np.sum(np.abs(diff_1)) + np.sum(np.abs(diff_2))
         return pap_loss
 
-    def xc_preprocess(self, batch_dict):
+    def xc_preprocess(self, batch_dict, epoch_obj_cnt):
         # Get the predictions, compute box vertices, and generate targets
         self.batch_dict = batch_dict
         # load_data_to_gpu(self.batch_dict)
         self.get_preds()
         self.compute_pred_box_vertices()
-        return self.generate_targets()
+        return self.generate_targets(epoch_obj_cnt)
 
-    def compute_xc(self, batch_dict, method="cnt", sign="positive"):
+    def compute_xc(self, batch_dict, epoch_obj_cnt, method="cnt", sign="positive"):
         """
         This is the ONLY function that the user should call
 
         :param batch_dict: The input batch for which we are generating explanations
         :param method: Either by counting ("cnt") or by summing ("sum")
+        :param epoch_obj_cnt: count of objects in each class up until the current epoch
         :param sign: Analyze either the positive or the negative attributions
         :return:
         """
         # Get the predictions, compute box vertices, and generate targets
-        targets, cared_vertices, cared_locs = self.xc_preprocess(batch_dict)
+        targets, cared_vertices, cared_locs = self.xc_preprocess(batch_dict, epoch_obj_cnt)
         if self.debug:
             print("len(targets): {} len(cared_vertices): {} len(cared_locs): {}".format(
                 len(targets), len(cared_vertices), len(cared_locs)))
@@ -509,13 +519,13 @@ class AttributionGeneratorTrain:
             total_pap = total_pap / self.batch_size
         return total_XC, total_far_attr, total_pap
 
-    def compute_PAP(self, batch_dict, sign="positive"):
+    def compute_PAP(self, epoch_obj_cnt, batch_dict, sign="positive"):
         """
         User shall call the function if they wish to not compute XC, just PAP only
         :return:
         """
         # Get the predictions, compute box vertices, and generate targets
-        targets, cared_vertices, cared_locs = self.xc_preprocess(batch_dict)
+        targets, cared_vertices, cared_locs = self.xc_preprocess(batch_dict, epoch_obj_cnt)
         if self.debug:
             print("len(targets): {} len(cared_vertices): {} len(cared_locs): {}".format(
                 len(targets), len(cared_vertices), len(cared_locs)))

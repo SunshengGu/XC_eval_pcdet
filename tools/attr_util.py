@@ -34,7 +34,7 @@ def attr_func_draft(explained_model, explainer, batch):
     return 0.00002
 
 
-def attr_func(explained_model, explainer, batch, dataset_name, cls_names, pap_only=False):
+def attr_func(explained_model, explainer, batch, dataset_name, cls_names, object_cnt, pap_only=False):
     '''
 
     :param explained_model: the model being explained
@@ -43,10 +43,10 @@ def attr_func(explained_model, explainer, batch, dataset_name, cls_names, pap_on
     :return:
     '''
     myExplainer = AttributionGeneratorTrain(explained_model, dataset_name, cls_names, explainer['method'], None,
-                                            debug=True)
+                                            margin=0.2, debug=True)
     if not pap_only:
-        XC, far_attr, pap = myExplainer.compute_xc(batch, method="sum", sign="positive")
+        XC, far_attr, pap = myExplainer.compute_xc(batch, object_cnt, method="sum", sign="positive")
         return XC, far_attr, pap
     else:
-        pap = myExplainer.compute_PAP(batch, sign="positive")
+        pap = myExplainer.compute_PAP(batch, object_cnt, sign="positive")
         return pap
