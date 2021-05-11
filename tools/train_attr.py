@@ -198,10 +198,10 @@ def main():
         model = nn.parallel.DistributedDataParallel(model, device_ids=[cfg.LOCAL_RANK % torch.cuda.device_count()])
     logger.info(model)
 
-    # lr_scheduler, lr_warmup_scheduler = build_scheduler(
-    #     optimizer, total_iters_each_epoch=len(train_loader), total_epochs=args.epochs,
-    #     last_epoch=last_epoch, optim_cfg=cfg.OPTIMIZATION
-    # )
+    lr_scheduler, lr_warmup_scheduler = build_scheduler(
+        optimizer, total_iters_each_epoch=len(train_loader), total_epochs=args.epochs,
+        last_epoch=last_epoch, optim_cfg=cfg.OPTIMIZATION
+    )
 
     # -----------------------start training---------------------------
     logger.info('**********************Start training %s/%s(%s)**********************'
@@ -215,7 +215,7 @@ def main():
         explainer=explainer,
         attr_func=attr_func,
         model_func=model_fn_decorator_xai(),
-        lr_scheduler=None,
+        lr_scheduler=lr_scheduler,
         optim_cfg=cfg.OPTIMIZATION,
         start_epoch=start_epoch,
         total_epochs=args.epochs,
@@ -224,7 +224,7 @@ def main():
         tb_log=tb_log,
         ckpt_save_dir=ckpt_dir,
         train_sampler=train_sampler,
-        lr_warmup_scheduler=None,
+        lr_warmup_scheduler=lr_warmup_scheduler,
         ckpt_save_interval=args.ckpt_save_interval,
         max_ckpt_save_num=args.max_ckpt_save_num,
         merge_all_iters_to_one_epoch=args.merge_all_iters_to_one_epoch,
