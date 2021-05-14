@@ -1,5 +1,6 @@
 import numpy as np
-from attr_generator import *
+from attr_generator_train import *
+from XAI_utils.tp_fp import get_gt_infos
 
 # def get_PAP(pos_grad, neg_grad, sign):
 #     grad = None
@@ -23,14 +24,12 @@ def main():
     steps = 24  # number of intermediate steps for IG
 
     # config file for the full PointPillars model
-    cfg_file = 'cfgs/kitti_models/pointpillar_xai.yaml'
-    # config file for the truncated PointPillars model: 2D backbone and SSD
-    explained_cfg_file = 'cfgs/kitti_models/pointpillar_2DBackbone_DetHead_xai.yaml'
+    model_cfg_file = 'cfgs/kitti_models/pointpillar_xai.yaml'
 
     # model checkpoint, change to your checkpoint, make sure it's a well-trained model
-    ckpt = '../output/kitti_models/pointpillar/default/ckpt/pointpillar_7728.pth'
+    model_ckpt = '../output/kitti_models/pointpillar/default/ckpt/pointpillar_7728.pth'
 
-    num_batchs = 6
+    num_batchs = 3
 
     '''________________________User Input End________________________'''
     # data set prepration, use the validation set (called 'test_set' here)
@@ -38,7 +37,36 @@ def main():
     batch_size = 2
     workers = 2
     dist_test = False
-    cfg_from_yaml_file(explained_cfg_file, cfg)
+
+    cfg_from_yaml_file(model_cfg_file, cfg)
+    cfg.TAG = Path(model_cfg_file).stem
+    cfg.EXP_GROUP_PATH = '/'.join(model_cfg_file.split('/')[1:-1])  # remove 'cfgs' and 'xxxx.yaml'
+
+    # Create output directories, not very useful, just to be compatible with the load_params_from_file
+    # method defined in pcdet/models/detectors/detector3d_template.py, which requires a logger
+    output_dir = cfg.ROOT_DIR / 'output' / cfg.EXP_GROUP_PATH / cfg.TAG / 'default'
+    output_dir.mkdir(parents=True, exist_ok=True)
+    eval_output_dir = output_dir / 'eval'
+    eval_all = False
+    eval_tag = 'default'
+
+    if not eval_all:
+        num_list = re.findall(r'\d+', model_ckpt) if model_ckpt is not None else []
+        epoch_id = num_list[-1] if num_list.__len__() > 0 else 'no_number'
+        eval_output_dir = eval_output_dir / ('epoch_%s' % epoch_id) / cfg.DATA_CONFIG.DATA_SPLIT['test']
+    else:
+        eval_output_dir = eval_output_dir / 'eval_all_default'
+
+    if eval_tag is not None:
+        eval_output_dir = eval_output_dir / eval_tag
+
+    eval_output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create logger, not very useful, just to be compatible with PCDet's structures
+    log_file = eval_output_dir / ('log_eval_%s.txt' % datetime.datetime.now().strftime('%Y%m%d-%H%M%S'))
+    logger = common_utils.create_logger(log_file, rank=cfg.LOCAL_RANK)
+
+    # Creating the dataset
     test_set, test_loader, sampler = build_dataloader(
         dataset_cfg=cfg.DATA_CONFIG,
         class_names=cfg.CLASS_NAMES,
@@ -46,16 +74,36 @@ def main():
         dist=dist_test, workers=workers, training=False
     )
 
-    myXCCalculator = AttributionGenerator(model_ckpt=ckpt, full_model_cfg_file=cfg_file,
-                                          model_cfg_file=explained_cfg_file,
-                                          data_set=test_set, xai_method=method, output_path="unspecified",
-                                          ignore_thresh=0.0, debug=True)
+    # Build the model
+    full_model = build_network(model_cfg=cfg.MODEL, num_class=len(cfg.CLASS_NAMES), dataset=test_set)
+    full_model.load_params_from_file(filename=model_ckpt, logger=logger, to_cpu=False)
+    full_model.cuda()
+    full_model.eval()
+    explained_model = full_model.forward_model2D
 
+    gt_infos = get_gt_infos(cfg, test_set)
+
+    # myXCCalculator = AttributionGenerator(model_ckpt=ckpt, full_model_cfg_file=cfg_file,
+    #                                       model_cfg_file=explained_cfg_file,
+    #                                       data_set=test_set, xai_method=method, output_path="unspecified",
+    #                                       ignore_thresh=0.0, debug=True)
+    selection = "tp/fp"
+
+    myXCCalculator = AttributionGeneratorTrain(explained_model, cfg.DATA_CONFIG.DATASET, cfg.CLASS_NAMES, method, None,
+                                               gt_infos, score_thresh=cfg.MODEL.POST_PROCESSING.SCORE_THRESH,
+                                               selection=selection, debug=True, full_model=full_model, margin=0.2,
+                                               ignore_thresh=0.0)
     for batch_num, batch_dictionary in enumerate(test_loader):
         if batch_num == num_batchs:
             break
-        print("\nAnalyzing the {}th batch".format(batch_num))
-        batch_XC, batch_far_attr, batch_total_pap = myXCCalculator.compute_xc(batch_dictionary, method="sum")
+        print("\n\nAnalyzing the {}th batch\n".format(batch_num))
+        if selection == "tp/fp":
+            batch_XC, batch_far_attr, batch_total_pap, batch_fp_XC, batch_fp_far_attr, batch_fp_total_pap = \
+                myXCCalculator.compute_xc(batch_dictionary, batch_num, method="sum")
+            print("\nTP XC values for the batch:\n {}".format(batch_XC))
+            print("\nFP XC values for the batch:\n {}".format(batch_fp_XC))
+        else:
+            batch_XC, batch_far_attr, batch_total_pap = myXCCalculator.compute_xc(batch_dictionary, batch_num, method="sum")
         print("\nXC values for the batch:\n {}".format(batch_XC))
         myXCCalculator.reset()
 
