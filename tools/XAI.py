@@ -250,7 +250,7 @@ def main():
     compute_pap = False
     use_multi_margin = False
     plotting = False
-    box_debug = False
+    box_debug = True
     run_all = False
     plot_enlarged_pred = True
     unmatched_TP_FP_pred = 0
@@ -268,7 +268,7 @@ def main():
     misclassified_box_analyzed = 0
     start_time = time.time()
     max_obj_cnt = 100
-    batches_to_analyze = 3
+    batches_to_analyze = 2
     method = 'Saliency'
     use_trapezoid = False
     ignore_thresh = 0.0
@@ -393,7 +393,7 @@ def main():
         dataset_cfg=cfg.DATA_CONFIG,
         class_names=cfg.CLASS_NAMES,
         batch_size=args.batch_size,
-        dist=dist_test, workers=args.workers, logger=logger, training=True
+        dist=dist_test, workers=args.workers, logger=logger, training=False
     )
     print("grid size for 2D pseudoimage: {}".format(test_set.grid_size))
     class_name_list = cfg.CLASS_NAMES

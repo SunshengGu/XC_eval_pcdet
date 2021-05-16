@@ -115,6 +115,8 @@ class AttributionGeneratorTrain:
         self.explainer = None
         self.tp_fp = None
         self.gt_dict = None
+        self.batch_cared_tp_ind = None # tp pred box indices for the cared boxes for which explanations are generated
+        self.batch_cared_fp_ind = None  # tp pred box indices for the cared boxes for which explanations are generated
         self.batch_size = 1
         self.cur_it = 0
         # the limits are self.num_boxes, unless the max_num_tp/fp per frame is less than self.num_boxes
@@ -212,8 +214,6 @@ class AttributionGeneratorTrain:
 
     def get_preds_single_frame(self, pred_dicts):
         pred_boxes = pred_dicts[0]['pred_boxes'].cpu().detach().numpy()
-        for i in range(len(pred_boxes)):
-            pred_boxes[i][6] += np.pi / 2
         self.pred_boxes = pred_boxes
         self.pred_labels = pred_dicts[0]['pred_labels'].cpu().detach().numpy() - 1
         self.pred_scores = pred_dicts[0]['pred_scores'].cpu().detach().numpy()
@@ -233,8 +233,6 @@ class AttributionGeneratorTrain:
             pred_boxes, pred_labels, pred_scores, selected_anchors = [], [], [], []
             for i in range(self.batch_size):
                 frame_pred_boxes = pred_dicts[i]['pred_boxes'].detach().cpu().numpy()
-                for j in range(len(frame_pred_boxes)):
-                    frame_pred_boxes[j][6] += np.pi / 2
                 pred_boxes.append(frame_pred_boxes)
                 pred_labels.append(pred_dicts[i]['pred_labels'].detach().cpu().numpy() - 1)
                 pred_scores.append(pred_dicts[i]['pred_scores'].detach().cpu().numpy())
@@ -323,8 +321,13 @@ class AttributionGeneratorTrain:
         box vertices: np.array([[x1, y1], [x2,y2], ...[x4,y4]])
         """
         if self.batch_size == 1:
+            for i in range(len(self.pred_boxes)):
+                self.pred_boxes[i][6] += np.pi / 2
             self.compute_pred_box_vertices_single_frame()
         else:
+            for i in range(self.batch_size):
+                for j in range(len(self.pred_boxes[i])):
+                    self.pred_boxes[i][j][6] += np.pi / 2
             batch_expanded_preds = []
             batch_pred_loc = []
             # Generate the vertices
@@ -423,11 +426,14 @@ class AttributionGeneratorTrain:
                 pred_box_iou.append(iou)
                 for j in range(len(self.pred_scores[i])):  # j is prediction box id in the i-th image
                     gt_cls = self.gt_dict[i]['labels'][gt_index[j]]
+                    print("gt class name: {}".format(gt_cls))
+                    # print("self.class_name_list: {}".format(self.class_name_list))
                     iou_thresh_3d = d3_iou_thresh_dict[gt_cls]
                     curr_pred_score = self.pred_scores[i][j]
                     if curr_pred_score >= self.score_thresh:
                         adjusted_pred_boxes_label = self.pred_labels[i][j]
                         pred_name = self.class_name_list[adjusted_pred_boxes_label]
+                        print("pred_name: {}".format(pred_name))
                         if iou[j] >= iou_thresh_3d:
                             if gt_cls == pred_name:
                                 conf_mat_frame.append('TP')
@@ -468,12 +474,14 @@ class AttributionGeneratorTrain:
             cared_indices = [i for i in range(len(self.tp_fp)) if self.tp_fp[i] == "TP"]
             if len(cared_indices) > self.num_boxes:
                 cared_indices = random.sample(cared_indices, self.num_boxes)
+            self.batch_cared_tp_ind = cared_indices
             cared_labels = [self.pred_labels[i] for i in cared_indices]
             cared_box_vertices = [self.pred_vertices[i] for i in cared_indices]
             cared_loc = [self.pred_loc[i] for i in cared_indices]
             fp_indices = [i for i in range(len(self.tp_fp)) if self.tp_fp[i] == "FP"]
             if len(fp_indices) > self.num_boxes:
                 fp_indices = random.sample(fp_indices, self.num_boxes)
+            self.batch_cared_fp_ind = fp_indices
             fp_labels = [self.pred_labels[i] for i in fp_indices]
             fp_box_vertices = [self.pred_vertices[i] for i in fp_indices]
             fp_loc = [self.pred_loc[i] for i in fp_indices]
@@ -495,10 +503,15 @@ class AttributionGeneratorTrain:
 
         # Generate targets
         for ind, label in enumerate(cared_labels):
-            target_list.append((self.selected_anchors[ind], label))
+            if self.selection == "tp/fp":
+                pred_id = self.batch_cared_tp_ind[ind]
+                target_list.append((self.selected_anchors[pred_id], label))
+            else:
+                target_list.append((self.selected_anchors[ind], label))
         if self.selection == "tp/fp":
             for ind, label in enumerate(fp_labels):
-                fp_target_list.append((self.selected_anchors[ind], label))
+                pred_id = self.batch_cared_fp_ind[ind]
+                fp_target_list.append((self.selected_anchors[pred_id], label))
             return target_list, cared_box_vertices, cared_loc, fp_target_list, fp_box_vertices, fp_loc
         return target_list, cared_box_vertices, cared_loc
 
@@ -525,14 +538,20 @@ class AttributionGeneratorTrain:
             max_num_fp = 0
             if self.selection == "tp/fp":
                 for f in range(self.batch_size):
+                    print("frame id: {}\ntp_fp list: {}".format(f, self.tp_fp[f]))
                     cared_indices = [k for k in range(len(self.tp_fp[f])) if self.tp_fp[f][k] == "TP"]
                     fp_indices = [k for k in range(len(self.tp_fp[f])) if self.tp_fp[f][k] == "FP"]
+                    print("tp indices: {}".format(cared_indices))
+                    print("fp indices: {}".format(fp_indices))
                     batch_cared_indices.append(cared_indices)
                     batch_fp_indices.append(fp_indices)
                     max_num_tp = max(len(cared_indices), max_num_tp)
                     max_num_fp = max(len(fp_indices), max_num_fp)
                 self.tp_limit = min(self.num_boxes, max_num_tp)
                 self.fp_limit = min(self.num_boxes, max_num_fp)
+                print("self.tp_limit: {} self.fp_limit: {}".format(self.tp_limit, self.fp_limit))
+            self.batch_cared_tp_ind = batch_cared_indices
+            self.batch_cared_fp_ind = batch_fp_indices
             for i in range(self.batch_size):
                 target_list = []
                 cared_labels = None
@@ -547,6 +566,7 @@ class AttributionGeneratorTrain:
                     cared_indices = batch_cared_indices[i]
                     if len(cared_indices) > self.tp_limit: # too many boxes
                         cared_indices = random.sample(cared_indices, self.tp_limit)
+                    self.batch_cared_tp_ind[i] = cared_indices
                     cared_labels = [self.pred_labels[i][ind] for ind in cared_indices]
                     cared_box_vertices = [self.pred_vertices[i][ind] for ind in cared_indices]
                     cared_loc = [self.pred_loc[i][ind] for ind in cared_indices]
@@ -554,12 +574,19 @@ class AttributionGeneratorTrain:
                     fp_indices = batch_fp_indices[i]
                     if len(fp_indices) > self.fp_limit: # too many boxes
                         fp_indices = random.sample(fp_indices, self.fp_limit)
+                    self.batch_cared_fp_ind[i] = fp_indices
                     fp_labels = [self.pred_labels[i][ind] for ind in fp_indices]
                     fp_box_vertices = [self.pred_vertices[i][ind] for ind in fp_indices]
                     fp_loc = [self.pred_loc[i][ind] for ind in fp_indices]
                     if self.debug:
                         print("cared tp indices: {}".format(cared_indices))
                         print("cared fp indices: {}".format(fp_indices))
+                    #     print("cared tp labels: {}".format(cared_labels))
+                    #     print("cared fp labels: {}".format(fp_labels))
+                    #     print("cared tp box vertices: {}".format(cared_box_vertices))
+                    #     print("cared fp box vertices: {}".format(fp_box_vertices))
+                    #     print("cared tp locs: {}".format(cared_loc))
+                    #     print("cared fp locs: {}".format(fp_loc))
                 elif self.num_boxes >= len(self.pred_labels[i]):
                     cared_labels = self.pred_labels[i]
                     cared_box_vertices = self.pred_vertices[i]
@@ -575,19 +602,34 @@ class AttributionGeneratorTrain:
 
                 # Generate targets
                 for ind, label in enumerate(cared_labels):
-                    target_list.append((self.selected_anchors[i][ind], label))
+                    print("tp pred_ids:")
+                    if self.selection == "tp/fp":
+                        pred_id = self.batch_cared_tp_ind[i][ind]
+                        print("pred_id: {}".format(pred_id))
+                        print("pred_label: {}".format(label))
+                        target_list.append((self.selected_anchors[i][pred_id], label))
+                    else:
+                        target_list.append((self.selected_anchors[ind], label))
                 if self.selection == "tp/fp":
+                    print("fp pred_ids:")
                     for ind, label in enumerate(fp_labels):
-                        fp_target_list.append((self.selected_anchors[i][ind], label))
+                        pred_id = self.batch_cared_fp_ind[i][ind]
+                        print("pred_id: {}".format(pred_id))
+                        print("pred_label: {}".format(label))
+                        fp_target_list.append((self.selected_anchors[i][pred_id], label))
+                    print("frame {} tp target_list: {}".format(i, target_list))
+                    print("frame {} fp target_list: {}".format(i, fp_target_list))
                     if len(target_list) < self.tp_limit: # too few boxes
                         for c in range(len(target_list), self.tp_limit):
                             # creating some dummy entries
+                            print("appending None to the tp vertices")
                             target_list.append((0, 0))
                             cared_box_vertices.append(None)
                             cared_loc.append(None)
                     if len(fp_target_list) < self.fp_limit: # too few boxes
                         for c in range(len(fp_target_list), self.fp_limit):
                             # creating some dummy entries
+                            print("appending None to the fp vertices")
                             fp_target_list.append((0, 0))
                             fp_box_vertices.append(None)
                             fp_loc.append(None)
@@ -676,8 +718,8 @@ class AttributionGeneratorTrain:
                 # run the model once to populate the batch dict
                 anchor_scores = self.full_model(dummy_tensor, self.batch_dict)
         self.get_preds()
-        self.compute_pred_box_vertices()
         self.get_tp_fp_indices(cur_it)
+        self.compute_pred_box_vertices()
         return self.generate_targets()
 
     def compute_xc(self, batch_dict, cur_it, method="cnt", sign="positive"):
@@ -742,9 +784,6 @@ class AttributionGeneratorTrain:
                 for i in range(self.tp_limit):
                     # The i-th target for each frame in the batch
                     new_targets = [frame_targets[i] for frame_targets in targets]
-                    if self.debug:
-                        print("tp type(new_targets): {}".format(type(new_targets)))  # Should be List
-                        print("tp new_targets: {}".format(new_targets))
                     pos_grad, neg_grad = self.get_attr(new_targets)
                     class_names, vicinities = [], []
                     for target in new_targets:
@@ -752,10 +791,18 @@ class AttributionGeneratorTrain:
                         vici = self.vicinity_dict[cls_name]
                         class_names.append(cls_name)
                         vicinities.append(vici)
-                    if self.debug:
-                        print("tp pred_box_id: {}".format(i))
+                    # print("cared tp vertices: {}".format(cared_vertices))
+                    # print("cared tp locs: {}".format(cared_locs))
+                    # print("type(cared tp vertices): {}".format(type(cared_vertices)))
+                    # print("type(cared tp locs): {}".format(type(cared_locs)))
                     new_cared_vertices = [frame_vertices[i] for frame_vertices in cared_vertices]
                     new_cared_locs = [frame_locs[i] for frame_locs in cared_locs]
+                    # if self.debug:
+                    #     print("tp pred_box_id: {}".format(i))
+                    #     print("tp type(new_targets): {}".format(type(new_targets)))  # Should be List
+                    #     print("tp new_targets: {}".format(new_targets))
+                    #     print("tp new_cared_vertices: {}".format(new_cared_vertices))
+                    #     print("tp new_cared_locs: {}".format(new_cared_locs))
                     XC, far_attr = self.compute_xc_single(
                         pos_grad, neg_grad, new_cared_vertices, self.dataset_name, sign, self.ignore_thresh,
                         new_cared_locs, vicinities, method)
@@ -767,9 +814,6 @@ class AttributionGeneratorTrain:
                 for i in range(self.fp_limit):
                     # The i-th target for each frame in the batch
                     new_targets = [frame_targets[i] for frame_targets in fp_targets]
-                    if self.debug:
-                        print("fp type(new_targets): {}".format(type(new_targets)))  # Should be List
-                        print("fp new_targets: {}".format(new_targets))
                     pos_grad, neg_grad = self.get_attr(new_targets)
                     class_names, vicinities = [], []
                     for target in new_targets:
@@ -777,10 +821,14 @@ class AttributionGeneratorTrain:
                         vici = self.vicinity_dict[cls_name]
                         class_names.append(cls_name)
                         vicinities.append(vici)
-                    if self.debug:
-                        print("fp pred_box_id: {}".format(i))
                     new_cared_vertices = [frame_vertices[i] for frame_vertices in fp_vertices]
                     new_cared_locs = [frame_locs[i] for frame_locs in fp_locs]
+                    # if self.debug:
+                    #     print("fp pred_box_id: {}".format(i))
+                    #     print("fp type(new_targets): {}".format(type(new_targets)))  # Should be List
+                    #     print("fp new_targets: {}".format(new_targets))
+                    #     print("fp new_cared_vertices: {}".format(new_cared_vertices))
+                    #     print("fp new_cared_locs: {}".format(new_cared_locs))
                     XC, far_attr = self.compute_xc_single(
                         pos_grad, neg_grad, new_cared_vertices, self.dataset_name, sign, self.ignore_thresh,
                         new_cared_locs, vicinities, method)
@@ -799,9 +847,6 @@ class AttributionGeneratorTrain:
                 for i in range(min_num_preds):
                     # The i-th target for each frame in the batch
                     new_targets = [frame_targets[i] for frame_targets in targets]
-                    if self.debug:
-                        print("type(new_targets): {}".format(type(new_targets)))  # Should be List
-                        print("new_targets: {}".format(new_targets))
                     pos_grad, neg_grad = self.get_attr(new_targets)
                     class_names, vicinities = [], []
                     for target in new_targets:
@@ -809,10 +854,14 @@ class AttributionGeneratorTrain:
                         vici = self.vicinity_dict[cls_name]
                         class_names.append(cls_name)
                         vicinities.append(vici)
-                    if self.debug:
-                        print("pred_box_id: {}".format(i))
                     new_cared_vertices = [frame_vertices[i] for frame_vertices in cared_vertices]
                     new_cared_locs = [frame_locs[i] for frame_locs in cared_locs]
+                    if self.debug:
+                        print("pred_box_id: {}".format(i))
+                        print("type(new_targets): {}".format(type(new_targets)))  # Should be List
+                        print("new_targets: {}".format(new_targets))
+                        print("new_cared_vertices: {}".format(new_cared_vertices))
+                        print("new_cared_locs: {}".format(new_cared_locs))
                     XC, far_attr = self.compute_xc_single(
                         pos_grad, neg_grad, new_cared_vertices, self.dataset_name, sign, self.ignore_thresh,
                         new_cared_locs, vicinities, method)
