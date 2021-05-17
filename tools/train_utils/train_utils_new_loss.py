@@ -61,7 +61,7 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
             loss += xc_loss
         elif attr_loss == 'pap' or attr_loss == 'PAP':
             loss += pap_loss
-        else:
+        elif attr_loss == 'far_attr' or attr_loss == 'FAR_ATTR':
             loss += far_attr_loss
         # print("loss: {}".format(loss))
         loss.backward()
@@ -83,6 +83,8 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
                 tb_log.add_scalar('train/xc', xc, accumulated_iter)
                 tb_log.add_scalar('train/xc_loss', xc_loss, accumulated_iter)
                 tb_log.add_scalar('train/far_attr', far_attr, accumulated_iter)
+                tb_log.add_scalar('train/far_attr_loss', far_attr_loss, accumulated_iter)
+                tb_log.add_scalar('train/pap', pap, accumulated_iter)
                 tb_log.add_scalar('train/pap_loss', pap_loss, accumulated_iter)
                 tb_log.add_scalar('meta_data/learning_rate', cur_lr, accumulated_iter)
                 tb_log.add_scalar('meta_data/beta1', beta1, accumulated_iter)
