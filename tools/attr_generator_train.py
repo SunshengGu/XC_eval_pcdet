@@ -340,7 +340,7 @@ class AttributionGeneratorTrain:
             target_list.append((self.selected_anchors[ind], label))
         return target_list, cared_box_vertices, cared_loc
 
-    def generate_targets(self, epoch_obj_cnt):
+    def generate_targets(self, epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt):
         """
         Generates targets for explanation given the batch
         Note that the class label target for each box corresponds to the top confidence predicted class
@@ -442,15 +442,15 @@ class AttributionGeneratorTrain:
                 pap_loss += np.sum(np.abs(diff_1)) + np.sum(np.abs(diff_2))
         return pap_loss
 
-    def xc_preprocess(self, batch_dict, epoch_obj_cnt):
+    def xc_preprocess(self, batch_dict, epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt):
         # Get the predictions, compute box vertices, and generate targets
         self.batch_dict = batch_dict
         # load_data_to_gpu(self.batch_dict)
         self.get_preds()
         self.compute_pred_box_vertices()
-        return self.generate_targets(epoch_obj_cnt)
+        return self.generate_targets(epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt)
 
-    def compute_xc(self, batch_dict, epoch_obj_cnt, method="cnt", sign="positive"):
+    def compute_xc(self, batch_dict, epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt, method="cnt", sign="positive"):
         """
         This is the ONLY function that the user should call
 
@@ -461,7 +461,7 @@ class AttributionGeneratorTrain:
         :return:
         """
         # Get the predictions, compute box vertices, and generate targets
-        targets, cared_vertices, cared_locs = self.xc_preprocess(batch_dict, epoch_obj_cnt)
+        targets, cared_vertices, cared_locs = self.xc_preprocess(batch_dict, epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt)
         if self.debug:
             print("len(targets): {} len(cared_vertices): {} len(cared_locs): {}".format(
                 len(targets), len(cared_vertices), len(cared_locs)))
