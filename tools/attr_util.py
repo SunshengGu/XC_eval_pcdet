@@ -52,9 +52,14 @@ def attr_func(explained_model, explainer, batch, dataset_name, cls_names, cur_it
         pred_score_file_name=pred_score_file_name, pred_score_field_name=pred_score_field_name,
         score_thresh=score_thresh, debug=True, selection=box_selection)
     if not pap_only:
-        XC, far_attr, pap = myExplainer.compute_xc(
-            batch, object_cnt, tp_object_cnt, fp_object_cnt, cur_it, cur_epoch=cur_epoch, method="sum", sign="positive")
-        return XC, far_attr, pap
+        if box_selection == "tp/fp":
+            tp_XC, tp_far_attr, tp_pap, fp_XC, fp_far_attr, fp_pap = myExplainer.compute_xc(
+                batch, object_cnt, tp_object_cnt, fp_object_cnt, cur_it, cur_epoch=cur_epoch, method="sum", sign="positive")
+            return tp_XC, tp_far_attr, tp_pap, fp_XC, fp_far_attr, fp_pap
+        else:
+            XC, far_attr, pap = myExplainer.compute_xc(
+                batch, object_cnt, tp_object_cnt, fp_object_cnt, cur_it, cur_epoch=cur_epoch, method="sum", sign="positive")
+            return XC, far_attr, pap
     else:
         pap = myExplainer.compute_PAP(
             batch, object_cnt, tp_object_cnt, fp_object_cnt, cur_it, cur_epoch=cur_epoch, sign="positive")

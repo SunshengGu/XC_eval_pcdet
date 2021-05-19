@@ -31,7 +31,7 @@ def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('--cfg_file', type=str, default=None, help='specify the config for training')
     parser.add_argument('--attr_loss', type=str, default='XC', help='specify the attribution loss')
-    parser.add_argument('--loss_selection', type=str, default='tp/fp', help='specify the attribution loss')
+    parser.add_argument('--box_selection', type=str, default='tp/fp', help='how to apply the attr loss')
     parser.add_argument('--explained_cfg_file', type=str, default=None,
                         help='specify the config for model to be explained')
     parser.add_argument('--batch_size', type=int, default=None, required=False, help='batch size for training')
@@ -238,7 +238,7 @@ def main():
         merge_all_iters_to_one_epoch=args.merge_all_iters_to_one_epoch,
         cls_names=cfg.CLASS_NAMES,
         dataset_name=cfg.DATA_CONFIG.DATASET,
-        attr_loss=attr_loss, box_selection=args.loss_selection,
+        attr_loss=attr_loss, box_selection=args.box_selection,
         output_dir=output_dir
     )
 

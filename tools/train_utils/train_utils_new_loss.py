@@ -1,6 +1,7 @@
 import csv
 import glob
 import os
+import numpy as np
 
 import torch
 import tqdm
@@ -56,19 +57,30 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
         loss, tb_dict, disp_dict = model_func(model, batch)
         # print("\nin tools/train_utils/train_utils_new_loss.py, train_one_epoch, loss.shape {}".format(loss.shape)
         # print("loss data type is {}\n".format(type(loss)))
-        xc, far_attr, pap = attr_func(
-            explained_model, explainer, batch, dataset_name, cls_names, cur_it=cur_it, gt_infos=gt_infos,
-            score_thresh=score_thresh, object_cnt=epoch_obj_cnt, tp_object_cnt=epoch_tp_obj_cnt,
-            fp_ojbect_cnt=epoch_fp_obj_cnt, box_selection=box_selection, pred_score_file_name=pred_score_file_name,
-            cur_epoch=cur_epoch, pred_score_field_name=pred_score_field_name
-        )
+        if box_selection == "tp/fp":
+            xc, far_attr, pap, fp_xc, fp_far_attr, fp_pap = attr_func(
+                explained_model, explainer, batch, dataset_name, cls_names, cur_it=cur_it, gt_infos=gt_infos,
+                score_thresh=score_thresh, object_cnt=epoch_obj_cnt, tp_object_cnt=epoch_tp_obj_cnt,
+                fp_object_cnt=epoch_fp_obj_cnt, box_selection=box_selection, pred_score_file_name=pred_score_file_name,
+                cur_epoch=cur_epoch, pred_score_field_name=pred_score_field_name
+            )
+        else:
+            xc, far_attr, pap = attr_func(
+                explained_model, explainer, batch, dataset_name, cls_names, cur_it=cur_it, gt_infos=gt_infos,
+                score_thresh=score_thresh, object_cnt=epoch_obj_cnt, tp_object_cnt=epoch_tp_obj_cnt,
+                fp_object_cnt=epoch_fp_obj_cnt, box_selection=box_selection, pred_score_file_name=pred_score_file_name,
+                cur_epoch=cur_epoch, pred_score_field_name=pred_score_field_name
+            )
 
         # print("xc_loss: {}".format(xc_loss))
         # print("far_attr: {}".format(far_attr))
         # print("pap: {}".format(pap))
-        xc_loss = 1 / xc  # smaller XC, bigger loss
-        pap_loss = 0.001 * pap
-        far_attr_loss = 0.03 * far_attr
+        xc_val = np.nansum(xc) / batch["batch_size"]
+        pap_val = np.nansum(pap) / batch["batch_size"]
+        far_attr_val = np.nansum(far_attr) / batch["batch_size"]
+        xc_loss = 1 / xc_val  # smaller XC, bigger loss
+        pap_loss = 0.001 * pap_val
+        far_attr_loss = 0.03 * far_attr_val
         if attr_loss == 'xc' or attr_loss == 'XC':
             loss += xc_loss
         elif attr_loss == 'pap' or attr_loss == 'PAP':
@@ -93,11 +105,11 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
 
             if tb_log is not None:
                 tb_log.add_scalar('train/loss', loss, accumulated_iter)
-                tb_log.add_scalar('train/xc', xc, accumulated_iter)
+                tb_log.add_scalar('train/xc', xc_val, accumulated_iter)
                 tb_log.add_scalar('train/xc_loss', xc_loss, accumulated_iter)
-                tb_log.add_scalar('train/far_attr', far_attr, accumulated_iter)
+                tb_log.add_scalar('train/far_attr', far_attr_val, accumulated_iter)
                 tb_log.add_scalar('train/far_attr_loss', far_attr_loss, accumulated_iter)
-                tb_log.add_scalar('train/pap', pap, accumulated_iter)
+                tb_log.add_scalar('train/pap', pap_val, accumulated_iter)
                 tb_log.add_scalar('train/pap_loss', pap_loss, accumulated_iter)
                 tb_log.add_scalar('meta_data/learning_rate', cur_lr, accumulated_iter)
                 tb_log.add_scalar('meta_data/beta1', beta1, accumulated_iter)

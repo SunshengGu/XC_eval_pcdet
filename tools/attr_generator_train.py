@@ -683,7 +683,7 @@ class AttributionGeneratorTrain:
                         print("pred_label: {}".format(label))
                         target_list.append((self.selected_anchors[i][pred_id], label))
                     else:
-                        target_list.append((self.selected_anchors[ind], label))
+                        target_list.append((self.selected_anchors[i][ind], label))
                 if self.selection == "tp/fp":
                     print("fp pred_ids:")
                     for ind, label in enumerate(fp_labels):
