@@ -75,10 +75,16 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
         # print("xc_loss: {}".format(xc_loss))
         # print("far_attr: {}".format(far_attr))
         # print("pap: {}".format(pap))
-        xc_val = np.nansum(xc) / batch["batch_size"]
-        pap_val = np.nansum(pap) / batch["batch_size"]
-        far_attr_val = np.nansum(far_attr) / batch["batch_size"]
-        xc_loss = 1 / xc_val  # smaller XC, bigger loss
+
+        # need a scaling ratio to normalize the losses to the previous setting (top 3 per frame, batch_size = 2, taking
+        # the average of frames in a batch)
+        # TODO: handle the case when batch_box_cnt is zero
+        batch_box_cnt = np.count_nonzero(~np.isnan(xc))
+        scaling_ratio = batch["batch_size"] * 3 / batch_box_cnt if batch_box_cnt != 0 else 0
+        xc_val = np.nansum(xc) / batch["batch_size"] * scaling_ratio
+        pap_val = np.nansum(pap) / batch["batch_size"] * scaling_ratio
+        far_attr_val = np.nansum(far_attr) / batch["batch_size"] * scaling_ratio
+        xc_loss = 1 / xc_val if xc_val > 0.01 else 0 # smaller XC, bigger loss
         pap_loss = 0.001 * pap_val
         far_attr_loss = 0.03 * far_attr_val
         if attr_loss == 'xc' or attr_loss == 'XC':
