@@ -1,3 +1,4 @@
+import csv
 import glob
 import os
 
@@ -6,15 +7,20 @@ import tqdm
 from torch.nn.utils import clip_grad_norm_
 
 
-def train_one_epoch(model, optimizer, train_loader, model_func, explained_model, explainer, attr_func,
+def train_one_epoch(model, optimizer, train_loader, model_func, explained_model, explainer, attr_func, epoch_obj_cnt,
+                    epoch_tp_obj_cnt, epoch_fp_obj_cnt, pred_score_file_name, pred_score_field_name, cur_epoch,
                     lr_scheduler, accumulated_iter, optim_cfg, rank, tbar, total_it_each_epoch, dataloader_iter,
-                    cls_names, dataset_name, attr_loss, gt_infos, score_thresh, tb_log=None, leave_pbar=False):
+                    cls_names, dataset_name, attr_loss, gt_infos, score_thresh, tb_log=None, leave_pbar=False,
+                    box_selection="tp/fp"):
     if total_it_each_epoch == len(train_loader):
         dataloader_iter = iter(train_loader)
 
     if rank == 0:
         pbar = tqdm.tqdm(total=total_it_each_epoch, leave=leave_pbar, desc='train', dynamic_ncols=True)
 
+    # set to False in case we want verify something without altering the model
+    enable_training = True
+    constant_lr = False
     for cur_it in range(total_it_each_epoch):
         print("\nThe {}th batch\n".format(cur_it))
         try:
@@ -24,7 +30,8 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
             batch = next(dataloader_iter)
             print('new iters')
 
-        lr_scheduler.step(accumulated_iter)
+        if not constant_lr:
+            lr_scheduler.step(accumulated_iter)
 
         try:
             cur_lr = float(optimizer.lr)
@@ -39,6 +46,7 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
         if tb_log is not None:
             tb_log.add_scalar('meta_data/learning_rate', cur_lr, accumulated_iter)
         print("\nIn tools/train_utils/train_utils_new_loss.py, type(batch): {}".format(type(batch)))
+
         model.train()
         optimizer.zero_grad()
 
@@ -49,7 +57,11 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
         # print("\nin tools/train_utils/train_utils_new_loss.py, train_one_epoch, loss.shape {}".format(loss.shape)
         # print("loss data type is {}\n".format(type(loss)))
         xc, far_attr, pap = attr_func(
-            explained_model, explainer, batch, dataset_name, cls_names, cur_it, gt_infos, score_thresh)
+            explained_model, explainer, batch, dataset_name, cls_names, cur_it=cur_it, gt_infos=gt_infos,
+            score_thresh=score_thresh, object_cnt=epoch_obj_cnt, tp_object_cnt=epoch_tp_obj_cnt,
+            fp_ojbect_cnt=epoch_fp_obj_cnt, box_selection=box_selection, pred_score_file_name=pred_score_file_name,
+            cur_epoch=cur_epoch, pred_score_field_name=pred_score_field_name
+        )
 
         # print("xc_loss: {}".format(xc_loss))
         # print("far_attr: {}".format(far_attr))
@@ -64,9 +76,10 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
         elif attr_loss == 'far_attr' or attr_loss == 'FAR_ATTR':
             loss += far_attr_loss
         # print("loss: {}".format(loss))
-        loss.backward()
-        clip_grad_norm_(model.parameters(), optim_cfg.GRAD_NORM_CLIP)
-        optimizer.step()
+        if enable_training:
+            loss.backward()
+            clip_grad_norm_(model.parameters(), optim_cfg.GRAD_NORM_CLIP)
+            optimizer.step()
 
         accumulated_iter += 1
         disp_dict.update({'loss': loss.item(), 'lr': cur_lr})
@@ -96,14 +109,29 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
     return accumulated_iter
 
 
-def train_model(model, optimizer, train_loader, model_func, explained_model, explainer, attr_func,
+def train_model(model, optimizer, train_loader, logger, model_func, explained_model, explainer, attr_func,
                 lr_scheduler, optim_cfg, start_epoch, total_epochs, start_iter, rank, tb_log, ckpt_save_dir, gt_infos,
-                score_thresh, train_sampler=None, lr_warmup_scheduler=None, ckpt_save_interval=1, max_ckpt_save_num=50,
-                merge_all_iters_to_one_epoch=False, cls_names=['Car', 'Pedestrian', 'Cyclist'],
-                dataset_name="KittiDataset", attr_loss="XC"):
+                score_thresh, output_dir, train_sampler=None, lr_warmup_scheduler=None, ckpt_save_interval=1,
+                max_ckpt_save_num=50, merge_all_iters_to_one_epoch=False, cls_names=['Car', 'Pedestrian', 'Cyclist'],
+                dataset_name="KittiDataset", attr_loss="XC", box_selection="tp/fp"):
+    # setup logging files for training-related boxes info
+    obj_cnt_file_name = output_dir / 'interested_obj_cnt.csv'
+    pred_score_file_name = output_dir / 'interested_pred_scores.csv'
+    obj_cnt_field_name = ['epoch', 'tp_cnt', 'fp_cnt', 'tp_car_cnt', 'tp_pede_cnt', 'tp_cyc_cnt', 'fp_car_cnt',
+                          'fp_pede_cnt', 'fp_cyc_cnt', 'car_cnt', 'pede_cnt', 'cyc_cnt']
+    pred_score_field_name = ['epoch', 'batch', 'tp/fp', 'pred_label', 'pred_score']
+    if box_selection != "tp/fp":
+        obj_cnt_field_name = ['epoch', 'car_cnt', 'pede_cnt', 'cyc_cnt']
+        pred_score_field_name = ['epoch', 'batch', 'pred_label', 'pred_score']
+    with open(obj_cnt_file_name, 'w', newline='') as csvfile:
+        writer = csv.DictWriter(csvfile, delimiter=',', fieldnames=obj_cnt_field_name)
+        writer.writeheader()
+    with open(pred_score_file_name, 'w', newline='') as csvfile:
+        writer = csv.DictWriter(csvfile, delimiter=',', fieldnames=pred_score_field_name)
+        writer.writeheader()
     accumulated_iter = start_iter
     if not (attr_loss == "XC" or attr_loss == "xc" or attr_loss == "PAP" or attr_loss == "pap" or
-            attr_loss == "far_attr"):
+            attr_loss == "far_attr" or attr_loss == "FAR_ATTR" or attr_loss == "None"):
         raise NotImplementedError
     with tqdm.trange(start_epoch, total_epochs, desc='epochs', dynamic_ncols=True, leave=(rank == 0)) as tbar:
         total_it_each_epoch = len(train_loader)
@@ -113,17 +141,25 @@ def train_model(model, optimizer, train_loader, model_func, explained_model, exp
             total_it_each_epoch = len(train_loader) // max(total_epochs, 1)
 
         dataloader_iter = iter(train_loader)
+        epoch_obj_cnt = {}
+        epoch_tp_obj_cnt = {}
+        epoch_fp_obj_cnt = {}
+        for i in range(len(cls_names)):
+            epoch_obj_cnt[i] = 0
+            epoch_tp_obj_cnt[i] = 0
+            epoch_fp_obj_cnt[i] = 0
         for cur_epoch in tbar:
             if train_sampler is not None:
                 train_sampler.set_epoch(cur_epoch)
-
             # train one epoch
             if lr_warmup_scheduler is not None and cur_epoch < optim_cfg.WARMUP_EPOCH:
                 cur_scheduler = lr_warmup_scheduler
             else:
                 cur_scheduler = lr_scheduler
             accumulated_iter = train_one_epoch(
-                model, optimizer, train_loader, model_func, explained_model, explainer, attr_func,
+                model, optimizer, train_loader, model_func, explained_model, explainer, attr_func, epoch_obj_cnt,
+                epoch_tp_obj_cnt, epoch_fp_obj_cnt,
+                cur_epoch=cur_epoch,
                 lr_scheduler=cur_scheduler,
                 accumulated_iter=accumulated_iter, optim_cfg=optim_cfg,
                 rank=rank, tbar=tbar, tb_log=tb_log,
@@ -131,9 +167,25 @@ def train_model(model, optimizer, train_loader, model_func, explained_model, exp
                 total_it_each_epoch=total_it_each_epoch,
                 dataloader_iter=dataloader_iter,
                 cls_names=cls_names, dataset_name=dataset_name, attr_loss=attr_loss, gt_infos=gt_infos,
-                score_thresh=score_thresh
+                score_thresh=score_thresh, box_selection=box_selection, pred_score_file_name=pred_score_file_name,
+                pred_score_field_name=pred_score_field_name
             )
-
+            # log object count
+            with open(obj_cnt_file_name, 'a', newline='') as csvfile:
+                writer = csv.DictWriter(csvfile, delimiter=',', fieldnames=obj_cnt_field_name)
+                data_dict = {}
+                data_dict["epoch"] = cur_epoch
+                #TODO: fill the data dict
+                if box_selection == "tp/fp":
+                    data_dict["tp_car_cnt"], data_dict["fp_car_cnt"] = epoch_tp_obj_cnt[0], epoch_fp_obj_cnt[0]
+                    data_dict["tp_pede_cnt"], data_dict["fp_pede_cnt"] = epoch_tp_obj_cnt[1], epoch_fp_obj_cnt[1]
+                    data_dict["tp_cyc_cnt"], data_dict["fp_cyc_cnt"] = epoch_tp_obj_cnt[2], epoch_fp_obj_cnt[2]
+                    data_dict["tp_cnt"], data_dict["fp_cnt"] = sum(epoch_tp_obj_cnt.values()), sum(epoch_fp_obj_cnt.values())
+                data_dict["car_cnt"], data_dict["pede_cnt"], data_dict["cyc_cnt"] = epoch_obj_cnt[0], epoch_obj_cnt[1], epoch_obj_cnt[2]
+                writer.writerow(data_dict)
+            logger.info("{}:{} {}:{} {}:{} after training for {} epochs".format(
+                cls_names[0], epoch_obj_cnt[0], cls_names[1], epoch_obj_cnt[1], cls_names[2], epoch_obj_cnt[2],
+                cur_epoch))
             # save trained model
             trained_epoch = cur_epoch + 1
             if trained_epoch % ckpt_save_interval == 0 and rank == 0:

@@ -51,8 +51,8 @@ from scipy.spatial.transform import Rotation as R
 
 
 class AttributionGeneratorTrain:
-    def __init__(self, model, dataset_name, class_name_list, xai_method, output_path, gt_infos, ig_steps=24,
-                 margin=0.2, num_boxes=3, selection='top', ignore_thresh=0.1, score_thresh=0.1, debug=False,
+    def __init__(self, model, dataset_name, class_name_list, xai_method, output_path, gt_infos, pred_score_file_name, pred_score_field_name,
+                 ig_steps=24, margin=0.2, num_boxes=3, selection='top', ignore_thresh=0.1, score_thresh=0.1, debug=False,
                  full_model=None):
         """
         You should have the data loader ready and the specific batch dictionary available before computing any
@@ -103,6 +103,8 @@ class AttributionGeneratorTrain:
         self.num_boxes = num_boxes
         self.selection = selection
         self.ignore_thresh = ignore_thresh
+        self.pred_score_file_name = pred_score_file_name
+        self.pred_score_field_name = pred_score_field_name
         self.box_debug = True
         self.tight_iou = False
         self.batch_dict = None
@@ -115,10 +117,12 @@ class AttributionGeneratorTrain:
         self.explainer = None
         self.tp_fp = None
         self.gt_dict = None
+        self.batch_cared_ind = []
         self.batch_cared_tp_ind = None # tp pred box indices for the cared boxes for which explanations are generated
         self.batch_cared_fp_ind = None  # tp pred box indices for the cared boxes for which explanations are generated
         self.batch_size = 1
         self.cur_it = 0
+        self.cur_epoch = 0
         # the limits are self.num_boxes, unless the max_num_tp/fp per frame is less than self.num_boxes
         self.tp_limit = 0
         self.fp_limit = 0
@@ -214,8 +218,9 @@ class AttributionGeneratorTrain:
 
     def get_preds_single_frame(self, pred_dicts):
         pred_boxes = pred_dicts[0]['pred_boxes'].cpu().detach().numpy()
+        pred_labels = pred_dicts[0]['pred_labels'].cpu().detach().numpy() - 1
         self.pred_boxes = pred_boxes
-        self.pred_labels = pred_dicts[0]['pred_labels'].cpu().detach().numpy() - 1
+        self.pred_labels = pred_labels
         self.pred_scores = pred_dicts[0]['pred_scores'].cpu().detach().numpy()
         self.selected_anchors = self.batch_dict['anchor_selections'][0]
 
@@ -233,14 +238,16 @@ class AttributionGeneratorTrain:
             pred_boxes, pred_labels, pred_scores, selected_anchors = [], [], [], []
             for i in range(self.batch_size):
                 frame_pred_boxes = pred_dicts[i]['pred_boxes'].detach().cpu().numpy()
+                frame_pred_labels = pred_dicts[i]['pred_labels'].detach().cpu().numpy() - 1
                 pred_boxes.append(frame_pred_boxes)
-                pred_labels.append(pred_dicts[i]['pred_labels'].detach().cpu().numpy() - 1)
+                pred_labels.append(frame_pred_labels)
                 pred_scores.append(pred_dicts[i]['pred_scores'].detach().cpu().numpy())
                 selected_anchors.append(self.batch_dict['anchor_selections'][i])
             self.pred_boxes = pred_boxes
             self.pred_labels = pred_labels
             self.pred_scores = pred_scores
             self.selected_anchors = selected_anchors
+
             # # debug message
             # print("len(selected_anchors): {}".format(len(selected_anchors)))
             # print("len(selected_anchors[0]): {}".format(len(selected_anchors[0])))
@@ -261,6 +268,9 @@ class AttributionGeneratorTrain:
         self.tp_limit = 0
         self.fp_limit = 0
         self.cur_it = 0
+        self.batch_cared_ind = []
+        self.batch_cared_tp_ind = None
+        self.batch_cared_fp_ind = None
 
     def get_attr(self, target):
         """
@@ -457,7 +467,52 @@ class AttributionGeneratorTrain:
                 conf_mat.append(conf_mat_frame)
         self.tp_fp = conf_mat
 
-    def generate_targets_single_frame(self):
+    def record_pred_results(self):
+        """
+        Record the predicted labels and scores
+        :return:
+        """
+        with open(self.pred_score_file_name, 'a', newline='') as csvfile:
+            writer = csv.DictWriter(csvfile, delimiter=',', fieldnames=self.pred_score_field_name)
+            if self.selection == "tp/fp":
+                if self.batch_size == 1:
+                    for ind in self.batch_cared_tp_ind:
+                        data_dict = {"epoch": self.cur_epoch, "batch": self.cur_it, "tp/fp": "tp",
+                                     "pred_label": self.pred_labels[ind], "pred_score": self.pred_scores[ind]}
+                        writer.writerow(data_dict)
+                    for ind in self.batch_cared_fp_ind:
+                        data_dict = {"epoch": self.cur_epoch, "batch": self.cur_it, "tp/fp": "fp",
+                                     "pred_label": self.pred_labels[ind], "pred_score": self.pred_scores[ind]}
+                        writer.writerow(data_dict)
+                else:
+                    for i in range(len(self.batch_cared_tp_ind)):
+                        # note that the length of self.batch_cared_tp_ind[i] will not exceed the actual number of tps
+                        # in a frame
+                        for ind in self.batch_cared_tp_ind[i]:
+                            data_dict = {"epoch": self.cur_epoch, "batch": self.cur_it, "tp/fp": "tp",
+                                         "pred_label": self.pred_labels[i][ind], "pred_score": self.pred_scores[i][ind]}
+                            writer.writerow(data_dict)
+                    for i in range(len(self.batch_cared_fp_ind)):
+                        # note that the length of self.batch_cared_fp_ind[i] will not exceed the actual number of fps
+                        # in a frame
+                        for ind in self.batch_cared_fp_ind[i]:
+                            data_dict = {"epoch": self.cur_epoch, "batch": self.cur_it, "tp/fp": "fp",
+                                         "pred_label": self.pred_labels[i][ind], "pred_score": self.pred_scores[i][ind]}
+                            writer.writerow(data_dict)
+            else:
+                if self.batch_size == 1:
+                    for ind in self.batch_cared_ind:
+                        data_dict = {"epoch": self.cur_epoch, "batch": self.cur_it,
+                                     "pred_label": self.pred_labels[ind], "pred_score": self.pred_scores[ind]}
+                        writer.writerow(data_dict)
+                else:
+                    for i in range(len(self.batch_cared_ind)):
+                        for ind in self.batch_cared_ind[i]:
+                            data_dict = {"epoch": self.cur_epoch, "batch": self.cur_it,
+                                         "pred_label": self.pred_labels[i][ind], "pred_score": self.pred_scores[i][ind]}
+                            writer.writerow(data_dict)
+
+    def generate_targets_single_frame(self, epoch_obj_cnt):
         """
         only gets called when the batch_size is 1
         :return:
@@ -489,18 +544,23 @@ class AttributionGeneratorTrain:
                 print("cared tp indices: {}".format(cared_indices))
                 print("cared fp indices: {}".format(fp_indices))
         elif self.num_boxes >= len(self.pred_labels):
+            self.batch_cared_ind = range(len(self.pred_labels))
             cared_labels = self.pred_labels
             cared_box_vertices = self.pred_vertices
             cared_loc = self.pred_loc
         elif self.selection == "top":
+            self.batch_cared_ind = range(self.num_boxes)
             cared_labels = self.pred_labels[:self.num_boxes]
             cared_box_vertices = self.pred_vertices[:self.num_boxes]
             cared_loc = self.pred_loc[:self.num_boxes]
         elif self.selection == "bottom":
+            self.batch_cared_ind = range(len(self.pred_labels) - self.num_boxes, len(self.pred_labels))
             cared_labels = self.pred_labels[-1 * self.num_boxes:]
             cared_box_vertices = self.pred_vertices[-1 * self.num_boxes:]
             cared_loc = self.pred_loc[-1 * self.num_boxes:]
 
+        for k in range(len(self.class_name_list)):
+            epoch_obj_cnt[k] += np.count_nonzero(cared_labels == k)
         # Generate targets
         for ind, label in enumerate(cared_labels):
             if self.selection == "tp/fp":
@@ -515,7 +575,7 @@ class AttributionGeneratorTrain:
             return target_list, cared_box_vertices, cared_loc, fp_target_list, fp_box_vertices, fp_loc
         return target_list, cared_box_vertices, cared_loc
 
-    def generate_targets(self):
+    def generate_targets(self, epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt):
         """
         Generates targets for explanation given the batch
         Note that the class label target for each box corresponds to the top confidence predicted class
@@ -530,27 +590,28 @@ class AttributionGeneratorTrain:
         batch_fp_box_vertices = []
         batch_fp_loc = []
         if self.batch_size == 1:
-            batch_target_list, batch_cared_box_vertices, batch_cared_loc = self.generate_targets_single_frame()
+            batch_target_list, batch_cared_box_vertices, batch_cared_loc = self.generate_targets_single_frame(epoch_obj_cnt)
         else:
-            batch_cared_indices = []
+            batch_tp_indices = []
             batch_fp_indices = []
+            batch_cared_indices = []
             max_num_tp = 0
             max_num_fp = 0
             if self.selection == "tp/fp":
                 for f in range(self.batch_size):
                     print("frame id: {}\ntp_fp list: {}".format(f, self.tp_fp[f]))
-                    cared_indices = [k for k in range(len(self.tp_fp[f])) if self.tp_fp[f][k] == "TP"]
+                    tp_indices = [k for k in range(len(self.tp_fp[f])) if self.tp_fp[f][k] == "TP"]
                     fp_indices = [k for k in range(len(self.tp_fp[f])) if self.tp_fp[f][k] == "FP"]
-                    print("tp indices: {}".format(cared_indices))
+                    print("tp indices: {}".format(tp_indices))
                     print("fp indices: {}".format(fp_indices))
-                    batch_cared_indices.append(cared_indices)
+                    batch_tp_indices.append(tp_indices)
                     batch_fp_indices.append(fp_indices)
-                    max_num_tp = max(len(cared_indices), max_num_tp)
+                    max_num_tp = max(len(tp_indices), max_num_tp)
                     max_num_fp = max(len(fp_indices), max_num_fp)
                 self.tp_limit = min(self.num_boxes, max_num_tp)
                 self.fp_limit = min(self.num_boxes, max_num_fp)
                 print("self.tp_limit: {} self.fp_limit: {}".format(self.tp_limit, self.fp_limit))
-            self.batch_cared_tp_ind = batch_cared_indices
+            self.batch_cared_tp_ind = batch_tp_indices
             self.batch_cared_fp_ind = batch_fp_indices
             for i in range(self.batch_size):
                 target_list = []
@@ -563,7 +624,7 @@ class AttributionGeneratorTrain:
                 fp_loc = None
                 if self.selection == "tp/fp":
                     # tp selection
-                    cared_indices = batch_cared_indices[i]
+                    cared_indices = batch_tp_indices[i]
                     if len(cared_indices) > self.tp_limit: # too many boxes
                         cared_indices = random.sample(cared_indices, self.tp_limit)
                     self.batch_cared_tp_ind[i] = cared_indices
@@ -588,18 +649,31 @@ class AttributionGeneratorTrain:
                     #     print("cared tp locs: {}".format(cared_loc))
                     #     print("cared fp locs: {}".format(fp_loc))
                 elif self.num_boxes >= len(self.pred_labels[i]):
+                    batch_cared_indices.append(range(len(self.pred_labels[i])))
                     cared_labels = self.pred_labels[i]
                     cared_box_vertices = self.pred_vertices[i]
                     cared_loc = self.pred_loc[i]
                 elif self.selection == "top":
+                    batch_cared_indices.append(range(self.num_boxes))
                     cared_labels = self.pred_labels[i][:self.num_boxes]
                     cared_box_vertices = self.pred_vertices[i][:self.num_boxes]
                     cared_loc = self.pred_loc[i][:self.num_boxes]
                 elif self.selection == "bottom":
+                    batch_cared_indices.append(range(len(self.pred_labels[i]) - self.num_boxes, len(self.pred_labels[i])))
                     cared_labels = self.pred_labels[i][-1 * self.num_boxes:]
                     cared_box_vertices = self.pred_vertices[i][-1 * self.num_boxes:]
                     cared_loc = self.pred_loc[i][-1 * self.num_boxes:]
 
+                if self.selection == "tp/fp":
+                    for k in range(len(self.class_name_list)):
+                        epoch_tp_obj_cnt[k] += np.count_nonzero(cared_labels == k)
+                        epoch_fp_obj_cnt[k] += np.count_nonzero(fp_labels == k)
+                        epoch_obj_cnt[k] += epoch_tp_obj_cnt[k] + epoch_fp_obj_cnt[k]
+                else:
+                    for k in range(len(self.class_name_list)):
+                        epoch_obj_cnt[k] += np.count_nonzero(cared_labels == k)
+                if self.debug:
+                    print("epoch_obj_cnt: {}".format(epoch_obj_cnt))
                 # Generate targets
                 for ind, label in enumerate(cared_labels):
                     print("tp pred_ids:")
@@ -639,6 +713,7 @@ class AttributionGeneratorTrain:
                 batch_target_list.append(target_list)
                 batch_cared_box_vertices.append(cared_box_vertices)
                 batch_cared_loc.append(cared_loc)
+            self.batch_cared_ind = batch_cared_indices
         if self.selection == "tp/fp":
             return batch_target_list, batch_cared_box_vertices, batch_cared_loc, batch_fp_target_list, batch_fp_box_vertices, batch_fp_loc
         return batch_target_list, batch_cared_box_vertices, batch_cared_loc
@@ -707,7 +782,7 @@ class AttributionGeneratorTrain:
                 pap_loss += np.sum(np.abs(diff_1)) + np.sum(np.abs(diff_2))
         return pap_loss
 
-    def xc_preprocess(self, batch_dict, cur_it):
+    def xc_preprocess(self, batch_dict, epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt, cur_it):
         # Get the predictions, compute box vertices, and generate targets
         self.batch_dict = batch_dict
         self.cur_it = cur_it
@@ -720,14 +795,16 @@ class AttributionGeneratorTrain:
         self.get_preds()
         self.get_tp_fp_indices(cur_it)
         self.compute_pred_box_vertices()
-        return self.generate_targets()
+        return self.generate_targets(epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt)
 
-    def compute_xc(self, batch_dict, cur_it, method="cnt", sign="positive"):
+    def compute_xc(self, batch_dict, epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt, cur_it, cur_epoch,
+                   method="cnt", sign="positive"):
         """
         This is the ONLY function that the user should call
 
         :param batch_dict: The input batch for which we are generating explanations
         :param method: Either by counting ("cnt") or by summing ("sum")
+        :param epoch_obj_cnt: count of objects in each class up until the current epoch
         :param sign: Analyze either the positive or the negative attributions
 
         :return:
@@ -737,12 +814,15 @@ class AttributionGeneratorTrain:
         # Get the predictions, compute box vertices, and generate targets
         targets, cared_vertices, cared_locs, fp_targets, fp_vertices, fp_locs = None, None, None, None, None, None
         if self.selection == "tp/fp":
-            targets, cared_vertices, cared_locs, fp_targets, fp_vertices, fp_locs = self.xc_preprocess(batch_dict, cur_it)
+            targets, cared_vertices, cared_locs, fp_targets, fp_vertices, fp_locs = self.xc_preprocess(
+                batch_dict, epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt, cur_it)
         else:
-            targets, cared_vertices, cared_locs = self.xc_preprocess(batch_dict, cur_it)
+            targets, cared_vertices, cared_locs = self.xc_preprocess(
+                batch_dict, epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt, cur_it)
         if self.debug:
             print("len(targets): {} len(cared_vertices): {} len(cared_locs): {}".format(
                 len(targets), len(cared_vertices), len(cared_locs)))
+
         # Compute gradients, XC, and pap
         total_XC_lst, total_far_attr_lst, total_pap_lst, total_fp_XC_lst, total_fp_far_attr_lst, total_fp_pap_lst = \
             [], [], [], [], [], []
@@ -889,20 +969,30 @@ class AttributionGeneratorTrain:
                     total_fp_XC = np.transpose(total_fp_XC)
                     total_fp_far_attr = np.transpose(total_fp_far_attr)
                     total_fp_pap = np.transpose(total_fp_pap)
+
+        # record the cared predictions:
+        self.cur_epoch = cur_epoch
+        self.record_pred_results()
+
         if self.selection == "tp/fp":
             return total_XC, total_far_attr, total_pap, total_fp_XC, total_fp_far_attr, total_fp_pap
         return total_XC, total_far_attr, total_pap
 
-    def compute_PAP(self, batch_dict, cur_it, sign="positive"):
+    def compute_PAP(self, batch_dict, epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt, cur_it, cur_epoch, sign="positive"):
         """
         User shall call the function if they wish to not compute XC, just PAP only
         :return:
         """
         # Get the predictions, compute box vertices, and generate targets
-        targets, cared_vertices, cared_locs = self.xc_preprocess(batch_dict, cur_it)
+        targets, cared_vertices, cared_locs = self.xc_preprocess(
+            batch_dict, epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt, cur_it)
         if self.debug:
             print("len(targets): {} len(cared_vertices): {} len(cared_locs): {}".format(
                 len(targets), len(cared_vertices), len(cared_locs)))
+
+        # record the cared predictions:
+        self.cur_epoch = cur_epoch
+        self.record_pred_results()
 
         # Compute gradients, XC, and pap
         total_pap = 0

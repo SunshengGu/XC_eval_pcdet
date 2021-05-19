@@ -157,6 +157,7 @@ class AttributionGenerator:
         self.explainer = None
         self.batch_size = 1
         self.time_study = False
+        self.xai_method = xai_method
         if xai_method == 'Saliency':
             self.explainer = Saliency(self.model)
         elif xai_method == 'IntegratedGradients':
@@ -287,9 +288,12 @@ class AttributionGenerator:
         """
         start1 = timeit.default_timer()
         PseudoImage2D = self.batch_dict['spatial_features']
-        batch_grad = self.explainer.attribute(PseudoImage2D, baselines=PseudoImage2D * 0, target=target,
-                                              additional_forward_args=self.batch_dict, n_steps=self.ig_steps,
-                                              internal_batch_size=self.batch_dict['batch_size'])
+        if self.xai_method == "IntegratedGradients":
+            batch_grad = self.explainer.attribute(PseudoImage2D, baselines=PseudoImage2D * 0, target=target,
+                                                  additional_forward_args=self.batch_dict, n_steps=self.ig_steps,
+                                                  internal_batch_size=self.batch_dict['batch_size'])
+        elif self.xai_method == "Saliency":
+            batch_grad = self.explainer.attribute(PseudoImage2D, target=target, additional_forward_args=self.batch_dict)
         end1 = timeit.default_timer()
         attr_time = end1 - start1
 
@@ -371,7 +375,7 @@ class AttributionGenerator:
             self.pred_vertices = batch_expanded_preds
             self.pred_loc = batch_pred_loc
 
-    def generate_targets_single_frame(self):
+    def generate_targets_single_frame(self, epoch_obj_cnt):
         target_list = []
         cared_labels = None
         cared_box_vertices = None
@@ -389,12 +393,16 @@ class AttributionGenerator:
             cared_box_vertices = self.pred_vertices[-1 * self.num_boxes:]
             cared_loc = self.pred_loc[-1 * self.num_boxes:]
 
+        for k in range(len(self.class_name_list)):
+            epoch_obj_cnt[k] += np.count_nonzero(cared_labels == k)
+        if self.debug:
+            print("epoch_obj_cnt: {}".format(epoch_obj_cnt))
         # Generate targets
         for ind, label in enumerate(cared_labels):
             target_list.append((self.selected_anchors[ind], label))
         return target_list, cared_box_vertices, cared_loc
 
-    def generate_targets(self):
+    def generate_targets(self, epoch_obj_cnt):
         """
         Generates targets for explanation given the batch
         Note that the class label target for each box corresponds to the top confidence predicted class
@@ -406,7 +414,7 @@ class AttributionGenerator:
         batch_cared_box_vertices = []
         batch_cared_loc = []
         if self.batch_size == 1:
-            batch_target_list, batch_cared_box_vertices, batch_cared_loc = self.generate_targets_single_frame()
+            batch_target_list, batch_cared_box_vertices, batch_cared_loc = self.generate_targets_single_frame(epoch_obj_cnt)
         else:
             for i in range(self.batch_size):
                 target_list = []
@@ -429,6 +437,10 @@ class AttributionGenerator:
                 # Generate targets
                 for ind, label in enumerate(cared_labels):
                     target_list.append((self.selected_anchors[i][ind], label))
+                for k in range(len(self.class_name_list)):
+                    epoch_obj_cnt[k] += np.count_nonzero(cared_labels == k)
+                if self.debug:
+                    print("epoch_obj_cnt: {}".format(epoch_obj_cnt))
                 batch_target_list.append(target_list)
                 batch_cared_box_vertices.append(cared_box_vertices)
                 batch_cared_loc.append(cared_loc)
@@ -494,7 +506,7 @@ class AttributionGenerator:
                 pap_loss += np.sum(np.abs(diff_1)) + np.sum(np.abs(diff_2))
         return pap_loss
 
-    def xc_preprocess(self, batch_dict):
+    def xc_preprocess(self, batch_dict, epoch_obj_cnt):
         # Get the predictions, compute box vertices, and generate targets
         self.batch_dict = batch_dict
         load_data_to_gpu(self.batch_dict)
@@ -505,9 +517,9 @@ class AttributionGenerator:
                 anchor_scores = self.full_model(dummy_tensor, self.batch_dict)
         self.get_preds()
         self.compute_pred_box_vertices()
-        return self.generate_targets()
+        return self.generate_targets(epoch_obj_cnt)
 
-    def compute_xc(self, batch_dict, method="cnt", sign="positive"):
+    def compute_xc(self, batch_dict, epoch_obj_cnt, method="cnt", sign="positive"):
         """
         This is the ONLY function that the user should call
 
@@ -518,7 +530,7 @@ class AttributionGenerator:
         """
         # Get the predictions, compute box vertices, and generate targets
         start_time = timeit.default_timer()
-        targets, cared_vertices, cared_locs = self.xc_preprocess(batch_dict)
+        targets, cared_vertices, cared_locs = self.xc_preprocess(batch_dict, epoch_obj_cnt)
         after_preprocess = timeit.default_timer()
         xc_preprocess_time = after_preprocess - start_time
         if self.debug:
@@ -607,13 +619,13 @@ class AttributionGenerator:
                 attr_time, aggr_time, xc_time, pap_time, misc_time))
         return total_XC, total_far_attr, total_pap
 
-    def compute_PAP(self, batch_dict, sign="positive"):
+    def compute_PAP(self, batch_dict, epoch_obj_cnt, sign="positive"):
         """
         User shall call the function if they wish to not compute XC, just PAP only
         :return:
         """
         # Get the predictions, compute box vertices, and generate targets
-        targets, cared_vertices, cared_locs = self.xc_preprocess(batch_dict)
+        targets, cared_vertices, cared_locs = self.xc_preprocess(batch_dict, epoch_obj_cnt)
         if self.debug:
             print("len(targets): {} len(cared_vertices): {} len(cared_locs): {}".format(
                 len(targets), len(cared_vertices), len(cared_locs)))

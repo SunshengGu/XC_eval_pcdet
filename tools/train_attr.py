@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from test import repeat_eval_ckpt
 import copy
+import csv
 
 import torch
 import torch.distributed as dist
@@ -30,6 +31,7 @@ def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('--cfg_file', type=str, default=None, help='specify the config for training')
     parser.add_argument('--attr_loss', type=str, default='XC', help='specify the attribution loss')
+    parser.add_argument('--loss_selection', type=str, default='tp/fp', help='specify the attribution loss')
     parser.add_argument('--explained_cfg_file', type=str, default=None,
                         help='specify the config for model to be explained')
     parser.add_argument('--batch_size', type=int, default=None, required=False, help='batch size for training')
@@ -214,6 +216,7 @@ def main():
         model,
         optimizer,
         train_loader,
+        logger=logger,
         explained_model=model2D,
         explainer=explainer,
         attr_func=attr_func,
@@ -235,7 +238,8 @@ def main():
         merge_all_iters_to_one_epoch=args.merge_all_iters_to_one_epoch,
         cls_names=cfg.CLASS_NAMES,
         dataset_name=cfg.DATA_CONFIG.DATASET,
-        attr_loss=attr_loss
+        attr_loss=attr_loss, box_selection=args.loss_selection,
+        output_dir=output_dir
     )
 
     logger.info('**********************End training %s/%s(%s)**********************\n\n\n'

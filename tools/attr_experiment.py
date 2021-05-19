@@ -45,6 +45,7 @@ def main():
     # Create output directories, not very useful, just to be compatible with the load_params_from_file
     # method defined in pcdet/models/detectors/detector3d_template.py, which requires a logger
     output_dir = cfg.ROOT_DIR / 'output' / cfg.EXP_GROUP_PATH / cfg.TAG / 'default'
+    print("\noutput_dir: {}\n".format(output_dir))
     output_dir.mkdir(parents=True, exist_ok=True)
     eval_output_dir = output_dir / 'eval'
     eval_all = False
@@ -88,23 +89,40 @@ def main():
     #                                       data_set=test_set, xai_method=method, output_path="unspecified",
     #                                       ignore_thresh=0.0, debug=True)
     selection = "tp/fp"
-
-    myXCCalculator = AttributionGeneratorTrain(explained_model, cfg.DATA_CONFIG.DATASET, cfg.CLASS_NAMES, method, None,
-                                               gt_infos, score_thresh=cfg.MODEL.POST_PROCESSING.SCORE_THRESH,
-                                               selection=selection, debug=True, full_model=full_model, margin=0.2,
-                                               ignore_thresh=0.0)
+    pred_score_file_name = output_dir / 'interested_pred_scores.csv'
+    pred_score_field_name = ['epoch', 'batch', 'tp/fp', 'pred_label', 'pred_score']
+    if selection != "tp/fp":
+        pred_score_field_name = ['epoch', 'batch', 'pred_label', 'pred_score']
+    with open(pred_score_file_name, 'w', newline='') as csvfile:
+        writer = csv.DictWriter(csvfile, delimiter=',', fieldnames=pred_score_field_name)
+        writer.writeheader()
+    myXCCalculator = AttributionGeneratorTrain(
+        explained_model, cfg.DATA_CONFIG.DATASET, cfg.CLASS_NAMES, method, None, gt_infos,
+        pred_score_file_name=pred_score_file_name, pred_score_field_name=pred_score_field_name,
+        score_thresh=cfg.MODEL.POST_PROCESSING.SCORE_THRESH, selection=selection, debug=True, full_model=full_model,
+        margin=0.2, ignore_thresh=0.0)
+    epoch_obj_cnt = {}
+    epoch_tp_obj_cnt = {}
+    epoch_fp_obj_cnt = {}
+    for i in range(3):
+        epoch_obj_cnt[i] = 0
+        epoch_tp_obj_cnt[i] = 0
+        epoch_fp_obj_cnt[i] = 0
     for batch_num, batch_dictionary in enumerate(test_loader):
         if batch_num == num_batchs:
             break
         print("\n\nAnalyzing the {}th batch\n".format(batch_num))
         if selection == "tp/fp":
             batch_XC, batch_far_attr, batch_total_pap, batch_fp_XC, batch_fp_far_attr, batch_fp_total_pap = \
-                myXCCalculator.compute_xc(batch_dictionary, batch_num, method="sum")
+                myXCCalculator.compute_xc(
+                    batch_dictionary, epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt, cur_it=batch_num,
+                    cur_epoch=0, method="sum")
             print("\nTP XC values for the batch:\n {}".format(batch_XC))
             print("\nFP XC values for the batch:\n {}".format(batch_fp_XC))
         else:
-            batch_XC, batch_far_attr, batch_total_pap = myXCCalculator.compute_xc(batch_dictionary, batch_num, method="sum")
-        print("\nXC values for the batch:\n {}".format(batch_XC))
+            batch_XC, batch_far_attr, batch_total_pap = myXCCalculator.compute_xc(
+                batch_dictionary, epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt, cur_it=batch_num,
+                cur_epoch=0, method="sum")
         myXCCalculator.reset()
 
 
