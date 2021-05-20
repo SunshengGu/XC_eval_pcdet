@@ -88,10 +88,10 @@ def main():
     #                                       model_cfg_file=explained_cfg_file,
     #                                       data_set=test_set, xai_method=method, output_path="unspecified",
     #                                       ignore_thresh=0.0, debug=True)
-    selection = "tp/fp"
+    selection = "tp"
     pred_score_file_name = output_dir / 'interested_pred_scores.csv'
     pred_score_field_name = ['epoch', 'batch', 'tp/fp', 'pred_label', 'pred_score']
-    if selection != "tp/fp":
+    if selection != "tp/fp" and selection != "tp":
         pred_score_field_name = ['epoch', 'batch', 'pred_label', 'pred_score']
     with open(pred_score_file_name, 'w', newline='') as csvfile:
         writer = csv.DictWriter(csvfile, delimiter=',', fieldnames=pred_score_field_name)
@@ -123,6 +123,8 @@ def main():
             batch_XC, batch_far_attr, batch_total_pap = myXCCalculator.compute_xc(
                 batch_dictionary, epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt, cur_it=batch_num,
                 cur_epoch=0, method="sum")
+            if selection == "tp":
+                print("\nTP XC values for the batch:\n {}".format(batch_XC))
         myXCCalculator.reset()
 
 

@@ -138,7 +138,7 @@ def train_model(model, optimizer, train_loader, logger, model_func, explained_mo
     obj_cnt_field_name = ['epoch', 'tp_cnt', 'fp_cnt', 'tp_car_cnt', 'tp_pede_cnt', 'tp_cyc_cnt', 'fp_car_cnt',
                           'fp_pede_cnt', 'fp_cyc_cnt', 'car_cnt', 'pede_cnt', 'cyc_cnt']
     pred_score_field_name = ['epoch', 'batch', 'tp/fp', 'pred_label', 'pred_score']
-    if box_selection != "tp/fp":
+    if box_selection != "tp/fp" and box_selection != "tp":
         obj_cnt_field_name = ['epoch', 'car_cnt', 'pede_cnt', 'cyc_cnt']
         pred_score_field_name = ['epoch', 'batch', 'pred_label', 'pred_score']
     with open(obj_cnt_file_name, 'w', newline='') as csvfile:
@@ -194,7 +194,7 @@ def train_model(model, optimizer, train_loader, logger, model_func, explained_mo
                 data_dict = {}
                 data_dict["epoch"] = cur_epoch
                 #TODO: fill the data dict
-                if box_selection == "tp/fp":
+                if box_selection == "tp/fp" or box_selection == "tp":
                     data_dict["tp_car_cnt"], data_dict["fp_car_cnt"] = epoch_tp_obj_cnt[0], epoch_fp_obj_cnt[0]
                     data_dict["tp_pede_cnt"], data_dict["fp_pede_cnt"] = epoch_tp_obj_cnt[1], epoch_fp_obj_cnt[1]
                     data_dict["tp_cyc_cnt"], data_dict["fp_cyc_cnt"] = epoch_tp_obj_cnt[2], epoch_fp_obj_cnt[2]
