@@ -87,8 +87,12 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
         xc_loss = 1 / xc_val if xc_val > 0.01 else 0 # smaller XC, bigger loss
         pap_loss = 0.001 * pap_val
         far_attr_loss = 0.03 * far_attr_val
+        if box_selection == 'tp/fp':
+            fp_xc_loss = 0.1 * np.nansum(fp_xc) / batch["batch_size"]
         if attr_loss == 'xc' or attr_loss == 'XC':
             loss += xc_loss
+            if box_selection == "tp/fp":
+                loss += fp_xc_loss
         elif attr_loss == 'pap' or attr_loss == 'PAP':
             loss += pap_loss
         elif attr_loss == 'far_attr' or attr_loss == 'FAR_ATTR':
@@ -113,6 +117,8 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
                 tb_log.add_scalar('train/loss', loss, accumulated_iter)
                 tb_log.add_scalar('train/xc', xc_val, accumulated_iter)
                 tb_log.add_scalar('train/xc_loss', xc_loss, accumulated_iter)
+                if box_selection == 'tp/fp':
+                    tb_log.add_scalar('train/fp_xc_loss', fp_xc_loss, accumulated_iter)
                 tb_log.add_scalar('train/far_attr', far_attr_val, accumulated_iter)
                 tb_log.add_scalar('train/far_attr_loss', far_attr_loss, accumulated_iter)
                 tb_log.add_scalar('train/pap', pap_val, accumulated_iter)
