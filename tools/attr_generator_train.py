@@ -630,10 +630,12 @@ class AttributionGeneratorTrain:
             for i in range(self.batch_size):
                 target_list = []
                 cared_labels = None
+                cared_labels_arr = None
                 cared_box_vertices = None
                 cared_loc = None
                 fp_target_list = []
                 fp_labels = None
+                fp_labels_arr = None
                 fp_box_vertices = None
                 fp_loc = None
                 if self.selection == "tp/fp" or self.selection == "tp":
@@ -643,6 +645,7 @@ class AttributionGeneratorTrain:
                         cared_indices = random.sample(cared_indices, self.tp_limit)
                     self.batch_cared_tp_ind[i] = cared_indices
                     cared_labels = [self.pred_labels[i][ind] for ind in cared_indices]
+                    cared_labels_arr = np.array(cared_labels)
                     cared_box_vertices = [self.pred_vertices[i][ind] for ind in cared_indices]
                     cared_loc = [self.pred_loc[i][ind] for ind in cared_indices]
                     # fp selection
@@ -651,6 +654,7 @@ class AttributionGeneratorTrain:
                         fp_indices = random.sample(fp_indices, self.fp_limit)
                     self.batch_cared_fp_ind[i] = fp_indices
                     fp_labels = [self.pred_labels[i][ind] for ind in fp_indices]
+                    fp_labels_arr = np.array(fp_labels)
                     fp_box_vertices = [self.pred_vertices[i][ind] for ind in fp_indices]
                     fp_loc = [self.pred_loc[i][ind] for ind in fp_indices]
                     if self.debug:
@@ -680,14 +684,19 @@ class AttributionGeneratorTrain:
 
                 if self.selection == "tp/fp" or self.selection == "tp":
                     for k in range(len(self.class_name_list)):
-                        epoch_tp_obj_cnt[k] += np.count_nonzero(cared_labels == k)
-                        epoch_fp_obj_cnt[k] += np.count_nonzero(fp_labels == k)
-                        epoch_obj_cnt[k] += epoch_tp_obj_cnt[k] + epoch_fp_obj_cnt[k]
+                        if self.debug:
+                            print("type(cared_labels): {}".format(type(cared_labels)))
+                            print("type(fp_labels): {}".format(type(fp_labels)))
+                        epoch_tp_obj_cnt[k] += np.count_nonzero(cared_labels_arr == k) if isinstance(cared_labels, list) else np.count_nonzero(cared_labels == k)
+                        epoch_fp_obj_cnt[k] += np.count_nonzero(fp_labels_arr == k) if isinstance(fp_labels, list) else np.count_nonzero(fp_labels == k)
+                        epoch_obj_cnt[k] = epoch_tp_obj_cnt[k] + epoch_fp_obj_cnt[k]
                 else:
                     for k in range(len(self.class_name_list)):
                         epoch_obj_cnt[k] += np.count_nonzero(cared_labels == k)
                 if self.debug:
                     print("epoch_obj_cnt: {}".format(epoch_obj_cnt))
+                    print("epoch_tp_obj_cnt: {}".format(epoch_tp_obj_cnt))
+                    print("epoch_fp_obj_cnt: {}".format(epoch_fp_obj_cnt))
                 # Generate targets
                 for ind, label in enumerate(cared_labels):
                     print("tp pred_ids:")
@@ -817,6 +826,10 @@ class AttributionGeneratorTrain:
         """
         This is the ONLY function that the user should call
 
+        :param cur_epoch: current epoch
+        :param cur_it: current batch id
+        :param epoch_fp_obj_cnt: tp object counts by class
+        :param epoch_tp_obj_cnt: tp object counts by class
         :param batch_dict: The input batch for which we are generating explanations
         :param method: Either by counting ("cnt") or by summing ("sum")
         :param epoch_obj_cnt: count of objects in each class up until the current epoch
