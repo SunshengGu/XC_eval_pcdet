@@ -1,3 +1,8 @@
+When you can't `git pull`, and `git stash` also won't work, try this:
+- `git status` to see which local files are modified but not committed
+- `git restore <file_that_causes_trouble>`
+- `git pull`
+
 Use the server to train:
 - `sudo openconnect -v cn-vpn.uwaterloo.ca`
 - Enter "UW-Campus" for Group
