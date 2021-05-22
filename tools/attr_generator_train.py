@@ -672,16 +672,28 @@ class AttributionGeneratorTrain:
                     cared_box_vertices = self.pred_vertices[i]
                     cared_loc = self.pred_loc[i]
                 elif self.selection == "top":
+                    # As long as self.num_boxes is small (say 3), it's OK to just brute force picking the top few elements
                     batch_cared_indices.append(range(self.num_boxes))
                     cared_labels = self.pred_labels[i][:self.num_boxes]
                     cared_box_vertices = self.pred_vertices[i][:self.num_boxes]
                     cared_loc = self.pred_loc[i][:self.num_boxes]
                 elif self.selection == "bottom":
-                    batch_cared_indices.append(range(len(self.pred_labels[i]) - self.num_boxes, len(self.pred_labels[i])))
+                    frame_cared_indices = range(len(self.pred_labels[i]) - self.num_boxes, len(self.pred_labels[i]))
+                    batch_cared_indices.append(frame_cared_indices)
+                    # TODO: recreate the following 3 variables again using frame_cared_indices
                     cared_labels = self.pred_labels[i][-1 * self.num_boxes:]
                     cared_box_vertices = self.pred_vertices[i][-1 * self.num_boxes:]
                     cared_loc = self.pred_loc[i][-1 * self.num_boxes:]
-
+                    # cared_labels = [self.pred_labels[i][ind] for ind in frame_cared_indices]
+                    # cared_labels_arr = np.array(cared_labels)
+                    # cared_box_vertices = [self.pred_vertices[i][ind] for ind in frame_cared_indices]
+                    # cared_loc = [self.pred_loc[i][ind] for ind in frame_cared_indices]
+                    if self.debug:
+                        print("type(frame_cared_indices): {}".format(type(frame_cared_indices)))
+                        print("frame {}  frame_cared_indices: {}".format(i, frame_cared_indices))
+                        print("len(cared_labels): {}".format(len(cared_labels)))
+                        print("len(cared_box_vertices): {}".format(len(cared_box_vertices)))
+                        print("len(cared_loc): {}".format(len(cared_loc)))
                 if self.selection == "tp/fp" or self.selection == "tp":
                     for k in range(len(self.class_name_list)):
                         if self.debug:
@@ -692,21 +704,24 @@ class AttributionGeneratorTrain:
                         epoch_obj_cnt[k] = epoch_tp_obj_cnt[k] + epoch_fp_obj_cnt[k]
                 else:
                     for k in range(len(self.class_name_list)):
-                        epoch_obj_cnt[k] += np.count_nonzero(cared_labels == k)
+                        epoch_obj_cnt[k] += np.count_nonzero(cared_labels_arr == k) if isinstance(cared_labels, list) else np.count_nonzero(cared_labels == k)
                 if self.debug:
                     print("epoch_obj_cnt: {}".format(epoch_obj_cnt))
                     print("epoch_tp_obj_cnt: {}".format(epoch_tp_obj_cnt))
                     print("epoch_fp_obj_cnt: {}".format(epoch_fp_obj_cnt))
                 # Generate targets
                 for ind, label in enumerate(cared_labels):
-                    print("tp pred_ids:")
                     if self.selection == "tp/fp" or self.selection == "tp":
+                        print("pred_ids:")
                         pred_id = self.batch_cared_tp_ind[i][ind]
                         print("pred_id: {}".format(pred_id))
                         print("pred_label: {}".format(label))
                         target_list.append((self.selected_anchors[i][pred_id], label))
-                    else:
+                    elif self.selection == "top":
                         target_list.append((self.selected_anchors[i][ind], label))
+                    elif self.selection == "bottom":
+                        pred_id = batch_cared_indices[i][ind]
+                        target_list.append((self.selected_anchors[i][pred_id], label))
                 if self.selection == "tp/fp" or self.selection == "tp":
                     print("fp pred_ids:")
                     for ind, label in enumerate(fp_labels):

@@ -88,7 +88,7 @@ def main():
     #                                       model_cfg_file=explained_cfg_file,
     #                                       data_set=test_set, xai_method=method, output_path="unspecified",
     #                                       ignore_thresh=0.0, debug=True)
-    selection = "tp"
+    selection = "bottom"
     pred_score_file_name = output_dir / 'interested_pred_scores.csv'
     pred_score_field_name = ['epoch', 'batch', 'tp/fp', 'pred_label', 'pred_score']
     if selection != "tp/fp" and selection != "tp":
@@ -125,6 +125,8 @@ def main():
                 cur_epoch=0, method="sum")
             if selection == "tp":
                 print("\nTP XC values for the batch:\n {}".format(batch_XC))
+            else:
+                print("\nXC values for the batch:\n {}".format(batch_XC))
         myXCCalculator.reset()
 
 
