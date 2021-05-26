@@ -88,10 +88,12 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
         pap_loss = 0.001 * pap_val
         far_attr_loss = 0.03 * far_attr_val
         if box_selection == 'tp/fp':
+            print("\ncomputing fp_xc_loss\n")
             fp_xc_loss = 0.1 * np.nansum(fp_xc) / batch["batch_size"]
         if attr_loss == 'xc' or attr_loss == 'XC':
             loss += xc_loss
-            if box_selection == "tp/fp":
+            if box_selection == 'tp/fp':
+                print("\nadding fp_xc_loss\n")
                 loss += fp_xc_loss
         elif attr_loss == 'pap' or attr_loss == 'PAP':
             loss += pap_loss
