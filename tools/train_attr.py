@@ -31,6 +31,7 @@ def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('--cfg_file', type=str, default=None, help='specify the config for training')
     parser.add_argument('--attr_loss', type=str, default='XC', help='specify the attribution loss')
+    parser.add_argument('--attr_method', type=str, default='Saliency', help='specify the method for generating attributions')
     parser.add_argument('--box_selection', type=str, default='tp/fp', help='how to apply the attr loss')
     parser.add_argument('--explained_cfg_file', type=str, default=None,
                         help='specify the config for model to be explained')
@@ -78,7 +79,7 @@ def parse_config():
 def main():
     args, cfg = parse_config()
     attr_loss = args.attr_loss
-    xai_method = 'Saliency'
+    xai_method = args.attr_method
     attr_shown = 'positive'  # show positive or negative attributions
     # IG specific parameters
     mult_by_inputs = True  # whether to show attributions only at where some input exists
