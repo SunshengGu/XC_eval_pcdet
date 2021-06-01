@@ -84,9 +84,9 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
         xc_val = np.nansum(xc) / batch["batch_size"] * scaling_ratio
         pap_val = np.nansum(pap) / batch["batch_size"] * scaling_ratio
         far_attr_val = np.nansum(far_attr) / batch["batch_size"] * scaling_ratio
-        epsilon = 0.01
+        epsilon = 0.01  # to avoid division by very small number
         xc_val = max(epsilon, xc_val)
-        xc_loss = min(0.3333 / xc_val, 0.3)
+        xc_loss = min(0.3333 / xc_val, 0.3) # to put an upper limit on XC_loss
         pap_loss = 0.001 * pap_val
         far_attr_loss = 0.03 * far_attr_val
         if box_selection == 'tp/fp':
