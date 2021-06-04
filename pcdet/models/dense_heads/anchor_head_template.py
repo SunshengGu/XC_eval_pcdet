@@ -130,6 +130,8 @@ class AnchorHeadTemplate(nn.Module):
         cls_loss = cls_loss_src.sum() / batch_size
 
         cls_loss = cls_loss * self.model_cfg.LOSS_CONFIG.LOSS_WEIGHTS['cls_weight']
+        # print("\ncls_loss_src data type: {}".format(type(cls_loss_src)))
+        # print("cls_loss data type: {}\n".format(type(cls_loss)))
         tb_dict = {
             'rpn_loss_cls': cls_loss.item()
         }
@@ -195,6 +197,8 @@ class AnchorHeadTemplate(nn.Module):
         tb_dict = {
             'rpn_loss_loc': loc_loss.item()
         }
+        # print("\nloc_loss_src data type: {}".format(type(loc_loss_src)))
+        # print("box_loss data type: {}\n".format(type(box_loss)))
 
         if box_dir_cls_preds is not None:
             dir_targets = self.get_direction_target(
@@ -218,6 +222,8 @@ class AnchorHeadTemplate(nn.Module):
         box_loss, tb_dict_box = self.get_box_reg_layer_loss()
         tb_dict.update(tb_dict_box)
         rpn_loss = cls_loss + box_loss
+        # print("\nrpn_loss data type: {}".format(type(rpn_loss)))
+        # print("rpn_loss.item() data type: {}\n".format(type(rpn_loss.item())))
 
         tb_dict['rpn_loss'] = rpn_loss.item()
         return rpn_loss, tb_dict

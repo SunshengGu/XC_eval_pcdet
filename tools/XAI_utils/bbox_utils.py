@@ -48,6 +48,29 @@ def box_preprocess(box_vertices):
     return AB, AD, AB_dot_AB, AD_dot_AD
 
 
+def box_preprocess_tensor(box_vertices):
+    """
+    :param box_vertices:
+    :return:
+        AB: one edge of the box in vector form
+        AD: another edge of the box in vector form
+        AB_dot_AB: scalar, dot product
+        AD_dot_AD: scalar, dot product
+    """
+    A = box_vertices[0]
+    B = box_vertices[1]
+    D = box_vertices[3]
+    AB, AD = torch.zeros(2).cuda(), torch.zeros(2).cuda()
+    AB[0] = B[0] - A[0]
+    AB[1] = B[1] - A[1]
+    AD[0] = D[0] - A[0]
+    AD[1] = D[1] - A[1]
+    AB_dot_AB = torch.dot(AB, AB)
+    # print("AB_dot_AB.device: {}".format(AB_dot_AB.device)) # it is already loaded onto the gpu
+    AD_dot_AD = torch.dot(AD, AD)
+    return AB, AD, AB_dot_AB, AD_dot_AD
+
+
 def box_validation(box, box_vertices, dataset_name):
     """
     :param box: a bounding box of the form (x,y,z,l,w,h,theta)
@@ -135,6 +158,8 @@ def find_anchor_index(dataset_name, y, x):
         col_id = math.floor(x / W_step)
         anchor_id = row_id * W_grid + col_id
         return anchor_id
+
+
 def flip_xy(box_vertices):
     box_vertices_copy = copy.deepcopy(box_vertices)
     for vertex in box_vertices_copy:
@@ -168,6 +193,33 @@ def generate_box_mask(box_mask, box_center, vicinity, corner_A, AB, AD, AB_dot_A
     for i in range(y_start, y_end, 1):
         for j in range(x_start, x_end, 1):
             if in_box(corner_A, i, j, AB, AD, AB_dot_AB, AD_dot_AD):
+                box_mask[i][j] = 1
+
+
+def generate_box_mask_tensor(box_mask, box_center, vicinity, corner_A, AB, AD, AB_dot_AB, AD_dot_AD):
+    """
+    :param vicinity: search vicinity w.r.t. the box_center, class dependent
+    :param box_center: center of the pred box we wish to explain
+    :param box_mask: numpy array, a mask for the box to be generated here
+    :param corner_A: a corner of the box
+    :param AB:
+    :param AD:
+    :param AB_dot_AB:
+    :param AD_dot_AD:
+    Idea:
+    - Create a mask for the box within the box center's vicinity
+    - The size of the vicinity is determined by the class of the object
+    :return:
+    """
+    H = box_mask.shape[0]
+    W = box_mask.shape[1]
+    y_start = max(0, int(box_center[0]-vicinity))
+    y_end = min(H, int(box_center[0]+vicinity+1))
+    x_start = max(0, int(box_center[1] - vicinity))
+    x_end = min(W, int(box_center[1] + vicinity + 1))
+    for i in range(y_start, y_end, 1):
+        for j in range(x_start, x_end, 1):
+            if in_box_tensor(corner_A, i, j, AB, AD, AB_dot_AB, AD_dot_AD):
                 box_mask[i][j] = 1
 
 
@@ -217,6 +269,26 @@ def in_box(A, y, x, AB, AD, AB_dot_AB, AD_dot_AD):
     if AM_dot_AB < 0 or AM_dot_AB > AB_dot_AB:
         return False
     AM_dot_AD = np.dot(AM, AD)
+    if AM_dot_AD < 0 or AM_dot_AD > AD_dot_AD:
+        return False
+    return True
+
+
+def in_box_tensor(A, y, x, AB, AD, AB_dot_AB, AD_dot_AD):
+    """
+    reference: https://math.stackexchange.com/questions/190111/how-to-check-if-a-point-is-inside-a-rectangle
+    :param A: first vertex of the box
+    :param y: y coordinate of M
+    :param x: x coordinate of M
+    :return: If point M(y,x) is in the box
+    """
+    AM = torch.zeros(2).cuda()
+    AM[0] = y - A[0]
+    AM[1] = x - A[1]
+    AM_dot_AB = torch.dot(AM, AB)
+    if AM_dot_AB < 0 or AM_dot_AB > AB_dot_AB:
+        return False
+    AM_dot_AD = torch.dot(AM, AD)
     if AM_dot_AD < 0 or AM_dot_AD > AD_dot_AD:
         return False
     return True
@@ -309,6 +381,42 @@ def transform_box_center_coord(coord, dataset_name, high_rez=False, scaling_fact
         # y = H - y
         x = coord[0] * new_scale
         return np.array([y,x])
+
+
+def transform_box_center_coord_tensor(coord, dataset_name, high_rez=False, scaling_factor=1):
+    """
+    :param coord: coordinate of the center of the box in meters (x, y) w.r.t. ego location
+    :param dataset_name:
+    :param high_rez: indicate if we are transforming to the high resolution coordinates
+    :param scaling_factor:
+    :return:
+    """
+    if dataset_name == 'CadcDataset':
+        # x_range = 100.0
+        y_range = 100.0
+        H = 400
+        if high_rez:
+            H = H * scaling_factor
+        #TODO: the remaining part of this if statement may need to be changed
+        new_scale = H / y_range
+        # print('H: {}'.format(H))
+        y = coord[1] * new_scale
+        # y = H - y
+        x = coord[0] * new_scale
+        return torch.tensor([y, x]).cuda()
+    elif dataset_name == 'KittiDataset':
+        '''Note: the range for Kitti is different now'''
+        # x_range = 70.4
+        y_range = 79.36
+        H = 496
+        if high_rez:
+            H = H * scaling_factor
+        new_scale = H / y_range
+        y = coord[1] + 39.68
+        y = y * new_scale
+        # y = H - y
+        x = coord[0] * new_scale
+        return torch.tensor([y, x]).cuda()
 
 
 def transform_box_coord(H, W, box_vertices, dataset_name, high_rez=False, scaling_factor=1):

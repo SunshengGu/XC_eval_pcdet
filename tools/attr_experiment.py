@@ -1,5 +1,6 @@
 import numpy as np
-from attr_generator_train import *
+# from attr_generator_train import *
+from attr_generator_tensor import *
 from XAI_utils.tp_fp import get_gt_infos
 
 # def get_PAP(pos_grad, neg_grad, sign):
@@ -96,7 +97,7 @@ def main():
     with open(pred_score_file_name, 'w', newline='') as csvfile:
         writer = csv.DictWriter(csvfile, delimiter=',', fieldnames=pred_score_field_name)
         writer.writeheader()
-    myXCCalculator = AttributionGeneratorTrain(
+    myXCCalculator = AttributionGeneratorTensor(
         explained_model, cfg.DATA_CONFIG.DATASET, cfg.CLASS_NAMES, method, None, gt_infos,
         pred_score_file_name=pred_score_file_name, pred_score_field_name=pred_score_field_name,
         score_thresh=cfg.MODEL.POST_PROCESSING.SCORE_THRESH, selection=selection, debug=True, full_model=full_model,

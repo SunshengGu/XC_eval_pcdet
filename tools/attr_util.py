@@ -1,5 +1,5 @@
 from XAI_utils.bbox_utils import *
-from attr_generator_train import AttributionGeneratorTrain
+from attr_generator_tensor import AttributionGeneratorTensor
 import numpy as np
 
 from captum.attr import IntegratedGradients
@@ -47,7 +47,7 @@ def attr_func(explained_model, explainer, batch, dataset_name, cls_names, cur_it
     :param cur_epoch: the current epoch
     :return:
     '''
-    myExplainer = AttributionGeneratorTrain(
+    myExplainer = AttributionGeneratorTensor(
         explained_model, dataset_name, cls_names, explainer['method'], None, gt_infos,
         pred_score_file_name=pred_score_file_name, pred_score_field_name=pred_score_field_name,
         score_thresh=score_thresh, debug=True, selection=box_selection)
