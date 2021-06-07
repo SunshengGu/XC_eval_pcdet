@@ -207,7 +207,10 @@ class AttributionGeneratorTensor:
         # print("poly.device: {}".format(poly.device))
         return poly
 
-    def calculate_iou(self, gt_boxes, pred_boxes, dataset_name, ret_overlap=False):
+    def calculate_iou(self, gt_boxes, pred_boxes_raw, dataset_name, ret_overlap=False):
+        # convert to numpy arrays to be compatible with d3_box_overlap
+        pred_boxes_copy = copy.deepcopy(pred_boxes_raw)
+        pred_boxes = pred_boxes_copy.cpu().numpy()
         # see pcdet/datasets/kitti/kitti_object_eval_python/eval.py for explanation
         z_axis = 1  # welp... it is really the y-axis
         z_center = 1.0
@@ -217,6 +220,7 @@ class AttributionGeneratorTensor:
             print("type(gt_boxes): {}".format(type(gt_boxes)))
             print("type(pred_boxes): {}".format(type(pred_boxes)))
         overlap = d3_box_overlap(gt_boxes, pred_boxes, z_axis=z_axis, z_center=z_center)
+        #TODO: modify the following line to working torch tensor
         iou, gt_index = np.max(overlap, axis=0), np.argmax(overlap, axis=0)
         if ret_overlap:
             return iou, gt_index, overlap
@@ -446,6 +450,7 @@ class AttributionGeneratorTensor:
                     continue
 
                 # when we indeed have some gt boxes
+
                 iou, gt_index, overlaps = self.calculate_iou(
                     self.gt_dict[i]['boxes'], self.pred_boxes[i], self.dataset_name, ret_overlap=True)
                 pred_box_iou.append(iou)
@@ -716,7 +721,7 @@ class AttributionGeneratorTensor:
                 if self.selection == "tp/fp" or self.selection == "tp":
                     for k in range(len(self.class_name_list)):
                         if self.debug:
-                            print("type(cared_labels): {}".format(type(cared_labels)))
+                            print("type(cared_labels[0]): {}".format(type(cared_labels[0])))
                             print("type(fp_labels): {}".format(type(fp_labels)))
                         epoch_tp_obj_cnt[k] += cared_labels.count(k) if isinstance(cared_labels, list) else torch.sum(cared_labels == k)
                         epoch_fp_obj_cnt[k] += fp_labels.count(k) if isinstance(fp_labels, list) else torch.sum(fp_labels == k)
@@ -802,8 +807,8 @@ class AttributionGeneratorTensor:
             XC_lst, far_attr_lst = [], []
             for i in range(self.batch_size):
                 if box_vertices[i] is None:
-                    XC_lst.append(np.NaN)
-                    far_attr_lst.append(np.NaN)
+                    XC_lst.append(torch.tensor(float('nan')).cuda())
+                    far_attr_lst.append(torch.tensor(float('nan')).cuda())
                 else:
                     XC_, far_attr_ = 0, 0
                     if method == "cnt":
@@ -827,16 +832,16 @@ class AttributionGeneratorTensor:
             grad = pos_grad
         elif sign == 'negative':
             grad = neg_grad
-        pap_loss = 0.0
+        pap_loss = []
         if self.batch_size == 1:
             diff_1 = grad[1:, :] - grad[:-1, :]
             diff_2 = grad[:, 1:] - grad[:, :-1]
-            pap_loss = np.sum(np.abs(diff_1)) + np.sum(np.abs(diff_2))
+            pap_loss.append(torch.sum(torch.abs(diff_1)) + torch.sum(torch.abs(diff_2)))
         else:
             for i in range(self.batch_size):
                 diff_1 = grad[i][1:, :] - grad[i][:-1, :]
                 diff_2 = grad[i][:, 1:] - grad[i][:, :-1]
-                pap_loss += np.sum(np.abs(diff_1)) + np.sum(np.abs(diff_2))
+                pap_loss.append(torch.sum(torch.abs(diff_1)) + torch.sum(torch.abs(diff_2)))
         return pap_loss
 
     def xc_preprocess(self, batch_dict, epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt, cur_it):
@@ -949,9 +954,9 @@ class AttributionGeneratorTensor:
                         pos_grad, neg_grad, new_cared_vertices, self.dataset_name, sign, self.ignore_thresh,
                         new_cared_locs, vicinities, method)
                     pap = self.get_PAP_single(pos_grad, neg_grad, sign)
-                    total_XC_lst.append(XC)
-                    total_far_attr_lst.append(far_attr)
-                    total_pap_lst.append(pap)
+                    total_XC_lst.append(torch.stack(XC))
+                    total_far_attr_lst.append(torch.stack(far_attr))
+                    total_pap_lst.append(torch.stack(pap))
                 if self.selection == "tp/fp":
                     # get the fp related metrics
                     for i in range(self.fp_limit):
@@ -976,9 +981,9 @@ class AttributionGeneratorTensor:
                             pos_grad, neg_grad, new_cared_vertices, self.dataset_name, sign, self.ignore_thresh,
                             new_cared_locs, vicinities, method)
                         pap = self.get_PAP_single(pos_grad, neg_grad, sign)
-                        total_fp_XC_lst.append(XC)
-                        total_fp_far_attr_lst.append(far_attr)
-                        total_fp_pap_lst.append(pap)
+                        total_fp_XC_lst.append(torch.stack(XC))
+                        total_fp_far_attr_lst.append(torch.stack(far_attr))
+                        total_fp_pap_lst.append(torch.stack(pap))
             else:
                 min_num_preds = 10000
                 for i in range(self.batch_size):
@@ -1008,30 +1013,37 @@ class AttributionGeneratorTensor:
                     XC, far_attr = self.compute_xc_single(
                         pos_grad, neg_grad, new_cared_vertices, self.dataset_name, sign, self.ignore_thresh,
                         new_cared_locs, vicinities, method)
+                    # note: pap is aggregated, unlike XC and far_attr which are per object
                     pap = self.get_PAP_single(pos_grad, neg_grad, sign)
-                    total_XC_lst.append(XC)
-                    total_far_attr_lst.append(far_attr)
-                    total_pap_lst.append(pap)
+                    print("type(XC[0]): {} XC[0].device: {} XC[0].dtype: {}".format(type(XC[0]), XC[0].device, XC[0].dtype))
+                    print("type(pap[0]): {} pap[0].device: {} pap[0].dtype: {}".format(type(pap[0]), pap[0].device, pap[0].dtype))
+                    total_XC_lst.append(torch.stack(XC))
+                    total_far_attr_lst.append(torch.stack(far_attr))
+                    total_pap_lst.append(torch.stack(pap))
             # normalizing by the batch size
-            total_XC = np.asarray(total_XC_lst)
-            total_far_attr = np.asarray(total_far_attr_lst)
-            total_pap = np.asarray(total_pap_lst)
-            total_pap = np.where(total_XC is np.NaN, np.NaN, total_pap)
-            total_pap = np.where(total_pap == 0, np.NaN, total_pap)
+            total_XC = torch.stack(total_XC_lst)
+            total_far_attr = torch.stack(total_far_attr_lst)
+            total_pap_raw = torch.stack(total_pap_lst)
+            nan_tensor = torch.full(total_XC.size(), float('nan')).cuda()
+            total_pap_ = torch.where(torch.isnan(total_XC), nan_tensor, total_pap_raw)
+            total_pap = torch.where(total_pap_ == 0, nan_tensor, total_pap_)
+            print("\ntotal_XC.size(): {}\ntotal_pap.size(): {}".format(total_XC.size(), total_pap.size()))
+            print("\nsuccessfully reformatted the XC, far_attr, and pap values from lists to tensors\n")
             if self.selection == "tp/fp":
-                total_fp_XC = np.asarray(total_fp_XC_lst)
-                total_fp_far_attr = np.asarray(total_fp_far_attr_lst)
-                total_fp_pap = np.asarray(total_fp_pap_lst)
-                total_fp_pap = np.where(total_fp_XC is np.NaN, np.NaN, total_fp_pap)
-                total_fp_pap = np.where(total_fp_pap == 0, np.NaN, total_fp_pap)
+                total_fp_XC = torch.stack(total_fp_XC_lst)
+                total_fp_far_attr = torch.stack(total_fp_far_attr_lst)
+                total_fp_pap_raw = torch.stack(total_fp_pap_lst)
+                fp_nan_tensor = torch.full(total_fp_XC.size(), float('nan')).cuda()
+                total_fp_pap_ = torch.where(torch.isnan(total_fp_XC), fp_nan_tensor, total_fp_pap_raw)
+                total_fp_pap = torch.where(total_fp_pap_ == 0, fp_nan_tensor, total_fp_pap_)
             if self.batch_size > 1:
-                total_XC = np.transpose(total_XC)
-                total_far_attr = np.transpose(total_far_attr)
-                total_pap = np.transpose(total_pap)
+                total_XC = total_XC.transpose(0, 1)
+                total_far_attr = total_far_attr.transpose(0, 1)
+                total_pap = total_pap.transpose(0, 1)
                 if self.selection == "tp/fp":
-                    total_fp_XC = np.transpose(total_fp_XC)
-                    total_fp_far_attr = np.transpose(total_fp_far_attr)
-                    total_fp_pap = np.transpose(total_fp_pap)
+                    total_fp_XC = total_fp_XC.transpose(0, 1)
+                    total_fp_far_attr = total_fp_far_attr.transpose(0, 1)
+                    total_fp_pap = total_fp_pap.transpose(0, 1)
 
         # record the cared predictions:
         self.cur_epoch = cur_epoch
