@@ -77,46 +77,69 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
         # need a scaling ratio to normalize the losses to the previous setting (top 3 per frame, batch_size = 2, taking
         # the average of frames in a batch)
         # TODO: handle the case when batch_box_cnt is zero
+        skip_attr_loss = False
         valid_xc_flag = ~torch.isnan(xc)  # indicating where the xc values are not NaN
         zero_tensor = torch.zeros(xc.size(), dtype=xc.dtype).cuda()
         batch_box_cnt = torch.sum(valid_xc_flag).cuda()
         scaling_ratio = batch["batch_size"] * 3 / batch_box_cnt if batch_box_cnt != 0 else 0
-        xc_val = torch.sum(torch.where(valid_xc_flag, xc, zero_tensor)) / batch["batch_size"] * scaling_ratio
+        xc_val_raw = torch.sum(torch.where(valid_xc_flag, xc, zero_tensor)) / batch["batch_size"] * scaling_ratio
         pap_val = torch.sum(torch.where(valid_xc_flag, pap, zero_tensor)) / batch["batch_size"] * scaling_ratio
         far_attr_val = torch.sum(torch.where(valid_xc_flag, far_attr, zero_tensor)) / batch["batch_size"] * scaling_ratio
-        epsilon = 0.01  # to avoid division by very small number
-        xc_val = xc_val if xc_val > epsilon else epsilon / xc_val.item() * xc_val
-        lambda_ = 0.3333
-        lambda_tensor = lambda_ * torch.ones(xc_val.size(), dtype=xc_val.dtype).cuda()
-        xc_loss_raw = torch.div(lambda_tensor, xc_val)
-        # to put an upper limit on XC_loss
-        xc_loss = xc_loss_raw if xc_loss_raw < 0.3 else 0.3 / xc_loss_raw.item() * xc_loss_raw
-        pap_loss = 0.001 * pap_val
-        far_attr_loss = 0.03 * far_attr_val
-        print("\nxc_loss.requires_grad: {}".format(xc_loss.requires_grad))
-        print("\npap_loss.requires_grad: {}".format(pap_loss.requires_grad))
-        print("\nfar_attr_loss.requires_grad: {}".format(far_attr_loss.requires_grad))
+        three_val = 3 * torch.ones(xc_val_raw.size(), dtype=xc_val_raw.dtype).cuda()
+        xc_val = torch.sub(three_val, xc_val_raw)  # xc_val = 3 - xc_val_raw, 3 since there are 3 boxes per frame
+
+        # upper limit for the attr losses
+        upper_limit = 0.3
+
+        if batch_box_cnt == 0: # handles the case where we have no tp boxes
+            skip_attr_loss = True
+            xc_loss = 0
+            pap_loss = 0
+            far_attr_loss = 0
+        else:
+            # epsilon = 0.000001  # to avoid division by very small number
+            # #
+            # xc_val = xc_val if xc_val > epsilon else epsilon / xc_val.item() * xc_val
+            # xc_val = torch.maximum(epsilon, xc_val)
+            lambda_ = 0.2
+            # lambda_tensor = lambda_ * torch.ones(xc_val.size(), dtype=xc_val.dtype).cuda()
+            xc_loss_raw = lambda_ * xc_val
+            pap_loss_raw = 0.0005 * pap_val
+            far_attr_loss_raw = 0.01 * far_attr_val
+
+            # to put an upper limit on the attr losses
+            xc_loss = xc_loss_raw if xc_loss_raw < upper_limit else upper_limit / xc_loss_raw.item() * xc_loss_raw
+            pap_loss = pap_loss_raw if pap_loss_raw < upper_limit else upper_limit / pap_loss_raw.item() * pap_loss_raw
+            far_attr_loss = far_attr_loss_raw if far_attr_loss_raw < upper_limit else upper_limit / far_attr_loss_raw.item() * far_attr_loss_raw
+            print("\nxc_loss.requires_grad: {}".format(xc_loss.requires_grad))
+            print("\npap_loss.requires_grad: {}".format(pap_loss.requires_grad))
+            print("\nfar_attr_loss.requires_grad: {}".format(far_attr_loss.requires_grad))
+            print("\nloss.requires_grad: {}".format(loss.requires_grad))
         if box_selection == 'tp/fp':
             # assuming we always have at least 3 fp predictions in each frame
             print("\ncomputing fp_xc_loss\n")
             valid_fp_xc_flag = ~torch.isnan(fp_xc)
             fp_zero_tensor = torch.zeros(fp_xc.size(), dtype=fp_xc.dtype).cuda()
-            fp_xc_loss = 0.1 * torch.sum(torch.where(valid_fp_xc_flag, fp_xc, fp_zero_tensor)) / batch["batch_size"]
-            fp_xc_loss = max(fp_xc_loss, 0.3)
-            fp_pap_loss = 0.001 * torch.sum(torch.where(valid_fp_xc_flag, fp_pap, fp_zero_tensor)) / batch["batch_size"]
+            fp_xc_loss_raw = 0.1 * torch.sum(torch.where(valid_fp_xc_flag, fp_xc, fp_zero_tensor)) / batch["batch_size"]
+            fp_pap_loss_raw = 0.001 * torch.sum(torch.where(valid_fp_xc_flag, fp_pap, fp_zero_tensor)) / batch["batch_size"]
+            fp_xc_loss = fp_xc_loss_raw if fp_xc_loss_raw < upper_limit else upper_limit / fp_xc_loss_raw.item() * fp_xc_loss_raw
+            fp_pap_loss = fp_pap_loss_raw if fp_pap_loss_raw < upper_limit else upper_limit / fp_pap_loss_raw.item() * fp_pap_loss_raw
             # TODO: a proper far_attr loss for fp
         if attr_loss == 'xc' or attr_loss == 'XC':
-            loss += xc_loss
+            if not skip_attr_loss:  # only applicable in the tp and tp/fp mode
+                loss += xc_loss
             if box_selection == 'tp/fp':
                 print("\nadding fp_xc_loss\n")
                 loss += fp_xc_loss
         elif attr_loss == 'pap' or attr_loss == 'PAP':
-            loss += pap_loss
+            if not skip_attr_loss:  # only applicable in the tp and tp/fp mode
+                loss += pap_loss
             if box_selection == 'tp/fp':
                 print("\nadding fp_xc_loss\n")
                 loss += fp_pap_loss
         elif attr_loss == 'far_attr' or attr_loss == 'FAR_ATTR':
-            loss += far_attr_loss
+            if not skip_attr_loss:  # only applicable in the tp and tp/fp mode
+                loss += far_attr_loss
             # TODO: a proper far_attr loss for fp
         # print("loss: {}".format(loss))
         if enable_training:
@@ -138,13 +161,13 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
                 tb_log.add_scalar('train/loss', loss, accumulated_iter)
                 tb_log.add_scalar('train/xc', xc_val, accumulated_iter)
                 tb_log.add_scalar('train/xc_loss', xc_loss, accumulated_iter)
+                tb_log.add_scalar('train/far_attr_loss', far_attr_loss, accumulated_iter)
+                tb_log.add_scalar('train/pap_loss', pap_loss, accumulated_iter)
                 if box_selection == 'tp/fp':
                     tb_log.add_scalar('train/fp_xc_loss', fp_xc_loss, accumulated_iter)
                     tb_log.add_scalar('train/fp_pap_loss', fp_pap_loss, accumulated_iter)
                 tb_log.add_scalar('train/far_attr', far_attr_val, accumulated_iter)
-                tb_log.add_scalar('train/far_attr_loss', far_attr_loss, accumulated_iter)
                 tb_log.add_scalar('train/pap', pap_val, accumulated_iter)
-                tb_log.add_scalar('train/pap_loss', pap_loss, accumulated_iter)
                 tb_log.add_scalar('meta_data/learning_rate', cur_lr, accumulated_iter)
                 tb_log.add_scalar('meta_data/beta1', beta1, accumulated_iter)
                 tb_log.add_scalar('meta_data/beta2', beta1, accumulated_iter)

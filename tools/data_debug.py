@@ -2,7 +2,7 @@ import numpy as np
 import torch
 
 def main():
-    cared_tensor = torch.tensor([3, 8, 6, 8, 6, 6], dtype=float).cuda()
+    cared_tensor = torch.tensor([3, 8, 6, 8, 6, 6], dtype=float, requires_grad=True).cuda()
     cared_list = [val for val in cared_tensor]
     print("cared_tensor: {} \ncared_list: {}".format(cared_tensor, cared_list))
     print("cared_tensor.dtype: {}".format(cared_tensor.dtype))
@@ -28,6 +28,10 @@ def main():
     print("new_tensor: {}".format(new_tensor))
     new_sum = torch.sum(new_tensor)
     print("new_sum: {}".format(new_sum))
+    new_arr = new_tensor.detach().cpu().numpy()
+    print("new_tensor: {}".format(new_tensor))
+    print("new_tensor.requires_grad: {}".format(new_tensor.requires_grad))
+    print("new_arr: {}".format(new_arr))
 
 if __name__ == '__main__':
     main()
