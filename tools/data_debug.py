@@ -2,7 +2,7 @@ import numpy as np
 import torch
 
 def main():
-    cared_tensor = torch.tensor([3, 8, 6, 8, 6, 6]).cuda()
+    cared_tensor = torch.tensor([3, 8, 6, 8, 6, 6], dtype=float).cuda()
     cared_list = [val for val in cared_tensor]
     print("cared_tensor: {} \ncared_list: {}".format(cared_tensor, cared_list))
     print("cared_tensor.dtype: {}".format(cared_tensor.dtype))
@@ -21,6 +21,13 @@ def main():
     dummy_prod = torch.dot(dummy1, dummy2)
     bool1 = dummy_prod > 1
     print("dummy_prod: {}\ntype(dummy_prod): {}\nbool1: {}".format(dummy_prod, type(dummy_prod), bool1))
+    cared_tensor[0] = torch.tensor(float('nan')).cuda()
+    valid_ind = ~torch.isnan(cared_tensor)
+    print("valid_ind: {}".format(valid_ind))
+    new_tensor = torch.where(valid_ind, cared_tensor, zero_tensor)
+    print("new_tensor: {}".format(new_tensor))
+    new_sum = torch.sum(new_tensor)
+    print("new_sum: {}".format(new_sum))
 
 if __name__ == '__main__':
     main()

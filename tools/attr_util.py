@@ -36,7 +36,7 @@ def attr_func_draft(explained_model, explainer, batch):
 
 def attr_func(explained_model, explainer, batch, dataset_name, cls_names, cur_it, gt_infos, score_thresh,
               object_cnt, tp_object_cnt, fp_object_cnt, box_selection, pred_score_file_name, pred_score_field_name,
-              cur_epoch, pap_only=False):
+              cur_epoch, aggre_method, attr_sign, pap_only=False):
     '''
     :param explained_model: the model being explained
     :param explainer: parameters for the attribution generator
@@ -45,6 +45,8 @@ def attr_func(explained_model, explainer, batch, dataset_name, cls_names, cur_it
     :param score_thresh: the threshold to filter out low confidence predictions
     :param box_selection: either "tp/fp", "top", or "bottom"
     :param cur_epoch: the current epoch
+    :param aggre_method: the aggregation method, "sum" or "cnt"
+    :param attr_sign: sign of attribution, "positive" or "negative"
     :return:
     '''
     myExplainer = AttributionGeneratorTensor(
@@ -54,13 +56,15 @@ def attr_func(explained_model, explainer, batch, dataset_name, cls_names, cur_it
     if not pap_only:
         if box_selection == "tp/fp":
             tp_XC, tp_far_attr, tp_pap, fp_XC, fp_far_attr, fp_pap = myExplainer.compute_xc(
-                batch, object_cnt, tp_object_cnt, fp_object_cnt, cur_it, cur_epoch=cur_epoch, method="sum", sign="positive")
+                batch, object_cnt, tp_object_cnt, fp_object_cnt, cur_it, cur_epoch=cur_epoch, method=aggre_method,
+                sign=attr_sign)
             return tp_XC, tp_far_attr, tp_pap, fp_XC, fp_far_attr, fp_pap
         else:
             XC, far_attr, pap = myExplainer.compute_xc(
-                batch, object_cnt, tp_object_cnt, fp_object_cnt, cur_it, cur_epoch=cur_epoch, method="sum", sign="positive")
+                batch, object_cnt, tp_object_cnt, fp_object_cnt, cur_it, cur_epoch=cur_epoch, method=aggre_method,
+                sign=attr_sign)
             return XC, far_attr, pap
     else:
         pap = myExplainer.compute_PAP(
-            batch, object_cnt, tp_object_cnt, fp_object_cnt, cur_it, cur_epoch=cur_epoch, sign="positive")
+            batch, object_cnt, tp_object_cnt, fp_object_cnt, cur_it, cur_epoch=cur_epoch, sign=attr_sign)
         return pap

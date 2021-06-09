@@ -11,8 +11,8 @@ from torch.nn.utils import clip_grad_norm_
 def train_one_epoch(model, optimizer, train_loader, model_func, explained_model, explainer, attr_func, epoch_obj_cnt,
                     epoch_tp_obj_cnt, epoch_fp_obj_cnt, pred_score_file_name, pred_score_field_name, cur_epoch,
                     lr_scheduler, accumulated_iter, optim_cfg, rank, tbar, total_it_each_epoch, dataloader_iter,
-                    cls_names, dataset_name, attr_loss, gt_infos, score_thresh, tb_log=None, leave_pbar=False,
-                    box_selection="tp/fp"):
+                    cls_names, dataset_name, attr_loss, gt_infos, score_thresh, aggre_method, attr_sign, tb_log=None,
+                    leave_pbar=False, box_selection="tp/fp"):
     if total_it_each_epoch == len(train_loader):
         dataloader_iter = iter(train_loader)
 
@@ -62,36 +62,49 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
                 explained_model, explainer, batch, dataset_name, cls_names, cur_it=cur_it, gt_infos=gt_infos,
                 score_thresh=score_thresh, object_cnt=epoch_obj_cnt, tp_object_cnt=epoch_tp_obj_cnt,
                 fp_object_cnt=epoch_fp_obj_cnt, box_selection=box_selection, pred_score_file_name=pred_score_file_name,
-                cur_epoch=cur_epoch, pred_score_field_name=pred_score_field_name
+                cur_epoch=cur_epoch, pred_score_field_name=pred_score_field_name, aggre_method=aggre_method,
+                attr_sign=attr_sign
             )
         else:
             xc, far_attr, pap = attr_func(
                 explained_model, explainer, batch, dataset_name, cls_names, cur_it=cur_it, gt_infos=gt_infos,
                 score_thresh=score_thresh, object_cnt=epoch_obj_cnt, tp_object_cnt=epoch_tp_obj_cnt,
                 fp_object_cnt=epoch_fp_obj_cnt, box_selection=box_selection, pred_score_file_name=pred_score_file_name,
-                cur_epoch=cur_epoch, pred_score_field_name=pred_score_field_name
+                cur_epoch=cur_epoch, pred_score_field_name=pred_score_field_name, aggre_method=aggre_method,
+                attr_sign=attr_sign
             )
-
-        # print("xc_loss: {}".format(xc_loss))
-        # print("far_attr: {}".format(far_attr))
-        # print("pap: {}".format(pap))
 
         # need a scaling ratio to normalize the losses to the previous setting (top 3 per frame, batch_size = 2, taking
         # the average of frames in a batch)
         # TODO: handle the case when batch_box_cnt is zero
-        batch_box_cnt = np.count_nonzero(~np.isnan(xc))
+        valid_xc_flag = ~torch.isnan(xc)  # indicating where the xc values are not NaN
+        zero_tensor = torch.zeros(xc.size(), dtype=xc.dtype).cuda()
+        batch_box_cnt = torch.sum(valid_xc_flag).cuda()
         scaling_ratio = batch["batch_size"] * 3 / batch_box_cnt if batch_box_cnt != 0 else 0
-        xc_val = np.nansum(xc) / batch["batch_size"] * scaling_ratio
-        pap_val = np.nansum(pap) / batch["batch_size"] * scaling_ratio
-        far_attr_val = np.nansum(far_attr) / batch["batch_size"] * scaling_ratio
+        xc_val = torch.sum(torch.where(valid_xc_flag, xc, zero_tensor)) / batch["batch_size"] * scaling_ratio
+        pap_val = torch.sum(torch.where(valid_xc_flag, pap, zero_tensor)) / batch["batch_size"] * scaling_ratio
+        far_attr_val = torch.sum(torch.where(valid_xc_flag, far_attr, zero_tensor)) / batch["batch_size"] * scaling_ratio
         epsilon = 0.01  # to avoid division by very small number
-        xc_val = max(epsilon, xc_val)
-        xc_loss = min(0.3333 / xc_val, 0.3) # to put an upper limit on XC_loss
+        xc_val = xc_val if xc_val > epsilon else epsilon / xc_val.item() * xc_val
+        lambda_ = 0.3333
+        lambda_tensor = lambda_ * torch.ones(xc_val.size(), dtype=xc_val.dtype).cuda()
+        xc_loss_raw = torch.div(lambda_tensor, xc_val)
+        # to put an upper limit on XC_loss
+        xc_loss = xc_loss_raw if xc_loss_raw < 0.3 else 0.3 / xc_loss_raw.item() * xc_loss_raw
         pap_loss = 0.001 * pap_val
         far_attr_loss = 0.03 * far_attr_val
+        print("\nxc_loss.requires_grad: {}".format(xc_loss.requires_grad))
+        print("\npap_loss.requires_grad: {}".format(pap_loss.requires_grad))
+        print("\nfar_attr_loss.requires_grad: {}".format(far_attr_loss.requires_grad))
         if box_selection == 'tp/fp':
+            # assuming we always have at least 3 fp predictions in each frame
             print("\ncomputing fp_xc_loss\n")
-            fp_xc_loss = 0.1 * np.nansum(fp_xc) / batch["batch_size"]
+            valid_fp_xc_flag = ~torch.isnan(fp_xc)
+            fp_zero_tensor = torch.zeros(fp_xc.size(), dtype=fp_xc.dtype).cuda()
+            fp_xc_loss = 0.1 * torch.sum(torch.where(valid_fp_xc_flag, fp_xc, fp_zero_tensor)) / batch["batch_size"]
+            fp_xc_loss = max(fp_xc_loss, 0.3)
+            fp_pap_loss = 0.001 * torch.sum(torch.where(valid_fp_xc_flag, fp_pap, fp_zero_tensor)) / batch["batch_size"]
+            # TODO: a proper far_attr loss for fp
         if attr_loss == 'xc' or attr_loss == 'XC':
             loss += xc_loss
             if box_selection == 'tp/fp':
@@ -99,8 +112,12 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
                 loss += fp_xc_loss
         elif attr_loss == 'pap' or attr_loss == 'PAP':
             loss += pap_loss
+            if box_selection == 'tp/fp':
+                print("\nadding fp_xc_loss\n")
+                loss += fp_pap_loss
         elif attr_loss == 'far_attr' or attr_loss == 'FAR_ATTR':
             loss += far_attr_loss
+            # TODO: a proper far_attr loss for fp
         # print("loss: {}".format(loss))
         if enable_training:
             loss.backward()
@@ -123,6 +140,7 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
                 tb_log.add_scalar('train/xc_loss', xc_loss, accumulated_iter)
                 if box_selection == 'tp/fp':
                     tb_log.add_scalar('train/fp_xc_loss', fp_xc_loss, accumulated_iter)
+                    tb_log.add_scalar('train/fp_pap_loss', fp_pap_loss, accumulated_iter)
                 tb_log.add_scalar('train/far_attr', far_attr_val, accumulated_iter)
                 tb_log.add_scalar('train/far_attr_loss', far_attr_loss, accumulated_iter)
                 tb_log.add_scalar('train/pap', pap_val, accumulated_iter)
@@ -139,7 +157,8 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
 
 def train_model(model, optimizer, train_loader, logger, model_func, explained_model, explainer, attr_func,
                 lr_scheduler, optim_cfg, start_epoch, total_epochs, start_iter, rank, tb_log, ckpt_save_dir, gt_infos,
-                score_thresh, output_dir, train_sampler=None, lr_warmup_scheduler=None, ckpt_save_interval=1,
+                score_thresh, output_dir, aggre_method, attr_sign,
+                train_sampler=None, lr_warmup_scheduler=None, ckpt_save_interval=1,
                 max_ckpt_save_num=50, merge_all_iters_to_one_epoch=False, cls_names=['Car', 'Pedestrian', 'Cyclist'],
                 dataset_name="KittiDataset", attr_loss="XC", box_selection="tp/fp"):
     # setup logging files for training-related boxes info
@@ -196,20 +215,22 @@ def train_model(model, optimizer, train_loader, logger, model_func, explained_mo
                 dataloader_iter=dataloader_iter,
                 cls_names=cls_names, dataset_name=dataset_name, attr_loss=attr_loss, gt_infos=gt_infos,
                 score_thresh=score_thresh, box_selection=box_selection, pred_score_file_name=pred_score_file_name,
-                pred_score_field_name=pred_score_field_name
+                pred_score_field_name=pred_score_field_name, aggre_method=aggre_method, attr_sign=attr_sign
             )
             # log object count
             with open(obj_cnt_file_name, 'a', newline='') as csvfile:
                 writer = csv.DictWriter(csvfile, delimiter=',', fieldnames=obj_cnt_field_name)
                 data_dict = {}
                 data_dict["epoch"] = cur_epoch
-                #TODO: fill the data dict
+                # TODO: fill the data dict
                 if box_selection == "tp/fp" or box_selection == "tp":
                     data_dict["tp_car_cnt"], data_dict["fp_car_cnt"] = epoch_tp_obj_cnt[0], epoch_fp_obj_cnt[0]
                     data_dict["tp_pede_cnt"], data_dict["fp_pede_cnt"] = epoch_tp_obj_cnt[1], epoch_fp_obj_cnt[1]
                     data_dict["tp_cyc_cnt"], data_dict["fp_cyc_cnt"] = epoch_tp_obj_cnt[2], epoch_fp_obj_cnt[2]
-                    data_dict["tp_cnt"], data_dict["fp_cnt"] = sum(epoch_tp_obj_cnt.values()), sum(epoch_fp_obj_cnt.values())
-                data_dict["car_cnt"], data_dict["pede_cnt"], data_dict["cyc_cnt"] = epoch_obj_cnt[0], epoch_obj_cnt[1], epoch_obj_cnt[2]
+                    data_dict["tp_cnt"], data_dict["fp_cnt"] = sum(epoch_tp_obj_cnt.values()), sum(
+                        epoch_fp_obj_cnt.values())
+                data_dict["car_cnt"], data_dict["pede_cnt"], data_dict["cyc_cnt"] = epoch_obj_cnt[0], epoch_obj_cnt[1], \
+                                                                                    epoch_obj_cnt[2]
                 writer.writerow(data_dict)
             logger.info("{}:{} {}:{} {}:{} after training for {} epochs".format(
                 cls_names[0], epoch_obj_cnt[0], cls_names[1], epoch_obj_cnt[1], cls_names[2], epoch_obj_cnt[2],
