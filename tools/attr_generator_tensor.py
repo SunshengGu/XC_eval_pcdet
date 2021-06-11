@@ -933,8 +933,8 @@ class AttributionGeneratorTensor:
                     new_cared_locs, vicinities, method)
                 # note: pap is aggregated, unlike XC and far_attr which are per object
                 pap = self.get_PAP_single(pos_grad, neg_grad, sign)
-                print("type(XC[0]): {} XC[0].device: {} XC[0].dtype: {}".format(type(XC[0]), XC[0].device, XC[0].dtype))
-                print("type(pap[0]): {} pap[0].device: {} pap[0].dtype: {}".format(type(pap[0]), pap[0].device, pap[0].dtype))
+                # print("type(XC[0]): {} XC[0].device: {} XC[0].dtype: {}".format(type(XC[0]), XC[0].device, XC[0].dtype))
+                # print("type(pap[0]): {} pap[0].device: {} pap[0].dtype: {}".format(type(pap[0]), pap[0].device, pap[0].dtype))
                 total_XC_lst.append(torch.stack(XC))
                 total_far_attr_lst.append(torch.stack(far_attr))
                 total_pap_lst.append(torch.stack(pap))
