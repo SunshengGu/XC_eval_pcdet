@@ -220,7 +220,7 @@ def get_sum_XQ_analytics_fast_tensor(pos_grad, neg_grad, box_vertices, dataset_n
     attr_in_box = torch.sum(masked_attr)
     if total_attr == 0:
         print("No attributions present!")
-        return 0, 0, 0, 0
+        return total_attr, total_attr, total_attr, total_attr
     XQ = attr_in_box / total_attr
     dist_attr_sum = total_attr - attr_in_box
     print("\ncompleted XC calculation by tensor operations\n")
@@ -263,7 +263,7 @@ def get_cnt_XQ_analytics_fast_tensor(pos_grad, neg_grad, box_vertices, dataset_n
     attr_in_box = torch.sum(masked_attr >= ignore_thresh)
     if total_attr == 0:
         print("No attributions present!")
-        return 0, 0, 0, 0
+        return total_attr, total_attr, total_attr, total_attr
     XQ = attr_in_box / total_attr
     distant_attr_cnt = total_attr - attr_in_box
     # print("XQ: {}".format(XQ))
