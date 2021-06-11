@@ -159,7 +159,7 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
 
             if tb_log is not None:
                 tb_log.add_scalar('train/loss', loss, accumulated_iter)
-                tb_log.add_scalar('train/xc', xc_val, accumulated_iter)
+                tb_log.add_scalar('train/xc', xc_val_raw, accumulated_iter)
                 tb_log.add_scalar('train/xc_loss', xc_loss, accumulated_iter)
                 tb_log.add_scalar('train/far_attr_loss', far_attr_loss, accumulated_iter)
                 tb_log.add_scalar('train/pap_loss', pap_loss, accumulated_iter)
