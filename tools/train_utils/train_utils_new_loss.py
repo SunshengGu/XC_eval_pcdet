@@ -83,6 +83,7 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
         batch_box_cnt = torch.sum(valid_xc_flag).cuda()
         scaling_ratio = batch["batch_size"] * 3 / batch_box_cnt if batch_box_cnt != 0 else 0
         xc_val_raw = torch.sum(torch.where(valid_xc_flag, xc, zero_tensor)) / batch["batch_size"] * scaling_ratio
+        xc_val_record = xc_val_raw.item()
         pap_val = torch.sum(torch.where(valid_xc_flag, pap, zero_tensor)) / batch["batch_size"] * scaling_ratio
         far_attr_val = torch.sum(torch.where(valid_xc_flag, far_attr, zero_tensor)) / batch["batch_size"] * scaling_ratio
         three_val = 3 * torch.ones(xc_val_raw.size(), dtype=xc_val_raw.dtype).cuda()
@@ -159,7 +160,7 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
 
             if tb_log is not None:
                 tb_log.add_scalar('train/loss', loss, accumulated_iter)
-                tb_log.add_scalar('train/xc', xc_val_raw, accumulated_iter)
+                tb_log.add_scalar('train/xc', xc_val_record, accumulated_iter)
                 tb_log.add_scalar('train/xc_loss', xc_loss, accumulated_iter)
                 tb_log.add_scalar('train/far_attr_loss', far_attr_loss, accumulated_iter)
                 tb_log.add_scalar('train/pap_loss', pap_loss, accumulated_iter)
