@@ -245,6 +245,7 @@ def main():
             parameter to get higher dpi.
     :return:
     """
+    attr_only = False
     visualize_attr = True
     compute_xc = True
     compute_pap = False
@@ -268,7 +269,7 @@ def main():
     misclassified_box_analyzed = 0
     start_time = time.time()
     max_obj_cnt = 100
-    batches_to_analyze = 2
+    batches_to_analyze = 358
     method = 'Saliency'
     use_trapezoid = False
     ignore_thresh = 0.0
@@ -278,6 +279,8 @@ def main():
     high_rez = True
     overlay_orig_bev = True
     overlay = 0.4
+    if attr_only:
+        overlay = 0
     mult_by_inputs = True
     channel_xai = False
     gray_scale_overlay = True
@@ -751,6 +754,8 @@ def main():
                     bev_image = np.rot90(bev_image_raw, k=1, axes=(0, 1))
                     if not gray_scale_overlay:
                         overlay = 0.2
+                    if attr_only:
+                        overlay = 0
                 # print("\ngt box locations:")
                 # for gt_ind in range(len(gt_boxes_loc)):
                 #     print("location of gt_box {}: {}".format(gt_ind, gt_boxes_loc[gt_ind]))

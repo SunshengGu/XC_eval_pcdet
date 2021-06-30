@@ -24,6 +24,8 @@ Connect to wise13:
 Creating multiple dockers on one wise09:
 bash run.sh --gpus='"device=0"' --cpuset-cpus=0-5 --shm-size=1gb
 bash run.sh --gpus='"device=1"' --cpuset-cpus=6-11 --shm-size=1gb
+bash run.sh --gpus='"device=2"' --cpuset-cpus=12-17 --shm-size=1gb
+bash run.sh --gpus='"device=3"' --cpuset-cpus=18-23 --shm-size=1gb
 need to change port mapping for the second docker
 Note: remember to change port mapping in run.sh when creating a second docker on the same machine.
 

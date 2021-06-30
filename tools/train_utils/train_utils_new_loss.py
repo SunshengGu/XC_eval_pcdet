@@ -179,6 +179,82 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
     return accumulated_iter
 
 
+def train_one_epoch_plain(model, optimizer, train_loader, model_func, explained_model, explainer, attr_func, epoch_obj_cnt,
+                    epoch_tp_obj_cnt, epoch_fp_obj_cnt, pred_score_file_name, pred_score_field_name, cur_epoch,
+                    lr_scheduler, accumulated_iter, optim_cfg, rank, tbar, total_it_each_epoch, dataloader_iter,
+                    cls_names, dataset_name, attr_loss, gt_infos, score_thresh, aggre_method, attr_sign, tb_log=None,
+                    leave_pbar=False, box_selection="tp/fp"):
+    if total_it_each_epoch == len(train_loader):
+        dataloader_iter = iter(train_loader)
+
+    if rank == 0:
+        pbar = tqdm.tqdm(total=total_it_each_epoch, leave=leave_pbar, desc='train', dynamic_ncols=True)
+
+    # set to False in case we want verify something without altering the model
+    enable_training = True
+    constant_lr = False
+    for cur_it in range(total_it_each_epoch):
+        print("\nThe {}th batch\n".format(cur_it))
+        try:
+            batch = next(dataloader_iter)
+        except StopIteration:
+            dataloader_iter = iter(train_loader)
+            batch = next(dataloader_iter)
+            print('new iters')
+
+        if not constant_lr:
+            lr_scheduler.step(accumulated_iter)
+
+        try:
+            cur_lr = float(optimizer.lr)
+        except:
+            cur_lr = optimizer.param_groups[0]['lr']
+
+        try:
+            beta1, beta2 = float(optimizer.betas[0]), float(optimizer.betas[1])
+        except:
+            beta1, beta2 = optimizer.param_groups[0]['betas'][0], optimizer.param_groups[0]['betas'][1]
+
+        if tb_log is not None:
+            tb_log.add_scalar('meta_data/learning_rate', cur_lr, accumulated_iter)
+        print("\nIn tools/train_utils/train_utils_new_loss.py, type(batch): {}".format(type(batch)))
+
+        model.train()
+        optimizer.zero_grad()
+
+        # # Loading parameters from the training model to the explained model
+        # explained_model.load_state_dict(model.state_dict(), strict=False)
+
+        loss, tb_dict, disp_dict = model_func(model, batch)
+
+        # print("loss: {}".format(loss))
+        if enable_training:
+            loss.backward()
+            clip_grad_norm_(model.parameters(), optim_cfg.GRAD_NORM_CLIP)
+            optimizer.step()
+
+        accumulated_iter += 1
+        disp_dict.update({'loss': loss.item(), 'lr': cur_lr})
+
+        # log to console and tensorboard
+        if rank == 0:
+            pbar.update()
+            pbar.set_postfix(dict(total_it=accumulated_iter))
+            tbar.set_postfix(disp_dict)
+            tbar.refresh()
+
+            if tb_log is not None:
+                tb_log.add_scalar('train/loss', loss, accumulated_iter)
+                tb_log.add_scalar('meta_data/learning_rate', cur_lr, accumulated_iter)
+                tb_log.add_scalar('meta_data/beta1', beta1, accumulated_iter)
+                tb_log.add_scalar('meta_data/beta2', beta1, accumulated_iter)
+                for key, val in tb_dict.items():
+                    tb_log.add_scalar('train/' + key, val, accumulated_iter)
+    if rank == 0:
+        pbar.close()
+    return accumulated_iter
+
+
 def train_model(model, optimizer, train_loader, logger, model_func, explained_model, explainer, attr_func,
                 lr_scheduler, optim_cfg, start_epoch, total_epochs, start_iter, rank, tb_log, ckpt_save_dir, gt_infos,
                 score_thresh, output_dir, aggre_method, attr_sign,
@@ -227,20 +303,38 @@ def train_model(model, optimizer, train_loader, logger, model_func, explained_mo
                 cur_scheduler = lr_warmup_scheduler
             else:
                 cur_scheduler = lr_scheduler
-            accumulated_iter = train_one_epoch(
-                model, optimizer, train_loader, model_func, explained_model, explainer, attr_func, epoch_obj_cnt,
-                epoch_tp_obj_cnt, epoch_fp_obj_cnt,
-                cur_epoch=cur_epoch,
-                lr_scheduler=cur_scheduler,
-                accumulated_iter=accumulated_iter, optim_cfg=optim_cfg,
-                rank=rank, tbar=tbar, tb_log=tb_log,
-                leave_pbar=(cur_epoch + 1 == total_epochs),
-                total_it_each_epoch=total_it_each_epoch,
-                dataloader_iter=dataloader_iter,
-                cls_names=cls_names, dataset_name=dataset_name, attr_loss=attr_loss, gt_infos=gt_infos,
-                score_thresh=score_thresh, box_selection=box_selection, pred_score_file_name=pred_score_file_name,
-                pred_score_field_name=pred_score_field_name, aggre_method=aggre_method, attr_sign=attr_sign
-            )
+
+            if attr_loss == "None" or attr_loss == "none":
+                # when no attr_loss is applied
+                accumulated_iter = train_one_epoch_plain(
+                    model, optimizer, train_loader, model_func, explained_model, explainer, attr_func, epoch_obj_cnt,
+                    epoch_tp_obj_cnt, epoch_fp_obj_cnt,
+                    cur_epoch=cur_epoch,
+                    lr_scheduler=cur_scheduler,
+                    accumulated_iter=accumulated_iter, optim_cfg=optim_cfg,
+                    rank=rank, tbar=tbar, tb_log=tb_log,
+                    leave_pbar=(cur_epoch + 1 == total_epochs),
+                    total_it_each_epoch=total_it_each_epoch,
+                    dataloader_iter=dataloader_iter,
+                    cls_names=cls_names, dataset_name=dataset_name, attr_loss=attr_loss, gt_infos=gt_infos,
+                    score_thresh=score_thresh, box_selection=box_selection, pred_score_file_name=pred_score_file_name,
+                    pred_score_field_name=pred_score_field_name, aggre_method=aggre_method, attr_sign=attr_sign
+                )
+            else:
+                accumulated_iter = train_one_epoch(
+                    model, optimizer, train_loader, model_func, explained_model, explainer, attr_func, epoch_obj_cnt,
+                    epoch_tp_obj_cnt, epoch_fp_obj_cnt,
+                    cur_epoch=cur_epoch,
+                    lr_scheduler=cur_scheduler,
+                    accumulated_iter=accumulated_iter, optim_cfg=optim_cfg,
+                    rank=rank, tbar=tbar, tb_log=tb_log,
+                    leave_pbar=(cur_epoch + 1 == total_epochs),
+                    total_it_each_epoch=total_it_each_epoch,
+                    dataloader_iter=dataloader_iter,
+                    cls_names=cls_names, dataset_name=dataset_name, attr_loss=attr_loss, gt_infos=gt_infos,
+                    score_thresh=score_thresh, box_selection=box_selection, pred_score_file_name=pred_score_file_name,
+                    pred_score_field_name=pred_score_field_name, aggre_method=aggre_method, attr_sign=attr_sign
+                )
             # log object count
             with open(obj_cnt_file_name, 'a', newline='') as csvfile:
                 writer = csv.DictWriter(csvfile, delimiter=',', fieldnames=obj_cnt_field_name)

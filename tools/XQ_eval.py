@@ -208,8 +208,9 @@ def main():
     """
     XC_only = True
     scatter_plot = False
+    legacy_file = True # whether the data file was pre jan10 2021
     comb_plot = True
-    w_sum_explore = False
+    w_sum_explore = True
     dataset_name = "KITTI"
     cls_name_list = []
     if dataset_name == "KITTI":
@@ -270,7 +271,8 @@ def main():
         2. Read in XC from the FP file
         3. Concatenate into one array, with TP labeled 1 and FP labeled 0
         """
-        XC_thresh_list = ['0.0', '0.0333', '0.0667', '0.1', '0.1333', '0.1667', '0.2']
+        # print("start trying")
+        XC_thresh_list = ['0.1'] # ['0.0', '0.0333', '0.0667', '0.1', '0.1333', '0.1667', '0.2']
         for thresh in XC_thresh_list:
             XC_list = []
             far_attr_list = []
@@ -282,8 +284,8 @@ def main():
             pts_list = []
             dist_list = []
             found = False
-            tp_name = "tp_XC_thresh{}.csv".format(thresh)
-            fp_name = "fp_XC_thresh{}.csv".format(thresh)
+            tp_name = "tp_xq_thresh{}.csv".format(thresh)
+            fp_name = "fp_xq_thresh{}.csv".format(thresh)
             tp_data = None
             fp_data = None
             for root, dirs, files in os.walk(XC_path):
@@ -293,13 +295,14 @@ def main():
                     if name == tp_name:
                         found = True
                         tp_data = pd.read_csv(os.path.join(root, name))
-                        # print("type(tp_data['XC']): {}".format(type(tp_data['XC'])))
-                        XC_list.append(tp_data['XC'])
-                        far_attr_list.append(tp_data['far_attr_cnt'])
-                        PAP_list.append(tp_data['PAP'])
-                        PAP_norm_list.append(tp_data['PAP_norm'])
+                        # print("type(tp_data['XQ']): {}".format(type(tp_data['XQ'])))
+                        XC_list.append(tp_data['XQ'])
+                        if not legacy_file:
+                            far_attr_list.append(tp_data['far_attr_cnt'])
+                            PAP_list.append(tp_data['PAP'])
+                            PAP_norm_list.append(tp_data['PAP_norm'])
                         score_list.append(tp_data['class_score'])
-                        TP_FP_label.append(np.ones(len(tp_data['XC'])))
+                        TP_FP_label.append(np.ones(len(tp_data['XQ'])))
                         cls_label_list.append(tp_data['class_label'])
                         pts_list.append(tp_data['pts_in_box'])
                         dist_list.append(tp_data['dist_to_ego'])
@@ -310,12 +313,13 @@ def main():
                     elif name == fp_name:
                         found = True
                         fp_data = pd.read_csv(os.path.join(root, name))
-                        XC_list.append(fp_data['XC'])
-                        far_attr_list.append(fp_data['far_attr_cnt'])
-                        PAP_list.append(fp_data['PAP'])
-                        PAP_norm_list.append(fp_data['PAP_norm'])
+                        XC_list.append(fp_data['XQ'])
+                        if not legacy_file:
+                            far_attr_list.append(fp_data['far_attr_cnt'])
+                            PAP_list.append(fp_data['PAP'])
+                            PAP_norm_list.append(fp_data['PAP_norm'])
                         score_list.append(fp_data['class_score'])
-                        TP_FP_label.append(np.zeros(len(fp_data['XC'])))
+                        TP_FP_label.append(np.zeros(len(fp_data['XQ'])))
                         cls_label_list.append(fp_data['class_label'])
                         pts_list.append(fp_data['pts_in_box'])
                         dist_list.append(fp_data['dist_to_ego'])
@@ -325,9 +329,10 @@ def main():
                         print("class 2: {}".format(np.count_nonzero(fp_data['class_label'] == 2)))
             if found:
                 XC_arr = np.concatenate(XC_list)
-                far_attr_arr = np.concatenate(far_attr_list)
-                PAP_arr = np.concatenate(PAP_list)
-                PAP_norm_arr = np.concatenate(PAP_norm_list)
+                if not legacy_file:
+                    far_attr_arr = np.concatenate(far_attr_list)
+                    PAP_arr = np.concatenate(PAP_list)
+                    PAP_norm_arr = np.concatenate(PAP_norm_list)
                 score_arr = np.concatenate(score_list)
                 TP_FP_arr = np.concatenate(TP_FP_label)
                 cls_label_arr = np.concatenate(cls_label_list)
@@ -339,42 +344,44 @@ def main():
                     # class score vs. XC plot
                     fig_name = "{}/XC_class_score_density_thresh{}.png".format(metric_result_path, thresh)
                     x_label = "class scores"
-                    tp_fp_density_plotting(XC_arr, score_arr, tp_data['XC'], tp_data['class_score'], fp_data['XC'],
+                    tp_fp_density_plotting(XC_arr, score_arr, tp_data['XQ'], tp_data['class_score'], fp_data['XQ'],
                                            fp_data['class_score'], fig_name, x_label)
 
                     # distance to ego vs. XC plot
                     fig_name = "{}/XC_distance_to_ego_thresh{}.png".format(metric_result_path, thresh)
                     x_label = 'distance to ego'
-                    tp_fp_density_plotting(XC_arr, dist_arr, tp_data['XC'], tp_data['dist_to_ego'], fp_data['XC'],
+                    tp_fp_density_plotting(XC_arr, dist_arr, tp_data['XQ'], tp_data['dist_to_ego'], fp_data['XQ'],
                                            fp_data['dist_to_ego'], fig_name, x_label)
 
                     # num of lidar points in box vs. XC plot
                     fig_name = "{}/XC_points_in_box_thresh{}.png".format(metric_result_path, thresh)
                     x_label = 'points in box'
-                    tp_fp_density_plotting(XC_arr, pts_arr, tp_data['XC'], tp_data['pts_in_box'], fp_data['XC'],
+                    tp_fp_density_plotting(XC_arr, pts_arr, tp_data['XQ'], tp_data['pts_in_box'], fp_data['XQ'],
                                            fp_data['pts_in_box'], fig_name, x_label, x_log=True)
 
                 eval_cols = ['XQ_thresh', 'measure', 'class', 'fpr_at_95_tpr', 'detection_error',
                              'auroc', 'aupr_out', 'aupr_in']
-                XC_eval_file = "XC_eval_metrics_thresh{}.csv".format(thresh)
-                far_attr_eval_file = "far_attr_eval_metrics_thresh{}.csv".format(thresh)
-                PAP_eval_file = "PAP_eval_metrics_thresh{}.csv".format(thresh)
-                PAP_norm_eval_file = "PAP_norm_eval_metrics_thresh{}.csv".format(thresh)
+                XC_eval_file = "XQ_eval_metrics_thresh{}.csv".format(thresh)
+                if not legacy_file:
+                    far_attr_eval_file = "far_attr_eval_metrics_thresh{}.csv".format(thresh)
+                    PAP_eval_file = "PAP_eval_metrics_thresh{}.csv".format(thresh)
+                    PAP_norm_eval_file = "PAP_norm_eval_metrics_thresh{}.csv".format(thresh)
                 XC_dict, XC_cls_dicts = evaluate_metric(XC_arr, TP_FP_arr, metric_result_path, XC_eval_file,
-                                                       eval_cols, 'XC', thresh,
+                                                       eval_cols, 'XQ', thresh,
                                                        cls_name_list, cls_label_arr)
-                far_attr_dict, far_attr_cls_dicts = evaluate_metric(far_attr_arr, TP_FP_arr, metric_result_path,
-                                                        far_attr_eval_file, eval_cols, 'far_attr', thresh,
-                                                        cls_name_list, cls_label_arr)
-                PAP_dict, PAP_cls_dicts = evaluate_metric(PAP_arr, TP_FP_arr, metric_result_path,
-                                                          far_attr_eval_file, eval_cols, 'PAP', thresh,
-                                                          cls_name_list, cls_label_arr)
-                PAP_norm_dict, PAP_norm_cls_dicts = evaluate_metric(PAP_norm_arr, TP_FP_arr, metric_result_path,
-                                                          far_attr_eval_file, eval_cols, 'PAP_norm', thresh,
-                                                          cls_name_list, cls_label_arr)
+                if not legacy_file:
+                    far_attr_dict, far_attr_cls_dicts = evaluate_metric(far_attr_arr, TP_FP_arr, metric_result_path,
+                                                            far_attr_eval_file, eval_cols, 'far_attr', thresh,
+                                                            cls_name_list, cls_label_arr)
+                    PAP_dict, PAP_cls_dicts = evaluate_metric(PAP_arr, TP_FP_arr, metric_result_path,
+                                                              far_attr_eval_file, eval_cols, 'PAP', thresh,
+                                                              cls_name_list, cls_label_arr)
+                    PAP_norm_dict, PAP_norm_cls_dicts = evaluate_metric(PAP_norm_arr, TP_FP_arr, metric_result_path,
+                                                              far_attr_eval_file, eval_cols, 'PAP_norm', thresh,
+                                                              cls_name_list, cls_label_arr)
                 # cls_score_arr, XC_arr, label_arr, save_path, file_name, cols, score_id, thresh, cls_names, cls_labels
                 if w_sum_explore:
-                    exp_cols = ['w_XC', 'w_cls_score', 'XQ_thresh', 'measure', 'class', 'fpr_at_95_tpr',
+                    exp_cols = ['w_xq', 'w_cls_score', 'XQ_thresh', 'measure', 'class', 'fpr_at_95_tpr',
                                 'detection_error', 'auroc', 'aupr_out', 'aupr_in']
                     w_sum_experiment_file = "cls_score_and_XC_weighted_sum_experiment.csv"
                     wsum_experiment(score_arr, XC_arr, TP_FP_arr, metric_result_path, w_sum_experiment_file,
