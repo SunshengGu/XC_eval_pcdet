@@ -35,9 +35,11 @@ class PFNLayer(nn.Module):
             x = torch.cat(part_linear_out, dim=0)
         else:
             x = self.linear(inputs)
-        torch.backends.cudnn.enabled = False
-        x = self.norm(x.permute(0, 2, 1)).permute(0, 2, 1) if self.use_norm else x
-        torch.backends.cudnn.enabled = True
+        # torch.backends.cudnn.enabled = False
+        # x = self.norm(x.permute(0, 2, 1)).permute(0, 2, 1) if self.use_norm else x
+        # torch.backends.cudnn.enabled = True
+        total_points, voxel_points, channels = x.shape
+        x = self.norm(x.view(-1, channels)).view(total_points, voxel_points, channels) if self.use_norm else x
         x = F.relu(x)
         x_max = torch.max(x, dim=1, keepdim=True)[0]
 

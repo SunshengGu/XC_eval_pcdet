@@ -17,6 +17,8 @@ class PointPillarXAI(Detector3DTemplate):
             ret_dict = {
                 'loss': loss
             }
+            # actually, using post_processing_v2 and post_processing_tensor lead to the same result here
+            # also, disabling post processing does not change the results either
             self.post_processing_v2(batch_dict)
             return ret_dict, tb_dict, disp_dict
         else:
