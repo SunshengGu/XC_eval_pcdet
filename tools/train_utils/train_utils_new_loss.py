@@ -278,7 +278,8 @@ def train_model(model, optimizer, train_loader, logger, model_func, explained_mo
         writer.writeheader()
     accumulated_iter = start_iter
     if not (attr_loss == "XC" or attr_loss == "xc" or attr_loss == "PAP" or attr_loss == "pap" or
-            attr_loss == "far_attr" or attr_loss == "FAR_ATTR" or attr_loss == "None"):
+            attr_loss == "far_attr" or attr_loss == "FAR_ATTR" or attr_loss == "None" or
+            attr_loss == "none_but_calc" or attr_loss == "None_but_calc"):
         raise NotImplementedError
     with tqdm.trange(start_epoch, total_epochs, desc='epochs', dynamic_ncols=True, leave=(rank == 0)) as tbar:
         total_it_each_epoch = len(train_loader)
