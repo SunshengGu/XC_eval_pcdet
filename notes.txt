@@ -26,6 +26,9 @@ bash run.sh --gpus='"device=0"' --cpuset-cpus=0-5 --shm-size=1gb
 bash run.sh --gpus='"device=1"' --cpuset-cpus=6-11 --shm-size=1gb
 bash run.sh --gpus='"device=2"' --cpuset-cpus=12-17 --shm-size=1gb
 bash run.sh --gpus='"device=3"' --cpuset-cpus=18-23 --shm-size=1gb
+bash run.sh --gpus='"device=4"' --cpuset-cpus=24-29 --shm-size=1gb
+bash run.sh --gpus='"device=5"' --cpuset-cpus=30-35 --shm-size=1gb
+bash run.sh --gpus='"device=6"' --cpuset-cpus=36-41 --shm-size=1gb
 need to change port mapping for the second docker
 Note: remember to change port mapping in run.sh when creating a second docker on the same machine.
 
@@ -217,6 +220,7 @@ XQ metric command:
 - kitti: python XQ_eval.py --XC_path ~/pcdet/tools/XAI_results/Nov_29_2020_15_58_56_IG_KittiDataset_all_batches_dont_delete_analytics_Dec_03_2020_19_30_26_positive_attr_by_counting
 - kitti: python XQ_eval.py --XC_path ~/pcdet/tools/XAI_results/Nov_29_2020_15_58_56_IG_KittiDataset_all_batches_dont_delete_analytics_Dec_17_2020_21_54_49_positive_attr_by_summing
 - kitti: python binary_cls.py --XC_path ~/pcdet/tools/XAI_results/Nov_29_2020_15_58_56_IG_KittiDataset_all_batches_dont_delete_analytics_ALL_XQ_with_1e-1_thresh
+- kitti: python xc_hist.py --XC_path /media/sg/02f4ed99-ea7d-47a9-9aed-3606f0fd7fda/tadenoud/Documents/WISEOpenLidarPerceptron/tools/XAI_results/Nov_29_2020_15_58_56_IG_KittiDataset_all_batches_dont_delete_analytics_Dec_04_2020_02_08_56_positive_attr_by_counting
 
 XAI with 2 GPUs:
 - bash scripts/dist_explain.sh 2 \

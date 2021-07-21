@@ -61,6 +61,18 @@ def parse_config():
     return args, cfg
 
 
+def get_PAP_single(pos_grad, neg_grad, sign):
+    grad = None
+    if sign == 'positive':
+        grad = pos_grad
+    elif sign == 'negative':
+        grad = neg_grad
+    diff_1 = grad[1:, :] - grad[:-1, :]
+    diff_2 = grad[:, 1:] - grad[:, :-1]
+    pap_loss = np.sum(np.abs(diff_1)) + np.sum(np.abs(diff_2))
+    return pap_loss
+
+
 def calculate_iou(gt_boxes, pred_boxes):
     # see pcdet/datasets/kitti/kitti_object_eval_python/eval.py for explanation
     z_axis = 2
@@ -412,7 +424,7 @@ def main():
                                 XC = 0
                                 distant_attr_cnt = 0
                                 PAP, PAP_norm, PAP_pt = 0.0, 0.0, 0.0
-                                PAP = get_PAP(pos_attr[j], neg_attr[j], sign)
+                                PAP = get_PAP_single(pos_attr[j], neg_attr[j], sign)
                                 if num_pts_in_pred_box[j][0] == 0:
                                     PAP_pt = PAP
                                 else:
@@ -657,8 +669,9 @@ def main():
                 # XC distribution
                 fig, axs = plt.subplots(3, figsize=(10, 20))
                 fig.tight_layout(pad=8.0)
-                axs[0].hist(XC_list, bins=20, range=(0.0, 1.0))
-                axs[0].set_title('All Boxes', fontsize=20)
+                axs[0].hist(TP_XC_list, bins=20, alpha=0.5, range=(0.0, 1.0), label="TP")
+                axs[0].hist(FP_XC_list, bins=20, alpha=0.5, range=(0.0, 1.0), label="FP")
+                axs[0].set_title('XC Distribution', fontsize=20)
                 axs[1].hist(TP_XC_list, bins=20, range=(0.0, 1.0))
                 axs[1].set_title('TP Boxes', fontsize=20)
                 axs[2].hist(FP_XC_list, bins=20, range=(0.0, 1.0))

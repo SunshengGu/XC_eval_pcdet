@@ -219,6 +219,10 @@ def main():
             2 - FN_missed
             3 - FN_partially_missed
             4 - FN_misclassified
+        save_npy: whether to save the attribution values as npy files
+        attr_only: whether to show just the attribution values
+        bkg_only: whether to show just the pseudo image/pcl bev
+        save_pdf: if true, save as pdf; otherwise, save as png
         FN_analysis: indicates if we are doing FN analysis
         skip_TP_FP: indicates if we are skipping TP and FP analysis
         max_obj_cnt: The maximum number of objects in an image, right now set to 50
@@ -245,15 +249,18 @@ def main():
             parameter to get higher dpi.
     :return:
     """
+    save_npy = False
     attr_only = False
+    bkg_only = True
+    save_pdf = True
     visualize_attr = True
-    compute_xc = True
+    compute_xc = False
     compute_pap = False
     use_multi_margin = False
     plotting = False
     box_debug = True
     run_all = False
-    plot_enlarged_pred = True
+    plot_enlarged_pred = False
     unmatched_TP_FP_pred = 0
     # use_anchor_directly = True
     FN_analysis = False
@@ -269,18 +276,20 @@ def main():
     misclassified_box_analyzed = 0
     start_time = time.time()
     max_obj_cnt = 100
-    batches_to_analyze = 358
-    method = 'Saliency'
+    batches_to_analyze = 57
+    method = 'IG'
     use_trapezoid = False
     ignore_thresh = 0.0
     verify_box = False
     attr_to_csv = False
     attr_shown = 'positive'
     high_rez = True
-    overlay_orig_bev = True
+    overlay_orig_bev = False
     overlay = 0.4
     if attr_only:
-        overlay = 0
+        overlay = 1.0
+    if bkg_only:
+        overlay = 0.0
     mult_by_inputs = True
     channel_xai = False
     gray_scale_overlay = True
@@ -498,9 +507,9 @@ def main():
             if (not run_all) and batch_num == batches_to_analyze:
                 break  # just process a limited number of batches
             print("\nbatch_num: {}\n".format(batch_num))
-            # check_list = [56]
-            # if batch_num not in check_list:
-            #     continue
+            check_list = [56]
+            if batch_num not in check_list:
+                continue
             # print('\nlen(batch_dict): {}\n'.format(len(batch_dict)))
             XAI_batch_path_str = XAI_res_path_str + '/batch_{}'.format(batch_num)
             os.mkdir(XAI_batch_path_str)
@@ -1027,6 +1036,11 @@ def main():
                                     attr_file["box_type"][new_size - 1] = 0
                                 print("padded_pred_boxes_vertices[0][j]: {}".format(padded_pred_boxes_vertices[0][j]))
                                 box_explained = flip_xy(padded_pred_boxes_vertices[0][j])
+                                # if filter != 0:
+                                #     if sign == "positive":
+                                #         grad[grad <= filter] = 0
+                                #     if sign == "negative":
+                                #         grad[grad <= -1 * filter] = 0
                                 if visualize_attr:
                                     if channel_xai:  # generates channel-wise explanation
                                         # TODO: this part needs fixing
@@ -1049,20 +1063,42 @@ def main():
                                                                 pad_inches=0.0)
                                             os.chmod(XAI_box_relative_path_str, 0o777)
                                     else:
-                                        grad_viz = viz.visualize_image_attr(grad, bev_image, method="blended_heat_map",
-                                                                            sign=sign,
-                                                                            show_colorbar=True,
-                                                                            title="Overlaid {}".format(method),
-                                                                            alpha_overlay=overlay,
-                                                                            fig_size=figure_size, upscale=high_rez)
+                                        if attr_only:
+                                            grad_viz = viz.visualize_image_attr(grad, bev_image,
+                                                                                method="heat_map",
+                                                                                sign=sign,
+                                                                                show_colorbar=True,
+                                                                                title="Overlaid {}".format(method),
+                                                                                alpha_overlay=overlay,
+                                                                                fig_size=figure_size, upscale=high_rez)
+                                        else:
+                                            grad_viz = viz.visualize_image_attr(grad, bev_image, method="blended_heat_map",
+                                                                                sign=sign,
+                                                                                show_colorbar=True,
+                                                                                title="Overlaid {}".format(method),
+                                                                                alpha_overlay=overlay,
+                                                                                fig_size=figure_size, upscale=high_rez)
                                         iou_for_box = 0.0
                                         if gt_exist[i]:
                                             iou_for_box = pred_box_iou[i][j]
 
-                                        XAI_box_relative_path_str = XAI_cls_path_str.split("tools/", 1)[1] + \
-                                                                    '/box_{}_{}_XQ_{}_points_{}_top_iou_{}_loc{}.png'.format(
-                                                                        j, conf_mat[i][j], XQ, num_pts,
-                                                                        iou_for_box, pred_boxes_loc[j])
+                                        if save_pdf:
+                                            XAI_box_relative_path_str = XAI_cls_path_str.split("tools/", 1)[1] + \
+                                                                        '/box_{}_{}_XQ_{}_points_{}_top_iou_{}_loc{}.pdf'.format(
+                                                                            j, conf_mat[i][j], XQ, num_pts,
+                                                                            iou_for_box, pred_boxes_loc[j])
+                                        else:
+                                            XAI_box_relative_path_str = XAI_cls_path_str.split("tools/", 1)[1] + \
+                                                                        '/box_{}_{}_XQ_{}_points_{}_top_iou_{}_loc{}.png'.format(
+                                                                            j, conf_mat[i][j], XQ, num_pts,
+                                                                            iou_for_box, pred_boxes_loc[j])
+
+                                        if save_npy:
+                                            numpy_grad_path = XAI_cls_path_str.split("tools/", 1)[1] + \
+                                                                        '/box_{}_{}_XQ_{}_points_{}_top_iou_{}_loc{}.npy'.format(
+                                                                            j, conf_mat[i][j], XQ, num_pts,
+                                                                            iou_for_box, pred_boxes_loc[j])
+                                            np.save(numpy_grad_path, grad_viz[2])
 
                                         XAI_attr_csv_str = XAI_cls_path_str + \
                                                            '/box_{}_{}_XQ_{}.csv'.format(j, conf_mat[i][j], XQ)
