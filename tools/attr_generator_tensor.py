@@ -26,6 +26,7 @@ from XAI_utils.XQ_utils import *
 from pcdet.models import load_data_to_gpu
 from pcdet.datasets.kitti.kitti_dataset import KittiDataset
 from pcdet.datasets.cadc.cadc_dataset import CadcDataset
+from pcdet.datasets.waymo.waymo_dataset import WaymoDataset
 from pcdet.datasets.kitti.kitti_object_eval_python.eval import d3_box_overlap
 import random
 
@@ -238,16 +239,23 @@ class AttributionGeneratorTensor:
 
     def get_preds(self):
         # # Debug message
-        # print("keys in self.batch_dict:")
-        # for key in self.batch_dict:
-        #     print('key: {}'.format(key))
+        print("keys in self.batch_dict:")
+        for key in self.batch_dict:
+            print('key: {}'.format(key))
 
         pred_dicts = self.batch_dict['pred_dicts']
+        print('len(pred_dicts): {}'.format(len(pred_dicts)))
         self.batch_size = self.batch_dict['batch_size']
+        print('self.batch_size: {}'.format(self.batch_size))
         pred_boxes, pred_labels, pred_scores, selected_anchors = [], [], [], []
         for i in range(self.batch_size):
+            print("\nkeys in pred_dicts[{}]:".format(i))
+            for key in pred_dicts[i]:
+                print('key: {}'.format(key))
             frame_pred_boxes = pred_dicts[i]['pred_boxes']
+            print('len(frame_pred_boxes): {}'.format(len(frame_pred_boxes)))
             frame_pred_labels = pred_dicts[i]['pred_labels'] - 1 # this operation is valid
+            print('len(frame_pred_labels): {}'.format(len(frame_pred_labels)))
             pred_boxes.append(frame_pred_boxes)
             pred_labels.append(frame_pred_labels)
             pred_scores.append(pred_dicts[i]['pred_scores'])
@@ -327,6 +335,8 @@ class AttributionGeneratorTensor:
             s1, s2, f1, f2 = 39.68, 39.68, 0.0, 69.12
         elif self.dataset_name == 'CadcDataset':
             s1, s2, f1, f2 = 50.0, 50.0, 50.0, 50.0
+        elif self.dataset_name == 'WaymoDataset':
+            s1, s2, f1, f2 = 75.2, 75.2, 75.2, 75.2
         else:
             raise NotImplementedError
         side_range = [-s1, s2]
@@ -365,6 +375,8 @@ class AttributionGeneratorTensor:
                 s1, s2, f1, f2 = 39.68, 39.68, 0.0, 69.12
             elif self.dataset_name == 'CadcDataset':
                 s1, s2, f1, f2 = 50.0, 50.0, 50.0, 50.0
+            elif self.dataset_name == 'WaymoDataset':
+                s1, s2, f1, f2 = 75.2, 75.2, 75.2, 75.2
             else:
                 raise NotImplementedError
             side_range = [-s1, s2]
@@ -416,8 +428,8 @@ class AttributionGeneratorTensor:
             conf_mat_frame = []
             x_low = -1.5
             x_high = 70.5
-            y_low = -1.5
-            y_high = 70.5
+            y_low = -40.5
+            y_high = 40.5
             if self.dataset_name == 'WaymoDataset':
                 x_low = -76
                 x_high = 76
@@ -428,10 +440,11 @@ class AttributionGeneratorTensor:
             filtered_gt_labels = []
             for gt_ind in range(len(self.gt_dict[i]['boxes'])):
                 x, y = self.gt_dict[i]['boxes'][gt_ind][0], self.gt_dict[i]['boxes'][gt_ind][1]
-                if (-1.5 < x < 70.5) and (-40.5 < y < 40.5):
+                if (x_low < x < x_high) and (y_low < y < y_high):
                     filtered_gt_boxes.append(self.gt_dict[i]['boxes'][gt_ind])
                     filtered_gt_labels.append(self.gt_dict[i]['labels'][gt_ind])
             if len(filtered_gt_boxes) != 0:
+                print("len(filtered_gt_boxes): {}".format(len(filtered_gt_boxes)))
                 self.gt_dict[i]['boxes'] = np.vstack(filtered_gt_boxes)
             else:
                 self.gt_dict[i]['boxes'] = filtered_gt_boxes
@@ -459,6 +472,7 @@ class AttributionGeneratorTensor:
             iou, gt_index, overlaps = self.calculate_iou(
                 self.gt_dict[i]['boxes'], self.pred_boxes[i], self.dataset_name, ret_overlap=True)
             pred_box_iou.append(iou)
+            print("len(self.pred_scores[i]): {}".format(len(self.pred_scores[i])))
             for j in range(len(self.pred_scores[i])):  # j is prediction box id in the i-th image
                 gt_cls = self.gt_dict[i]['labels'][gt_index[j]]
                 print("gt class name: {}".format(gt_cls))
@@ -816,6 +830,7 @@ class AttributionGeneratorTensor:
         self.batch_dict = batch_dict
         self.cur_it = cur_it
         if self.full_model is not None:
+            print("full_model is not None")
             load_data_to_gpu(self.batch_dict)
             dummy_tensor = 0
             with torch.no_grad():

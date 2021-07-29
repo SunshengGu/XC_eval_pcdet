@@ -37,10 +37,10 @@ def get_gt_infos(cfg, dataset):
             if label in cfg.CLASS_NAMES:
                 interested.append(i)
         interested = np.array(interested)
-        print("len(box3d_lidar): {}".format(len(box3d_lidar)))
-        print("len(labels): {}".format(len(labels)))
-        print("len(interested): {}".format(len(interested)))
-        print("type(interested): {}".format(type(interested)))
+        # print("len(box3d_lidar): {}".format(len(box3d_lidar)))
+        # print("len(labels): {}".format(len(labels)))
+        # print("len(interested): {}".format(len(interested)))
+        # print("type(interested): {}".format(type(interested)))
         
         # TODO: handle the case where len(interested) == 0
         if (len(interested) == 0):
