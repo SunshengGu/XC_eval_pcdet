@@ -404,7 +404,7 @@ class Detector3DTemplate(nn.Module):
                     score_thresh=post_process_cfg.SCORE_THRESH
                 )
                 anchor_selections.append(selected)
-
+                print("\nlen(selected): {}\n".format(len(selected)))
                 if post_process_cfg.OUTPUT_RAW_SCORE:  # no need to worry about this, false by default
                     max_cls_preds, _ = torch.max(src_cls_preds, dim=-1)
                     selected_scores = max_cls_preds[selected]
@@ -574,10 +574,12 @@ class Detector3DTemplate(nn.Module):
                 if post_process_cfg.OUTPUT_RAW_SCORE:  # no need to worry about this, false by default
                     max_cls_preds, _ = torch.max(src_cls_preds, dim=-1)
                     selected_scores = max_cls_preds[selected]
-
+                print("len(selected): {}".format(len(selected)))
                 final_scores = selected_scores # this is the original code
                 final_labels = label_preds[selected]
                 final_boxes = box_preds[selected]
+                print("len(final_labels): {}".format(len(final_labels)))
+                print("len(final_scores): {}".format(len(final_scores)))
 
                 batch_dict['box_count'][index] = final_scores.shape[0]
 
@@ -701,6 +703,7 @@ class Detector3DTemplate(nn.Module):
                     nms_config=post_process_cfg.NMS_CONFIG,
                     score_thresh=post_process_cfg.SCORE_THRESH
                 )
+                print("\nlen(selected): {}\n".format(len(selected)))
                 anchor_selections.append(selected)
 
                 if post_process_cfg.OUTPUT_RAW_SCORE:  # no need to worry about this, false by default

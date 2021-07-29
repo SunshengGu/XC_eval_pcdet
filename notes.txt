@@ -3,6 +3,17 @@ When you can't `git pull`, and `git stash` also won't work, try this:
 - `git restore <file_that_causes_trouble>`
 - `git pull`
 
+Waymo stuff:
+eval_utils.py
+pcdet/datasets/waymo                                        done
+dataset.py, check for any waymo stuff                       done
+do the necessary changes in __init__.py                     done
+model: output/waymo_models/pointpillar/modified_07april
+data_augementor, have a look for waymo specific stuff       done
+
+plan:
+get a model ckpt and run eval, see if everything works fine
+
 Use the server to train:
 - `sudo openconnect -v cn-vpn.uwaterloo.ca`
 - Enter "UW-Campus" for Group
@@ -184,6 +195,8 @@ Test command:
 - kitti test the training set: python test.py --cfg_file cfgs/kitti_models/pointpillar.yaml --batch_size 2 --ckpt ~/pcdet/output/kitti_models/pointpillar/default2/ckpt/pointpillar_7728.pth
 - deformable pvrcnn: python test.py --cfg_file cfgs/kitti_models/def_pv_rcnn.yaml --batch_size 4 --ckpt /pt/Deformable-PV-RCNN/OpenPCDet/output/def_pv_rcnn/def_pv_rcnn_all.pth
 - cadc: python test.py --cfg_file cfgs/cadc_models/pointpillar.yaml --batch_size 4 --ckpt ~/pcdet/output/cadc_models/pointpillar/default/ckpt/checkpoint_epoch_4.pth
+- waymo on wisealice: python test.py --cfg_file cfgs/waymo_models/pointpillar.yaml --batch_size 4 --ckpt ~/pcdet/output/waymo_models/pointpillar/modified_07april/ckpt/checkpoint_epoch_30.pth
+
 
 ~/pcdet/output/kitti_models/pointpillar_xai/may24_18_15_xc_scratch_saliency_80_bottom_redo/ckpt
 may22_13_30_xc_scratch_saliency_80_bottom

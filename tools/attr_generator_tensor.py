@@ -92,6 +92,9 @@ class AttributionGeneratorTensor:
         elif self.dataset_name == 'CadcDataset':
             self.label_dict = {"Car": 0, "Pedestrian": 1, "Truck": 2}
             self.vicinity_dict = {"Car": 13, "Pedestrian": 3, "Truck": 19}
+        elif self.dataset_name == 'WaymoDataset':
+            self.label_dict = {"Vehicle": 0, "Pedestrian": 1, "Cyclist": 2}
+            self.vicinity_dict = {"Vehicle": 11, "Pedestrian": 4, "Cyclist": 6}
         else:
             raise NotImplementedError
 
@@ -400,78 +403,93 @@ class AttributionGeneratorTensor:
             else:
                 d3_iou_thresh = [0.5, 0.25, 0.5]
                 d3_iou_thresh_dict = {'Car': 0.5, 'Pedestrian': 0.25, 'Truck': 0.5}
+        elif self.dataset_name == 'WaymoDataset':
+            if self.tight_iou:
+                d3_iou_thresh = [0.7, 0.5, 0.7]
+                d3_iou_thresh_dict = {'Vehicle': 0.7, 'Pedestrian': 0.5, 'Cyclist': 0.7}
+            else:
+                d3_iou_thresh = [0.5, 0.25, 0.5]
+                d3_iou_thresh_dict = {'Vehicle': 0.5, 'Pedestrian': 0.25, 'Cyclist': 0.5}
 
-        # filtering out out-of-range gt boxes for Kitti
+        # filtering out out-of-range gt boxes
         for i in range(self.batch_size):
             conf_mat_frame = []
+            x_low = -1.5
+            x_high = 70.5
+            y_low = -1.5
+            y_high = 70.5
+            if self.dataset_name == 'WaymoDataset':
+                x_low = -76
+                x_high = 76
+                y_low = -76
+                y_high = 76
             # filter out out-of-range gt boxes for Kitti
-            if self.dataset_name == 'KittiDataset':
-                filtered_gt_boxes = []
-                filtered_gt_labels = []
-                for gt_ind in range(len(self.gt_dict[i]['boxes'])):
-                    x, y = self.gt_dict[i]['boxes'][gt_ind][0], self.gt_dict[i]['boxes'][gt_ind][1]
-                    if (-1.5 < x < 70.5) and (-40.5 < y < 40.5):
-                        filtered_gt_boxes.append(self.gt_dict[i]['boxes'][gt_ind])
-                        filtered_gt_labels.append(self.gt_dict[i]['labels'][gt_ind])
-                if len(filtered_gt_boxes) != 0:
-                    self.gt_dict[i]['boxes'] = np.vstack(filtered_gt_boxes)
-                else:
-                    self.gt_dict[i]['boxes'] = filtered_gt_boxes
-                self.gt_dict[i]['labels'] = filtered_gt_labels
+            filtered_gt_boxes = []
+            filtered_gt_labels = []
+            for gt_ind in range(len(self.gt_dict[i]['boxes'])):
+                x, y = self.gt_dict[i]['boxes'][gt_ind][0], self.gt_dict[i]['boxes'][gt_ind][1]
+                if (-1.5 < x < 70.5) and (-40.5 < y < 40.5):
+                    filtered_gt_boxes.append(self.gt_dict[i]['boxes'][gt_ind])
+                    filtered_gt_labels.append(self.gt_dict[i]['labels'][gt_ind])
+            if len(filtered_gt_boxes) != 0:
+                self.gt_dict[i]['boxes'] = np.vstack(filtered_gt_boxes)
+            else:
+                self.gt_dict[i]['boxes'] = filtered_gt_boxes
+            self.gt_dict[i]['labels'] = filtered_gt_labels
 
-                # need to handle the case when no gt boxes exist
-                gt_present = True
-                if len(self.gt_dict[i]['boxes']) == 0:
-                    gt_present = False
-                gt_exist.append(gt_present)
-                if not gt_present:
-                    for j in range(len(self.pred_scores)):
-                        curr_pred_score = self.pred_scores[i][j]
-                        if curr_pred_score >= self.score_thresh:
-                            conf_mat_frame.append('FP')
-                            # print("pred_box_ind: {}, pred_label: {}, didn't match any gt boxes".format(j, pred_name))
-                        else:
-                            conf_mat_frame.append('ignore')  # these boxes do not meet score thresh, ignore for now
-                            print("pred_box {} has score below threshold: {}".format(j, curr_pred_score))
-                    conf_mat.append(conf_mat_frame)
-                    continue
-
-                # when we indeed have some gt boxes
-
-                iou, gt_index, overlaps = self.calculate_iou(
-                    self.gt_dict[i]['boxes'], self.pred_boxes[i], self.dataset_name, ret_overlap=True)
-                pred_box_iou.append(iou)
-                for j in range(len(self.pred_scores[i])):  # j is prediction box id in the i-th image
-                    gt_cls = self.gt_dict[i]['labels'][gt_index[j]]
-                    print("gt class name: {}".format(gt_cls))
-                    # print("self.class_name_list: {}".format(self.class_name_list))
-                    iou_thresh_3d = d3_iou_thresh_dict[gt_cls]
+            # need to handle the case when no gt boxes exist
+            gt_present = True
+            if len(self.gt_dict[i]['boxes']) == 0:
+                gt_present = False
+            gt_exist.append(gt_present)
+            if not gt_present:
+                for j in range(len(self.pred_scores)):
                     curr_pred_score = self.pred_scores[i][j]
                     if curr_pred_score >= self.score_thresh:
-                        adjusted_pred_boxes_label = self.pred_labels[i][j]
-                        pred_name = self.class_name_list[adjusted_pred_boxes_label]
-                        print("pred_name: {}".format(pred_name))
-                        if iou[j] >= iou_thresh_3d:
-                            if gt_cls == pred_name:
-                                conf_mat_frame.append('TP')
-                            else:
-                                conf_mat_frame.append('FP')
-                            if self.box_debug:
-                                print("pred_box_ind: {}, pred_label: {}, gt_ind is {}, gt_label: {}, iou: {}".format(
-                                    j, pred_name, gt_index[j], gt_cls, iou[j]))
-                        elif iou[j] > 0:
-                            conf_mat_frame.append('FP')
-                            if self.box_debug:
-                                print("pred_box_ind: {}, pred_label: {}, gt_ind is {}, gt_label: {}, iou: {}".format(
-                                    j, pred_name, gt_index[j], gt_cls, iou[j]))
-                        else:
-                            conf_mat_frame.append('FP')
-                            if self.box_debug:
-                                print("pred_box_ind: {}, pred_label: {}, didn't match any gt boxes".format(j, pred_name))
+                        conf_mat_frame.append('FP')
+                        # print("pred_box_ind: {}, pred_label: {}, didn't match any gt boxes".format(j, pred_name))
                     else:
                         conf_mat_frame.append('ignore')  # these boxes do not meet score thresh, ignore for now
                         print("pred_box {} has score below threshold: {}".format(j, curr_pred_score))
                 conf_mat.append(conf_mat_frame)
+                continue
+
+            # when we indeed have some gt boxes
+
+            iou, gt_index, overlaps = self.calculate_iou(
+                self.gt_dict[i]['boxes'], self.pred_boxes[i], self.dataset_name, ret_overlap=True)
+            pred_box_iou.append(iou)
+            for j in range(len(self.pred_scores[i])):  # j is prediction box id in the i-th image
+                gt_cls = self.gt_dict[i]['labels'][gt_index[j]]
+                print("gt class name: {}".format(gt_cls))
+                # print("self.class_name_list: {}".format(self.class_name_list))
+                iou_thresh_3d = d3_iou_thresh_dict[gt_cls]
+                curr_pred_score = self.pred_scores[i][j]
+                if curr_pred_score >= self.score_thresh:
+                    adjusted_pred_boxes_label = self.pred_labels[i][j]
+                    pred_name = self.class_name_list[adjusted_pred_boxes_label]
+                    print("pred_name: {}".format(pred_name))
+                    if iou[j] >= iou_thresh_3d:
+                        if gt_cls == pred_name:
+                            conf_mat_frame.append('TP')
+                        else:
+                            conf_mat_frame.append('FP')
+                        if self.box_debug:
+                            print("pred_box_ind: {}, pred_label: {}, gt_ind is {}, gt_label: {}, iou: {}".format(
+                                j, pred_name, gt_index[j], gt_cls, iou[j]))
+                    elif iou[j] > 0:
+                        conf_mat_frame.append('FP')
+                        if self.box_debug:
+                            print("pred_box_ind: {}, pred_label: {}, gt_ind is {}, gt_label: {}, iou: {}".format(
+                                j, pred_name, gt_index[j], gt_cls, iou[j]))
+                    else:
+                        conf_mat_frame.append('FP')
+                        if self.box_debug:
+                            print("pred_box_ind: {}, pred_label: {}, didn't match any gt boxes".format(j, pred_name))
+                else:
+                    conf_mat_frame.append('ignore')  # these boxes do not meet score thresh, ignore for now
+                    print("pred_box {} has score below threshold: {}".format(j, curr_pred_score))
+            conf_mat.append(conf_mat_frame)
         self.tp_fp = conf_mat
 
     def record_pred_results(self):

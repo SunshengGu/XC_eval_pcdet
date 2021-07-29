@@ -25,17 +25,17 @@ def main():
     steps = 24  # number of intermediate steps for IG
 
     # config file for the full PointPillars model
-    model_cfg_file = 'cfgs/kitti_models/pointpillar_xai.yaml'
-
+    # model_cfg_file = 'cfgs/kitti_models/pointpillar_xai.yaml'
+    model_cfg_file = 'cfgs/waymo_models/pointpillar_xai.yaml'
     # model checkpoint, change to your checkpoint, make sure it's a well-trained model
-    model_ckpt = '../output/kitti_models/pointpillar/default/ckpt/pointpillar_7728.pth'
-
+    # model_ckpt = '../output/kitti_models/pointpillar/default/ckpt/pointpillar_7728.pth'
+    model_ckpt = '../output/waymo_models/pointpillar/default/ckpt/checkpoint_epoch_30.pth'
     num_batchs = 3
 
     '''________________________User Input End________________________'''
     # data set prepration, use the validation set (called 'test_set' here)
     # arguments for dataloader
-    batch_size = 2
+    batch_size = 1
     workers = 2
     dist_test = False
 
@@ -73,6 +73,7 @@ def main():
         dataset_cfg=cfg.DATA_CONFIG,
         class_names=cfg.CLASS_NAMES,
         batch_size=batch_size,
+        logger=logger,
         dist=dist_test, workers=workers, training=False
     )
 
@@ -110,6 +111,7 @@ def main():
         epoch_tp_obj_cnt[i] = 0
         epoch_fp_obj_cnt[i] = 0
     for batch_num, batch_dictionary in enumerate(test_loader):
+        print("batch_num: {}".format(batch_num))
         if batch_num == num_batchs:
             break
         print("\n\nAnalyzing the {}th batch\n".format(batch_num))

@@ -24,22 +24,36 @@ def get_gt_infos(cfg, dataset):
         dataset_infos = dataset.cadc_infos
     elif dataset_name == 'KittiDataset':
         dataset_infos = dataset.kitti_infos
+    elif dataset_name == 'WaymoDataset':
+        dataset_infos = dataset.infos
+    # print("dataset_infos: {}".format(dataset_infos))
     for info in dataset_infos:
         box3d_lidar = np.array(info['annos']['gt_boxes_lidar'])
         labels = np.array(info['annos']['name'])
-
+        # print("info['annos']: ".format(info['annos']))
         interested = []
         for i in range(len(labels)):
             label = labels[i]
             if label in cfg.CLASS_NAMES:
                 interested.append(i)
         interested = np.array(interested)
-
-        # box3d_lidar[:,2] -= box3d_lidar[:,5] / 2
-        gt_info = {
-            'boxes': box3d_lidar[interested],
-            'labels': info['annos']['name'][interested],
-        }
+        print("len(box3d_lidar): {}".format(len(box3d_lidar)))
+        print("len(labels): {}".format(len(labels)))
+        print("len(interested): {}".format(len(interested)))
+        print("type(interested): {}".format(type(interested)))
+        
+        # TODO: handle the case where len(interested) == 0
+        if (len(interested) == 0):
+            gt_info = {
+                'boxes': [],
+                'labels': [],
+            }
+        else:
+            # box3d_lidar[:,2] -= box3d_lidar[:,5] / 2
+            gt_info = {
+                'boxes': box3d_lidar[interested],
+                'labels': info['annos']['name'][interested],
+            }
         gt_infos.append(gt_info)
     return gt_infos
 
