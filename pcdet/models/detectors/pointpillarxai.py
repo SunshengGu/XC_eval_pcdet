@@ -22,14 +22,14 @@ class PointPillarXAI(Detector3DTemplate):
             self.post_processing_v2(batch_dict)
             return ret_dict, tb_dict, disp_dict
         else:
-            print("\ncalling post_processing_tensor\n")
+            # print("\ncalling post_processing_tensor\n")
             pred_dicts, recall_dicts = self.post_processing_tensor(tensor_values, batch_dict)
             return pred_dicts, recall_dicts
 
     def forward_model2D(self, tensor_values, batch_dict):
         out_put, out_batch_dict = self.backbone_2d(tensor_values, batch_dict)
         out_put, out_batch_dict = self.dense_head(out_put, out_batch_dict)
-        print("\ncalling post_processing_xai\n")
+        # print("\ncalling post_processing_xai\n")
         out_put = self.post_processing_xai(out_put, batch_dict)
         return out_put
 

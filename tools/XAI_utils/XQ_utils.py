@@ -208,6 +208,9 @@ def get_sum_XQ_analytics_fast_tensor(pos_grad, neg_grad, box_vertices, dataset_n
     H, W = grad.size()[0], grad.size()[1]  # image height and width
     box_vertices = transform_box_coord_pseudo(H, W, box_vertices, dataset_name)
     box_loc = transform_box_center_coord_tensor(box_loc, dataset_name)
+    print("dataset_name in get_sum_XQ_analytics_fast_tensor: {}".format(dataset_name))
+    print("box_vertices in psuedo image coordinates: {}".format(box_vertices))
+    print("box_loc in psuedo image coordinates: {}".format(box_loc))
     '''2) preprocess the box to get important parameters'''
     AB, AD, AB_dot_AB, AD_dot_AD = box_preprocess_tensor(box_vertices)
     '''3) compute XQ'''

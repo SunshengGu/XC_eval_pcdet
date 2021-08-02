@@ -239,23 +239,23 @@ class AttributionGeneratorTensor:
 
     def get_preds(self):
         # # Debug message
-        print("keys in self.batch_dict:")
-        for key in self.batch_dict:
-            print('key: {}'.format(key))
+        # print("keys in self.batch_dict:")
+        # for key in self.batch_dict:
+        #     print('key: {}'.format(key))
 
         pred_dicts = self.batch_dict['pred_dicts']
-        print('len(pred_dicts): {}'.format(len(pred_dicts)))
+        # print('len(pred_dicts): {}'.format(len(pred_dicts)))
         self.batch_size = self.batch_dict['batch_size']
-        print('self.batch_size: {}'.format(self.batch_size))
+        # print('self.batch_size: {}'.format(self.batch_size))
         pred_boxes, pred_labels, pred_scores, selected_anchors = [], [], [], []
         for i in range(self.batch_size):
-            print("\nkeys in pred_dicts[{}]:".format(i))
-            for key in pred_dicts[i]:
-                print('key: {}'.format(key))
+            # print("\nkeys in pred_dicts[{}]:".format(i))
+            # for key in pred_dicts[i]:
+                # print('key: {}'.format(key))
             frame_pred_boxes = pred_dicts[i]['pred_boxes']
-            print('len(frame_pred_boxes): {}'.format(len(frame_pred_boxes)))
+            # print('len(frame_pred_boxes): {}'.format(len(frame_pred_boxes)))
             frame_pred_labels = pred_dicts[i]['pred_labels'] - 1 # this operation is valid
-            print('len(frame_pred_labels): {}'.format(len(frame_pred_labels)))
+            # print('len(frame_pred_labels): {}'.format(len(frame_pred_labels)))
             pred_boxes.append(frame_pred_boxes)
             pred_labels.append(frame_pred_labels)
             pred_scores.append(pred_dicts[i]['pred_scores'])
@@ -506,41 +506,53 @@ class AttributionGeneratorTensor:
             conf_mat.append(conf_mat_frame)
         self.tp_fp = conf_mat
 
-    def record_pred_results(self):
+    def record_pred_results(self, cared_xc, cared_far_attr, cared_pap, cared_fp_xc, cared_fp_far_attr, cared_fp_pap):
         """
         Record the predicted labels and scores
         :return:
         """
         with open(self.pred_score_file_name, 'a', newline='') as csvfile:
             writer = csv.DictWriter(csvfile, delimiter=',', fieldnames=self.pred_score_field_name)
-            if self.selection == "tp/fp":
+            if self.selection == "tp/fp" or self.selection == "tp/fp_all":
                 for i in range(len(self.batch_cared_tp_ind)):
                     # note that the length of self.batch_cared_tp_ind[i] will not exceed the actual number of tps
                     # in a frame
-                    for ind in self.batch_cared_tp_ind[i]:
+                    for j in range(len(self.batch_cared_tp_ind[i])):
+                        ind = self.batch_cared_tp_ind[i][j]
                         data_dict = {"epoch": self.cur_epoch, "batch": self.cur_it, "tp/fp": "tp",
-                                     "pred_label": self.pred_labels[i][ind], "pred_score": self.pred_scores[i][ind]}
+                                     "pred_label": self.pred_labels[i][ind].item(), "pred_score": self.pred_scores[i][ind].item(),
+                                     "xc": cared_xc[i][j].item(), "far_attr": cared_far_attr[i][j].item(), 
+                                     "pap": cared_pap[i][j].item()}
                         writer.writerow(data_dict)
                 for i in range(len(self.batch_cared_fp_ind)):
                     # note that the length of self.batch_cared_fp_ind[i] will not exceed the actual number of fps
                     # in a frame
-                    for ind in self.batch_cared_fp_ind[i]:
+                    for j in range(len(self.batch_cared_fp_ind[i])):
+                        ind = self.batch_cared_fp_ind[i][j]
                         data_dict = {"epoch": self.cur_epoch, "batch": self.cur_it, "tp/fp": "fp",
-                                     "pred_label": self.pred_labels[i][ind], "pred_score": self.pred_scores[i][ind]}
+                                     "pred_label": self.pred_labels[i][ind].item(), "pred_score": self.pred_scores[i][ind].item(),
+                                     "xc": cared_fp_xc[i][j].item(), "far_attr": cared_fp_far_attr[i][j].item(), 
+                                     "pap": cared_fp_pap[i][j].item()}
                         writer.writerow(data_dict)
             elif self.selection == "tp":
                 for i in range(len(self.batch_cared_tp_ind)):
                     # note that the length of self.batch_cared_tp_ind[i] will not exceed the actual number of tps
                     # in a frame
-                    for ind in self.batch_cared_tp_ind[i]:
+                    for j in range(len(self.batch_cared_tp_ind[i])):
+                        ind = self.batch_cared_tp_ind[i][j]
                         data_dict = {"epoch": self.cur_epoch, "batch": self.cur_it, "tp/fp": "tp",
-                                     "pred_label": self.pred_labels[i][ind], "pred_score": self.pred_scores[i][ind]}
+                                     "pred_label": self.pred_labels[i][ind].item(), "pred_score": self.pred_scores[i][ind].item(),
+                                     "xc": cared_xc[i][j].item(), "far_attr": cared_far_attr[i][j].item(), 
+                                     "pap": cared_pap[i][j].item()}
                         writer.writerow(data_dict)
             else:
                 for i in range(len(self.batch_cared_ind)):
-                    for ind in self.batch_cared_ind[i]:
+                    for j in range(len(self.batch_cared_ind[i])):
+                        ind = self.batch_cared_ind[i][j]
                         data_dict = {"epoch": self.cur_epoch, "batch": self.cur_it,
-                                     "pred_label": self.pred_labels[i][ind], "pred_score": self.pred_scores[i][ind]}
+                                     "pred_label": self.pred_labels[i][ind].item(), "pred_score": self.pred_scores[i][ind].item(),
+                                     "xc": cared_xc[i][j].item(), "far_attr": cared_far_attr[i][j].item(), 
+                                     "pap": cared_pap[i][j].item()}
                         writer.writerow(data_dict)
 
     def generate_targets_single_frame(self, epoch_obj_cnt):
@@ -557,16 +569,16 @@ class AttributionGeneratorTensor:
         fp_labels = None
         fp_box_vertices = None
         fp_loc = None
-        if self.selection == "tp/fp" or self.selection == "tp":
+        if self.selection == "tp/fp" or self.selection == "tp" or self.selection == "tp/fp_all":
             cared_indices = [i for i in range(len(self.tp_fp)) if self.tp_fp[i] == "TP"]
-            if len(cared_indices) > self.num_boxes:
+            if self.selection != "tp/fp_all" and len(cared_indices) > self.num_boxes:
                 cared_indices = random.sample(cared_indices, self.num_boxes)
             self.batch_cared_tp_ind = cared_indices
             cared_labels = [self.pred_labels[i] for i in cared_indices]
             cared_box_vertices = [self.pred_vertices[i] for i in cared_indices]
             cared_loc = [self.pred_loc[i] for i in cared_indices]
             fp_indices = [i for i in range(len(self.tp_fp)) if self.tp_fp[i] == "FP"]
-            if len(fp_indices) > self.num_boxes:
+            if self.selection != "tp/fp_all" and len(fp_indices) > self.num_boxes:
                 fp_indices = random.sample(fp_indices, self.num_boxes)
             self.batch_cared_fp_ind = fp_indices
             fp_labels = [self.pred_labels[i] for i in fp_indices]
@@ -595,12 +607,12 @@ class AttributionGeneratorTensor:
             epoch_obj_cnt[k] += np.count_nonzero(cared_labels == k)
         # Generate targets
         for ind, label in enumerate(cared_labels):
-            if self.selection == "tp/fp" or self.selection == "tp":
+            if self.selection == "tp/fp" or self.selection == "tp" or self.selection == "tp/fp_all":
                 pred_id = self.batch_cared_tp_ind[ind]
                 target_list.append((self.selected_anchors[pred_id], label))
             else:
                 target_list.append((self.selected_anchors[ind], label))
-        if self.selection == "tp/fp" or self.selection == "tp":
+        if self.selection == "tp/fp" or self.selection == "tp" or self.selection == "tp/fp_all":
             for ind, label in enumerate(fp_labels):
                 pred_id = self.batch_cared_fp_ind[ind]
                 fp_target_list.append((self.selected_anchors[pred_id], label))
@@ -626,7 +638,7 @@ class AttributionGeneratorTensor:
         batch_cared_indices = []
         max_num_tp = 0
         max_num_fp = 0
-        if self.selection == "tp/fp" or self.selection == "tp":
+        if self.selection == "tp/fp" or self.selection == "tp" or self.selection == "tp/fp_all":
             for f in range(self.batch_size):
                 print("frame id: {}\ntp_fp list: {}".format(f, self.tp_fp[f]))
                 tp_indices = [k for k in range(len(self.tp_fp[f])) if self.tp_fp[f][k] == "TP"]
@@ -637,8 +649,12 @@ class AttributionGeneratorTensor:
                 batch_fp_indices.append(fp_indices)
                 max_num_tp = max(len(tp_indices), max_num_tp)
                 max_num_fp = max(len(fp_indices), max_num_fp)
-            self.tp_limit = min(self.num_boxes, max_num_tp)
-            self.fp_limit = min(self.num_boxes, max_num_fp)
+            if self.selection == "tp/fp_all":
+                self.tp_limit = max_num_tp
+                self.fp_limit = max_num_fp
+            else:
+                self.tp_limit = min(self.num_boxes, max_num_tp)
+                self.fp_limit = min(self.num_boxes, max_num_fp)
             print("self.tp_limit: {} self.fp_limit: {}".format(self.tp_limit, self.fp_limit))
         self.batch_cared_tp_ind = batch_tp_indices
         self.batch_cared_fp_ind = batch_fp_indices
@@ -653,10 +669,10 @@ class AttributionGeneratorTensor:
             fp_labels_arr = None
             fp_box_vertices = None
             fp_loc = None
-            if self.selection == "tp/fp" or self.selection == "tp":
+            if self.selection == "tp/fp" or self.selection == "tp" or self.selection == "tp/fp_all":
                 # tp selection
                 cared_indices = batch_tp_indices[i]
-                if len(cared_indices) > self.tp_limit: # too many boxes
+                if self.selection != "tp/fp_all" and len(cared_indices) > self.tp_limit: # too many boxes
                     cared_indices = random.sample(cared_indices, self.tp_limit)
                 self.batch_cared_tp_ind[i] = cared_indices
                 cared_labels = [self.pred_labels[i][ind] for ind in cared_indices]
@@ -665,7 +681,7 @@ class AttributionGeneratorTensor:
                 cared_loc = [self.pred_loc[i][ind] for ind in cared_indices]
                 # fp selection
                 fp_indices = batch_fp_indices[i]
-                if len(fp_indices) > self.fp_limit: # too many boxes
+                if self.selection != "tp/fp_all" and len(fp_indices) > self.fp_limit: # too many boxes
                     fp_indices = random.sample(fp_indices, self.fp_limit)
                 self.batch_cared_fp_ind[i] = fp_indices
                 fp_labels = [self.pred_labels[i][ind] for ind in fp_indices]
@@ -712,7 +728,7 @@ class AttributionGeneratorTensor:
             # print("\ncared_labels.device: {}\n".format(cared_labels.device))
             # print("type(cared_labels): {} \ncared_labels.dtype: {} \ncared_labels.size(): {}".format(type(cared_labels), cared_labels.dtype, cared_labels.size()))
 
-            if self.selection == "tp/fp" or self.selection == "tp":
+            if self.selection == "tp/fp" or self.selection == "tp" or self.selection == "tp/fp_all":
                 for k in range(len(self.class_name_list)):
                     if self.debug:
                         print("type(cared_labels): {}".format(type(cared_labels)))
@@ -729,7 +745,7 @@ class AttributionGeneratorTensor:
                 print("epoch_fp_obj_cnt: {}".format(epoch_fp_obj_cnt))
             # Generate targets
             for ind, label in enumerate(cared_labels):
-                if self.selection == "tp/fp" or self.selection == "tp":
+                if self.selection == "tp/fp" or self.selection == "tp" or self.selection == "tp/fp_all":
                     print("pred_ids:")
                     pred_id = self.batch_cared_tp_ind[i][ind]
                     print("pred_id: {}".format(pred_id))
@@ -740,7 +756,7 @@ class AttributionGeneratorTensor:
                 elif self.selection == "bottom":
                     pred_id = batch_cared_indices[i][ind]
                     target_list.append((self.selected_anchors[i][pred_id], label))
-            if self.selection == "tp/fp" or self.selection == "tp":
+            if self.selection == "tp/fp" or self.selection == "tp" or self.selection == "tp/fp_all":
                 print("fp pred_ids:")
                 for ind, label in enumerate(fp_labels):
                     pred_id = self.batch_cared_fp_ind[i][ind]
@@ -770,7 +786,7 @@ class AttributionGeneratorTensor:
             batch_cared_box_vertices.append(cared_box_vertices)
             batch_cared_loc.append(cared_loc)
         self.batch_cared_ind = batch_cared_indices
-        if self.selection == "tp/fp":
+        if self.selection == "tp/fp" or self.selection == "tp/fp_all":
             return batch_target_list, batch_cared_box_vertices, batch_cared_loc, batch_fp_target_list, batch_fp_box_vertices, batch_fp_loc
         return batch_target_list, batch_cared_box_vertices, batch_cared_loc
 
@@ -837,7 +853,7 @@ class AttributionGeneratorTensor:
                 # run the model once to populate the batch dict
                 anchor_scores = self.full_model(dummy_tensor, self.batch_dict)
         self.get_preds()
-        if self.selection == "tp/fp" or self.selection == "tp":
+        if self.selection == "tp/fp" or self.selection == "tp" or self.selection == "tp/fp_all":
             self.get_tp_fp_indices(cur_it)
         self.compute_pred_box_vertices()
         return self.generate_targets(epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt)
@@ -862,7 +878,7 @@ class AttributionGeneratorTensor:
         """
         # Get the predictions, compute box vertices, and generate targets
         targets, cared_vertices, cared_locs, fp_targets, fp_vertices, fp_locs = None, None, None, None, None, None
-        if self.selection == "tp/fp":
+        if self.selection == "tp/fp" or self.selection == "tp/fp_all":
             targets, cared_vertices, cared_locs, fp_targets, fp_vertices, fp_locs = self.xc_preprocess(
                 batch_dict, epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt, cur_it)
         else:
@@ -877,7 +893,7 @@ class AttributionGeneratorTensor:
             [], [], [], [], [], []
         total_XC, total_far_attr, total_pap, total_fp_XC, total_fp_far_attr, total_fp_pap = \
             None, None, None, None, None, None
-        if self.selection == "tp/fp" or self.selection == "tp":
+        if self.selection == "tp/fp" or self.selection == "tp" or self.selection == "tp/fp_all":
             # get the tp related metrics
             for i in range(self.tp_limit):
                 # The i-th target for each frame in the batch
@@ -895,12 +911,12 @@ class AttributionGeneratorTensor:
                 # print("type(cared tp locs): {}".format(type(cared_locs)))
                 new_cared_vertices = [frame_vertices[i] for frame_vertices in cared_vertices]
                 new_cared_locs = [frame_locs[i] for frame_locs in cared_locs]
-                # if self.debug:
-                #     print("tp pred_box_id: {}".format(i))
-                #     print("tp type(new_targets): {}".format(type(new_targets)))  # Should be List
-                #     print("tp new_targets: {}".format(new_targets))
-                #     print("tp new_cared_vertices: {}".format(new_cared_vertices))
-                #     print("tp new_cared_locs: {}".format(new_cared_locs))
+                if self.debug:
+                    print("tp pred_box_id: {}".format(i))
+                    print("tp type(new_targets): {}".format(type(new_targets)))  # Should be List
+                    print("tp new_targets: {}".format(new_targets))
+                    print("tp new_cared_vertices: {}".format(new_cared_vertices))
+                    print("tp new_cared_locs: {}".format(new_cared_locs))
                 XC, far_attr = self.compute_xc_single(
                     pos_grad, neg_grad, new_cared_vertices, self.dataset_name, sign, self.ignore_thresh,
                     new_cared_locs, vicinities, method)
@@ -908,7 +924,7 @@ class AttributionGeneratorTensor:
                 total_XC_lst.append(torch.stack(XC))
                 total_far_attr_lst.append(torch.stack(far_attr))
                 total_pap_lst.append(torch.stack(pap))
-            if self.selection == "tp/fp":
+            if self.selection == "tp/fp" or self.selection == "tp/fp_all":
                 # get the fp related metrics
                 for i in range(self.fp_limit):
                     # The i-th target for each frame in the batch
@@ -922,12 +938,12 @@ class AttributionGeneratorTensor:
                         vicinities.append(vici)
                     new_cared_vertices = [frame_vertices[i] for frame_vertices in fp_vertices]
                     new_cared_locs = [frame_locs[i] for frame_locs in fp_locs]
-                    # if self.debug:
-                    #     print("fp pred_box_id: {}".format(i))
-                    #     print("fp type(new_targets): {}".format(type(new_targets)))  # Should be List
-                    #     print("fp new_targets: {}".format(new_targets))
-                    #     print("fp new_cared_vertices: {}".format(new_cared_vertices))
-                    #     print("fp new_cared_locs: {}".format(new_cared_locs))
+                    if self.debug:
+                        print("fp pred_box_id: {}".format(i))
+                        print("fp type(new_targets): {}".format(type(new_targets)))  # Should be List
+                        print("fp new_targets: {}".format(new_targets))
+                        print("fp new_cared_vertices: {}".format(new_cared_vertices))
+                        print("fp new_cared_locs: {}".format(new_cared_locs))
                     XC, far_attr = self.compute_xc_single(
                         pos_grad, neg_grad, new_cared_vertices, self.dataset_name, sign, self.ignore_thresh,
                         new_cared_locs, vicinities, method)
@@ -984,7 +1000,7 @@ class AttributionGeneratorTensor:
         total_pap = torch.where(total_pap_ == 0, nan_tensor, total_pap_)
         print("\ntotal_XC.size(): {}\ntotal_pap.size(): {}".format(total_XC.size(), total_pap.size()))
         print("\nsuccessfully reformatted the XC, far_attr, and pap values from lists to tensors\n")
-        if self.selection == "tp/fp":
+        if self.selection == "tp/fp" or self.selection == "tp/fp_all":
             total_fp_XC = torch.stack(total_fp_XC_lst)
             total_fp_far_attr = torch.stack(total_fp_far_attr_lst)
             total_fp_pap_raw = torch.stack(total_fp_pap_lst)
@@ -994,16 +1010,16 @@ class AttributionGeneratorTensor:
             total_XC = total_XC.transpose(0, 1)
             total_far_attr = total_far_attr.transpose(0, 1)
             total_pap = total_pap.transpose(0, 1)
-            if self.selection == "tp/fp":
+            if self.selection == "tp/fp" or self.selection == "tp/fp_all":
                 total_fp_XC = total_fp_XC.transpose(0, 1)
                 total_fp_far_attr = total_fp_far_attr.transpose(0, 1)
                 total_fp_pap = total_fp_pap.transpose(0, 1)
 
         # record the cared predictions:
         self.cur_epoch = cur_epoch
-        self.record_pred_results()
+        self.record_pred_results(total_XC, total_far_attr, total_pap, total_fp_XC, total_fp_far_attr, total_fp_pap)
 
-        if self.selection == "tp/fp":
+        if self.selection == "tp/fp" or self.selection == "tp/fp_all":
             return total_XC, total_far_attr, total_pap, total_fp_XC, total_fp_far_attr, total_fp_pap
         return total_XC, total_far_attr, total_pap
 

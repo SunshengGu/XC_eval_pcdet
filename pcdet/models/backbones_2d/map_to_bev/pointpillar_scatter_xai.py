@@ -36,4 +36,8 @@ class PointPillarScatterXAI(nn.Module):
         batch_spatial_features = batch_spatial_features.view(batch_size, self.num_bev_features * self.nz, self.ny,
                                                              self.nx)
         batch_dict['spatial_features'] = batch_spatial_features
+        # print("\nbatch_spatial_features.shape: {}".format(batch_spatial_features.shape))
+        # print("\ntorch.mean(batch_spatial_features): {}".format(torch.mean(batch_spatial_features)))
+        # print("\ntorch.max(batch_spatial_features): {}".format(torch.max(batch_spatial_features)))
+        # print("\ntorch.min(batch_spatial_features): {}".format(torch.min(batch_spatial_features)))
         return tensor_values, batch_dict

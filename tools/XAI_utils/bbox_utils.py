@@ -239,8 +239,9 @@ def get_box_scale(dataset_name):
     if dataset_name == 'CadcDataset':
         return 400 / 100
     if dataset_name == 'KittiDataset':
-        # TODO: verify Kitti's explanation map dimension
         return 496 / 79.36
+    if dataset_name == 'WaymoDataset':
+        return 456 / 150.4
 
 
 def get_dist(p1, p2):
@@ -317,15 +318,24 @@ def rotate_and_flip(box_vertices, dataset_name, angle):
     if dataset_name == 'KittiDataset':
         x_max = 496.0
         y_max = 432.0
+    if dataset_name == 'WaymoDataset':
+        x_max = 456.0
+        y_max = 456.0
+    # TODO: verify the following for waymo
     vert_center = y_max/2.0
     horiz_center = x_max/2.0
-    for vertex in box_vertices_copy:
-        # first, rotate ccw by a certain degrees
-        rotate(vert_center, horiz_center, vertex, angle)
-        # then, flip about the vertical axis
-        '''Note: x is the vertical direction'''
-        vert_dist = vertex[1] - vert_center
-        vertex[1] = vert_center - vert_dist
+    if dataset_name == 'KittiDataset':
+        for vertex in box_vertices_copy:
+            # first, rotate ccw by a certain degrees
+            rotate(vert_center, horiz_center, vertex, angle)
+            # then, flip about the vertical axis
+            '''Note: x is the vertical direction'''
+            vert_dist = vertex[1] - vert_center
+            vertex[1] = vert_center - vert_dist
+    else: # waymo or cadc
+        for vertex in box_vertices_copy:
+            # first, rotate ccw by a certain degrees
+            rotate(vert_center, horiz_center, vertex, angle)
     return box_vertices_copy
 
 
@@ -381,6 +391,20 @@ def transform_box_center_coord(coord, dataset_name, high_rez=False, scaling_fact
         # y = H - y
         x = coord[0] * new_scale
         return np.array([y,x])
+    elif dataset_name == 'WaymoDataset':
+        # x_range = 100.0
+        y_range = 150.4
+        H = 456
+        if high_rez:
+            H = H * scaling_factor
+        #TODO: the remaining part of this if statement may need to be changed
+        new_scale = H / y_range
+        y = y_orig + coord[0]
+        x = x_orig - coord[1]
+        y = y_range - y
+        y = y * new_scale
+        x = x * new_scale
+        return np.array([y,x])
 
 
 def transform_box_center_coord_tensor(coord, dataset_name, high_rez=False, scaling_factor=1):
@@ -417,6 +441,22 @@ def transform_box_center_coord_tensor(coord, dataset_name, high_rez=False, scali
         # y = H - y
         x = coord[0] * new_scale
         return torch.tensor([y, x]).cuda()
+    elif dataset_name == 'WaymoDataset':
+        # TODO: need to check if the following is valid
+        # origin coordinate in 
+        x_orig = 75.2
+        y_orig = 75.2
+        y_range = 150.4
+        H = 456
+        if high_rez:
+            H = H * scaling_factor
+        new_scale = H / y_range
+        y = y_orig + coord[0]
+        x = x_orig - coord[1]
+        x = y_range - x
+        y = y * new_scale
+        x = x * new_scale
+        return torch.tensor([x, y]).cuda()
 
 
 def transform_box_coord(H, W, box_vertices, dataset_name, high_rez=False, scaling_factor=1):
@@ -441,12 +481,20 @@ def transform_box_coord(H, W, box_vertices, dataset_name, high_rez=False, scalin
         '''Note: the range for Kitti is different now'''
         # x_range = 70.4
         y_range = 79.36
+    elif dataset_name == 'WaymoDataset':
+        y_range = 150.4
     new_scale = H / y_range
     # print('H: {}'.format(H))
-    for vertex in box_vertices:
-        vertex[0] = vertex[0] * new_scale
-        vertex[0] = H - vertex[0]
-        vertex[1] = vertex[1] * new_scale
+    if dataset_name == 'KittiDataset':
+        for vertex in box_vertices:
+            vertex[0] = vertex[0] * new_scale
+            vertex[0] = H - vertex[0]
+            vertex[1] = vertex[1] * new_scale
+    else:
+        for vertex in box_vertices:
+            vertex[0] = vertex[0] * new_scale
+            vertex[0] = H - vertex[0]
+            vertex[1] = vertex[1] * new_scale
     return box_vertices
 
 
@@ -468,12 +516,23 @@ def transform_box_coord_pseudo(H, W, box_vertices, dataset_name):
     elif dataset_name == 'KittiDataset':
         '''Note: the range for Kitti is different now'''
         y_range = 79.36
+    elif dataset_name == 'WaymoDataset':
+        y_range = 150.4
     new_scale = H / y_range
     # print('H: {}'.format(H))
-    for vertex in box_vertices:
-        vertex[0] = vertex[0] * new_scale
-        vertex[0] = H - vertex[0]
-        vertex[1] = vertex[1] * new_scale
+    # TODO: verify the following for waymo
+    if dataset_name == 'KittiDataset':
+        for vertex in box_vertices:
+            vertex[0] = vertex[0] * new_scale
+            vertex[0] = H - vertex[0]
+            vertex[1] = vertex[1] * new_scale
+    else:
+	# print("\n")
+        for vertex in box_vertices:
+            vertex[0] = vertex[0] * new_scale
+            vertex[0] = H - vertex[0]
+            vertex[1] = vertex[1] * new_scale
+            # print("vertex: {}".format(vertex))
     return box_vertices
 
 
@@ -489,7 +548,10 @@ def transform_point_coord(H, W, coord, dataset_name, high_rez=False, scaling_fac
         '''Note: the range for Kitti is different now'''
         # x_range = 70.4
         y_range = 79.36
+    elif dataset_name == 'WaymoDataset':
+        y_range = 150.4
     new_scale = H / y_range
+    # TODO: verify the following for waymo
     # print('H: {}'.format(H))
     y = coord[0] * new_scale
     # y = H - y
@@ -509,10 +571,14 @@ def transform_pred_point_coord(H, W, coord, dataset_name, high_rez=False, scalin
         '''Note: the range for Kitti is different now'''
         # x_range = 70.4
         y_range = 79.36
+    elif dataset_name == 'WaymoDataset':
+        y_range = 150.4
     new_scale = H / y_range
+    # TODO: verify the following for waymo
     # print('H: {}'.format(H))
     y = coord[0] * new_scale
-    y = H - y
+    if dataset_name == 'KittiDataset':
+        y = H - y
     x = coord[1] * new_scale
     return y, x
 

@@ -16,9 +16,12 @@ from XAI_utils.tp_fp import get_gt_infos
 
 def main():
     '''________________________User Input Begin________________________'''
-    dataset_name = 'KittiDataset'  # change to your dataset, follow naming convention in the config yaml files in PCDet
+    # dataset_name = 'KittiDataset'  # change to your dataset, follow naming convention in the config yaml files in PCDet
     method = 'IntegratedGradients'  # explanation method
     attr_shown = 'positive'  # show positive or negative attributions
+    aggre_method = 'sum'
+    check_all = True
+    debugging = False
 
     # IG specific parameters
     mult_by_inputs = True  # whether to show attributions only at where some input exists
@@ -29,8 +32,8 @@ def main():
     model_cfg_file = 'cfgs/waymo_models/pointpillar_xai.yaml'
     # model checkpoint, change to your checkpoint, make sure it's a well-trained model
     # model_ckpt = '../output/kitti_models/pointpillar/default/ckpt/pointpillar_7728.pth'
-    model_ckpt = '../output/waymo_models/pointpillar/default/ckpt/checkpoint_epoch_30.pth'
-    num_batchs = 3
+    model_ckpt = '../output/waymo_models/pointpillar/modified_07april/ckpt/checkpoint_epoch_30.pth'
+    num_batchs = 2
 
     '''________________________User Input End________________________'''
     # data set prepration, use the validation set (called 'test_set' here)
@@ -90,19 +93,19 @@ def main():
     #                                       model_cfg_file=explained_cfg_file,
     #                                       data_set=test_set, xai_method=method, output_path="unspecified",
     #                                       ignore_thresh=0.0, debug=True)
-    selection = "tp/fp"
-    pred_score_file_name = output_dir / 'interested_pred_scores.csv'
-    pred_score_field_name = ['epoch', 'batch', 'tp/fp', 'pred_label', 'pred_score']
-    if selection != "tp/fp" and selection != "tp":
-        pred_score_field_name = ['epoch', 'batch', 'pred_label', 'pred_score']
+    selection = "tp/fp_all"
+    pred_score_file_name = output_dir / 'interested_pred_scores_{}.csv'.format(datetime.datetime.now().strftime('%Y%m%d-%H%M%S'))
+    pred_score_field_name = ['epoch', 'batch', 'tp/fp', 'pred_label', 'pred_score', 'xc', 'far_attr', 'pap']
+    if selection != "tp/fp" and selection != "tp" and selection != "tp/fp_all":
+        pred_score_field_name = ['epoch', 'batch', 'pred_label', 'pred_score', 'xc', 'far_attr', 'pap']
     with open(pred_score_file_name, 'w', newline='') as csvfile:
         writer = csv.DictWriter(csvfile, delimiter=',', fieldnames=pred_score_field_name)
         writer.writeheader()
     myXCCalculator = AttributionGeneratorTensor(
         explained_model, cfg.DATA_CONFIG.DATASET, cfg.CLASS_NAMES, method, None, gt_infos,
         pred_score_file_name=pred_score_file_name, pred_score_field_name=pred_score_field_name,
-        score_thresh=cfg.MODEL.POST_PROCESSING.SCORE_THRESH, selection=selection, debug=True, full_model=full_model,
-        margin=0.2, ignore_thresh=0.0)
+        score_thresh=cfg.MODEL.POST_PROCESSING.SCORE_THRESH, selection=selection, debug=debugging, full_model=full_model,
+        margin=0.2, ignore_thresh=0.1)
     epoch_obj_cnt = {}
     epoch_tp_obj_cnt = {}
     epoch_fp_obj_cnt = {}
@@ -112,20 +115,20 @@ def main():
         epoch_fp_obj_cnt[i] = 0
     for batch_num, batch_dictionary in enumerate(test_loader):
         print("batch_num: {}".format(batch_num))
-        if batch_num == num_batchs:
+        if (not check_all) and batch_num == num_batchs:
             break
         print("\n\nAnalyzing the {}th batch\n".format(batch_num))
-        if selection == "tp/fp":
+        if selection == "tp/fp" or selection == "tp/fp_all":
             batch_XC, batch_far_attr, batch_total_pap, batch_fp_XC, batch_fp_far_attr, batch_fp_total_pap = \
                 myXCCalculator.compute_xc(
                     batch_dictionary, epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt, cur_it=batch_num,
-                    cur_epoch=0, method="sum")
+                    cur_epoch=0, method=aggre_method, sign=attr_shown)
             print("\nTP XC values for the batch:\n {}".format(batch_XC))
             print("\nFP XC values for the batch:\n {}".format(batch_fp_XC))
         else:
             batch_XC, batch_far_attr, batch_total_pap = myXCCalculator.compute_xc(
                 batch_dictionary, epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt, cur_it=batch_num,
-                cur_epoch=0, method="sum")
+                cur_epoch=0, method=aggre_method, sign=attr_shown)
             if selection == "tp":
                 print("\nTP XC values for the batch:\n {}".format(batch_XC))
             else:

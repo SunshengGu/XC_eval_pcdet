@@ -35,5 +35,8 @@ class PointPillarScatter(nn.Module):
         batch_spatial_features = batch_spatial_features.view(batch_size, self.num_bev_features * self.nz, self.ny,
                                                              self.nx)
         batch_dict['spatial_features'] = batch_spatial_features
+        # print("\ntorch.mean(batch_spatial_features[0]): {}".format(torch.mean(batch_spatial_features[0])))
+        # print("\ntorch.max(batch_spatial_features[0]): {}".format(torch.max(batch_spatial_features[0])))
+        # print("\ntorch.min(batch_spatial_features[0]): {}".format(torch.min(batch_spatial_features[0])))
         return batch_dict
 
