@@ -117,6 +117,8 @@ def main():
         print("batch_num: {}".format(batch_num))
         if (not check_all) and batch_num == num_batchs:
             break
+        if (batch_num % 10 != 0):
+            continue  # only analyze 10% of the dataset
         print("\n\nAnalyzing the {}th batch\n".format(batch_num))
         if selection == "tp/fp" or selection == "tp/fp_all":
             batch_XC, batch_far_attr, batch_total_pap, batch_fp_XC, batch_fp_far_attr, batch_fp_total_pap = \
