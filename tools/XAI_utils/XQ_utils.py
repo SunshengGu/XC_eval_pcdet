@@ -262,8 +262,8 @@ def get_cnt_XQ_analytics_fast_tensor(pos_grad, neg_grad, box_vertices, dataset_n
     grad_ind = grad >= ignore_thresh
     filtered_attr = torch.where(grad_ind, grad, zero_tensor)
     masked_attr = torch.where(box_mask == 1, filtered_attr, zero_tensor)
-    total_attr = torch.sum(grad_ind)
-    attr_in_box = torch.sum(masked_attr >= ignore_thresh)
+    total_attr = torch.sum(grad_ind) * 1.0
+    attr_in_box = torch.sum(masked_attr >= ignore_thresh) * 1.0
     if total_attr == 0:
         print("No attributions present!")
         return total_attr, total_attr, total_attr, total_attr
