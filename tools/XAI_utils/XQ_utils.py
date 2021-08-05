@@ -215,7 +215,7 @@ def get_sum_XQ_analytics_fast_tensor(pos_grad, neg_grad, box_vertices, dataset_n
     AB, AD, AB_dot_AB, AD_dot_AD = box_preprocess_tensor(box_vertices)
     '''3) compute XQ'''
     box_mask = torch.zeros((H, W)).cuda()
-    zero_tensor = torch.zeros((H, W)).cuda()
+    zero_tensor = torch.zeros((H, W), dtype=torch.double).cuda()
     generate_box_mask_tensor(box_mask, box_loc, vicinity, box_vertices[0], AB, AD, AB_dot_AB, AD_dot_AD)
     filtered_attr = torch.where(grad >= ignore_thresh, grad, zero_tensor)
     masked_attr = torch.where(box_mask == 1, filtered_attr, zero_tensor)
@@ -257,7 +257,7 @@ def get_cnt_XQ_analytics_fast_tensor(pos_grad, neg_grad, box_vertices, dataset_n
     AB, AD, AB_dot_AB, AD_dot_AD = box_preprocess_tensor(box_vertices)
     '''3) compute XQ'''
     box_mask = torch.zeros((H, W)).cuda()
-    zero_tensor = torch.zeros((H, W)).cuda()
+    zero_tensor = torch.zeros((H, W), dtype=torch.double).cuda()
     generate_box_mask_tensor(box_mask, box_loc, vicinity, box_vertices[0], AB, AD, AB_dot_AB, AD_dot_AD)
     grad_ind = grad >= ignore_thresh
     filtered_attr = torch.where(grad_ind, grad, zero_tensor)

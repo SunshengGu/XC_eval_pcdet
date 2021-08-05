@@ -298,21 +298,30 @@ class AttributionGeneratorTensor:
         # print("PseudoImage2D.size(): {}".format(PseudoImage2D.size()))
         attr_size = PseudoImage2D[0].size()
         d, h, w = attr_size[0], attr_size[1], attr_size[2]
-        zero_tensor = torch.zeros((h, w, d), dtype=PseudoImage2D[0].dtype).cuda()
+        zero_tensor = torch.zeros((h, w, d), dtype=torch.double).cuda()
         if self.xai_method == "IntegratedGradients":
-            print("type(self.batch_dict['batch_size']): {}".format(type(self.batch_dict['batch_size'])))
-            print("self.batch_dict['batch_size']: {}".format(self.batch_dict['batch_size']))
-            print("type(self.ig_steps): {}".format(type(self.ig_steps)))
-            print("self.ig_steps: {}".format(self.ig_steps))
+            # print("type(self.batch_dict['batch_size']): {}".format(type(self.batch_dict['batch_size'])))
+            # print("self.batch_dict['batch_size']: {}".format(self.batch_dict['batch_size']))
+            # print("type(self.ig_steps): {}".format(type(self.ig_steps)))
+            # print("self.ig_steps: {}".format(self.ig_steps))
             time.sleep(0.001)
             batch_grad = self.explainer.attribute(PseudoImage2D, baselines=PseudoImage2D * 0, target=target,
                                                   additional_forward_args=self.batch_dict, n_steps=self.ig_steps,
                                                   internal_batch_size=self.batch_dict['batch_size'])
         elif self.xai_method == "Saliency":
             batch_grad = self.explainer.attribute(PseudoImage2D, target=target, additional_forward_args=self.batch_dict)
-
+        # print("\nbatch_grad[0].type(): {}".format(batch_grad[0].type()))
         grads = [gradients.squeeze().permute(1, 2, 0) for gradients in batch_grad]
-        print("\ngrads[0].size(): {}".format(grads[0].size()))
+        # print("\ngrads[0].size(): {}".format(grads[0].size()))
+        # print("\ngrads[0].type(): {}".format(grads[0].type()))
+        # print("\nzero_tensor.type(): {}".format(zero_tensor.type()))
+        pos_grad = []
+        # for grad in grads:
+        #     filtered_pos_grad = torch.where(grad > 0, grad, zero_tensor)
+        #     print("filtered_pos_grad.type(): {}".format(filtered_pos_grad.type()))
+        #     cur_pos_grad = torch.sum(filtered_pos_grad, axis = 2)
+        #     print("cur_pos_grad.type(): {}".format(cur_pos_grad.type()))
+        #     pos_grad.append(cur_pos_grad)
         pos_grad = [torch.sum(torch.where(grad > 0, grad, zero_tensor), axis=2) for grad in grads]
         neg_grad = [torch.sum(-1 * torch.where(grad < 0, grad, zero_tensor), axis=2) for grad in grads]
         print("\nsummarized grad")
@@ -994,7 +1003,7 @@ class AttributionGeneratorTensor:
             total_pap_lst.append(torch.full((1,1), float('nan')).cuda())
         total_XC = torch.stack(total_XC_lst)
         total_far_attr = torch.stack(total_far_attr_lst)
-        total_pap_raw = torch.stack(total_pap_lst)
+        total_pap_raw = torch.stack(total_pap_lst).float()
         nan_tensor = torch.full(total_XC.size(), float('nan')).cuda()
         total_pap_ = torch.where(torch.isnan(total_XC), nan_tensor, total_pap_raw)
         total_pap = torch.where(total_pap_ == 0, nan_tensor, total_pap_)
@@ -1003,7 +1012,7 @@ class AttributionGeneratorTensor:
         if self.selection == "tp/fp" or self.selection == "tp/fp_all":
             total_fp_XC = torch.stack(total_fp_XC_lst)
             total_fp_far_attr = torch.stack(total_fp_far_attr_lst)
-            total_fp_pap_raw = torch.stack(total_fp_pap_lst)
+            total_fp_pap_raw = torch.stack(total_fp_pap_lst).float()
             fp_nan_tensor = torch.full(total_fp_XC.size(), float('nan')).cuda()
             total_fp_pap_ = torch.where(torch.isnan(total_fp_XC), fp_nan_tensor, total_fp_pap_raw)
             total_fp_pap = torch.where(total_fp_pap_ == 0, fp_nan_tensor, total_fp_pap_)
