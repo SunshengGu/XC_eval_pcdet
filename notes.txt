@@ -3,6 +3,18 @@ When you can't `git pull`, and `git stash` also won't work, try this:
 - `git restore <file_that_causes_trouble>`
 - `git pull`
 
+Problem with binary checkpoint files:
+- previously, the .pth checkpoint files are of type "program"
+- but now, they could be of type "binary" too
+- pytorch < 1.6 won't be able to handle this
+- so need to uninstall pytorch and install pytorch 1.6
+- then need to run `python setup.py clean --all && python setup.py develop` again
+- reset spconv by doing the following:
+    git clone https://github.com/traveller59/spconv --recursive
+    cd spconv
+    python setup.py bdist_wheel
+    pip install --force-reinstall dist/*
+
 Waymo stuff:
 eval_utils.py
 pcdet/datasets/waymo                                        done
@@ -195,7 +207,7 @@ Test command:
 - kitti test the training set: python test.py --cfg_file cfgs/kitti_models/pointpillar.yaml --batch_size 2 --ckpt ~/pcdet/output/kitti_models/pointpillar/default2/ckpt/pointpillar_7728.pth
 - deformable pvrcnn: python test.py --cfg_file cfgs/kitti_models/def_pv_rcnn.yaml --batch_size 4 --ckpt /pt/Deformable-PV-RCNN/OpenPCDet/output/def_pv_rcnn/def_pv_rcnn_all.pth
 - cadc: python test.py --cfg_file cfgs/cadc_models/pointpillar.yaml --batch_size 4 --ckpt ~/pcdet/output/cadc_models/pointpillar/default/ckpt/checkpoint_epoch_4.pth
-- waymo on wisealice: python test.py --cfg_file cfgs/waymo_models/pointpillar.yaml --batch_size 4 --ckpt ~/pcdet/output/waymo_models/pointpillar/modified_07april/ckpt/checkpoint_epoch_30.pth
+- waymo on wisealice: python test.py --cfg_file cfgs/waymo_models/pointpillar.yaml --batch_size 4 --ckpt ~/pcdet/output/waymo_models/pointpillar/nick_models/ckpt/checkpoint_epoch_30.pth
 
 
 ~/pcdet/output/kitti_models/pointpillar_xai/may24_18_15_xc_scratch_saliency_80_bottom_redo/ckpt

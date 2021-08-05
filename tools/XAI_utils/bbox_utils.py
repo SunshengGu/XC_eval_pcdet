@@ -241,7 +241,7 @@ def get_box_scale(dataset_name):
     if dataset_name == 'KittiDataset':
         return 496 / 79.36
     if dataset_name == 'WaymoDataset':
-        return 456 / 150.4
+        return 512 / 168.96
 
 
 def get_dist(p1, p2):
@@ -319,8 +319,8 @@ def rotate_and_flip(box_vertices, dataset_name, angle):
         x_max = 496.0
         y_max = 432.0
     if dataset_name == 'WaymoDataset':
-        x_max = 456.0
-        y_max = 456.0
+        x_max = 512.0
+        y_max = 512.0
     # TODO: verify the following for waymo
     vert_center = y_max/2.0
     horiz_center = x_max/2.0
@@ -393,8 +393,8 @@ def transform_box_center_coord(coord, dataset_name, high_rez=False, scaling_fact
         return np.array([y,x])
     elif dataset_name == 'WaymoDataset':
         # x_range = 100.0
-        y_range = 150.4
-        H = 456
+        y_range = 168.96
+        H = 512
         if high_rez:
             H = H * scaling_factor
         #TODO: the remaining part of this if statement may need to be changed
@@ -444,10 +444,10 @@ def transform_box_center_coord_tensor(coord, dataset_name, high_rez=False, scali
     elif dataset_name == 'WaymoDataset':
         # TODO: need to check if the following is valid
         # origin coordinate in 
-        x_orig = 75.2
-        y_orig = 75.2
-        y_range = 150.4
-        H = 456
+        x_orig = 84.48
+        y_orig = 84.48
+        y_range = 168.96
+        H = 512
         if high_rez:
             H = H * scaling_factor
         new_scale = H / y_range
@@ -482,7 +482,7 @@ def transform_box_coord(H, W, box_vertices, dataset_name, high_rez=False, scalin
         # x_range = 70.4
         y_range = 79.36
     elif dataset_name == 'WaymoDataset':
-        y_range = 150.4
+        y_range = 168.96
     new_scale = H / y_range
     # print('H: {}'.format(H))
     if dataset_name == 'KittiDataset':
@@ -517,7 +517,7 @@ def transform_box_coord_pseudo(H, W, box_vertices, dataset_name):
         '''Note: the range for Kitti is different now'''
         y_range = 79.36
     elif dataset_name == 'WaymoDataset':
-        y_range = 150.4
+        y_range = 168.96
     new_scale = H / y_range
     # print('H: {}'.format(H))
     # TODO: verify the following for waymo
@@ -549,7 +549,7 @@ def transform_point_coord(H, W, coord, dataset_name, high_rez=False, scaling_fac
         # x_range = 70.4
         y_range = 79.36
     elif dataset_name == 'WaymoDataset':
-        y_range = 150.4
+        y_range = 168.96
     new_scale = H / y_range
     # TODO: verify the following for waymo
     # print('H: {}'.format(H))
@@ -572,7 +572,7 @@ def transform_pred_point_coord(H, W, coord, dataset_name, high_rez=False, scalin
         # x_range = 70.4
         y_range = 79.36
     elif dataset_name == 'WaymoDataset':
-        y_range = 150.4
+        y_range = 168.96
     new_scale = H / y_range
     # TODO: verify the following for waymo
     # print('H: {}'.format(H))

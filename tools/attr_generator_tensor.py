@@ -336,7 +336,7 @@ class AttributionGeneratorTensor:
         elif self.dataset_name == 'CadcDataset':
             s1, s2, f1, f2 = 50.0, 50.0, 50.0, 50.0
         elif self.dataset_name == 'WaymoDataset':
-            s1, s2, f1, f2 = 75.2, 75.2, 75.2, 75.2
+            s1, s2, f1, f2 = 84.48, 84.48, 84.48, 84.48
         else:
             raise NotImplementedError
         side_range = [-s1, s2]
@@ -376,7 +376,7 @@ class AttributionGeneratorTensor:
             elif self.dataset_name == 'CadcDataset':
                 s1, s2, f1, f2 = 50.0, 50.0, 50.0, 50.0
             elif self.dataset_name == 'WaymoDataset':
-                s1, s2, f1, f2 = 75.2, 75.2, 75.2, 75.2
+                s1, s2, f1, f2 = 84.48, 84.48, 84.48, 84.48
             else:
                 raise NotImplementedError
             side_range = [-s1, s2]
