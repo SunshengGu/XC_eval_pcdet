@@ -87,7 +87,8 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
         pap_val = torch.sum(torch.where(valid_xc_flag, pap, zero_tensor)) / batch["batch_size"] * scaling_ratio
         far_attr_val = torch.sum(torch.where(valid_xc_flag, far_attr, zero_tensor)) / batch["batch_size"] * scaling_ratio
         three_val = 3 * torch.ones(xc_val_raw.size(), dtype=xc_val_raw.dtype).cuda()
-        xc_val = torch.sub(three_val, xc_val_raw)  # xc_val = 3 - xc_val_raw, 3 since there are 3 boxes per frame
+        # xc_val = torch.sub(three_val, xc_val_raw)  # xc_val = 3 - xc_val_raw, 3 since there are 3 boxes per frame
+        xc_val = xc_val_raw
 
         # upper limit for the attr losses
         upper_limit = 0.3
@@ -102,10 +103,10 @@ def train_one_epoch(model, optimizer, train_loader, model_func, explained_model,
             # #
             # xc_val = xc_val if xc_val > epsilon else epsilon / xc_val.item() * xc_val
             # xc_val = torch.maximum(epsilon, xc_val)
-            lambda_ = 0.2
+            lambda_ = 0.01
             # lambda_tensor = lambda_ * torch.ones(xc_val.size(), dtype=xc_val.dtype).cuda()
             xc_loss_raw = lambda_ * xc_val
-            pap_loss_raw = 0.0005 * pap_val
+            pap_loss_raw = 0.005 * pap_val
             far_attr_loss_raw = 0.01 * far_attr_val
 
             # to put an upper limit on the attr losses
@@ -266,10 +267,10 @@ def train_model(model, optimizer, train_loader, logger, model_func, explained_mo
     pred_score_file_name = output_dir / 'interested_pred_scores.csv'
     obj_cnt_field_name = ['epoch', 'tp_cnt', 'fp_cnt', 'tp_car_cnt', 'tp_pede_cnt', 'tp_cyc_cnt', 'fp_car_cnt',
                           'fp_pede_cnt', 'fp_cyc_cnt', 'car_cnt', 'pede_cnt', 'cyc_cnt']
-    pred_score_field_name = ['epoch', 'batch', 'tp/fp', 'pred_label', 'pred_score']
+    pred_score_field_name = ['epoch', 'batch', 'tp/fp', 'pred_label', 'pred_score', 'xc', 'far_attr', 'pap']
     if box_selection != "tp/fp" and box_selection != "tp":
         obj_cnt_field_name = ['epoch', 'car_cnt', 'pede_cnt', 'cyc_cnt']
-        pred_score_field_name = ['epoch', 'batch', 'pred_label', 'pred_score']
+        pred_score_field_name = ['epoch', 'batch', 'pred_label', 'pred_score', 'xc', 'far_attr', 'pap']
     with open(obj_cnt_file_name, 'w', newline='') as csvfile:
         writer = csv.DictWriter(csvfile, delimiter=',', fieldnames=obj_cnt_field_name)
         writer.writeheader()
