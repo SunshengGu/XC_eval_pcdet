@@ -79,6 +79,7 @@ class AttributionGeneratorTensor:
 
         # Load model configurations
         self.model = model
+        self.verbose = False
         self.dataset_name = dataset_name
         self.class_name_list = class_name_list
         self.gt_infos = gt_infos
@@ -298,7 +299,9 @@ class AttributionGeneratorTensor:
         # print("PseudoImage2D.size(): {}".format(PseudoImage2D.size()))
         attr_size = PseudoImage2D[0].size()
         d, h, w = attr_size[0], attr_size[1], attr_size[2]
-        zero_tensor = torch.zeros((h, w, d), dtype=torch.double).cuda()
+        zero_tensor = torch.zeros((h, w, d), dtype=torch.float).cuda()
+        if self.dataset_name == "WaymoDataset":
+            zero_tensor = torch.zeros((h, w, d), dtype=torch.double).cuda()
         if self.xai_method == "IntegratedGradients":
             # print("type(self.batch_dict['batch_size']): {}".format(type(self.batch_dict['batch_size'])))
             # print("self.batch_dict['batch_size']: {}".format(self.batch_dict['batch_size']))
@@ -523,9 +526,14 @@ class AttributionGeneratorTensor:
         with open(self.pred_score_file_name, 'a', newline='') as csvfile:
             writer = csv.DictWriter(csvfile, delimiter=',', fieldnames=self.pred_score_field_name)
             if self.selection == "tp/fp" or self.selection == "tp/fp_all":
+                print('len(self.batch_cared_tp_ind): {}'.format(len(self.batch_cared_tp_ind)))
+                print('len(self.batch_cared_fp_ind): {}'.format(len(self.batch_cared_fp_ind)))
+                print('cared_xc.size(): {}'.format(cared_xc.size()))
+                print('cared_fp_xc.size(): {}'.format(cared_fp_xc.size()))
                 for i in range(len(self.batch_cared_tp_ind)):
                     # note that the length of self.batch_cared_tp_ind[i] will not exceed the actual number of tps
                     # in a frame
+                    print('len(self.batch_cared_tp_ind[i]): {}'.format(len(self.batch_cared_tp_ind[i])))
                     for j in range(len(self.batch_cared_tp_ind[i])):
                         ind = self.batch_cared_tp_ind[i][j]
                         data_dict = {"epoch": self.cur_epoch, "batch": self.cur_it, "tp/fp": "tp",
@@ -536,6 +544,7 @@ class AttributionGeneratorTensor:
                 for i in range(len(self.batch_cared_fp_ind)):
                     # note that the length of self.batch_cared_fp_ind[i] will not exceed the actual number of fps
                     # in a frame
+                    print('len(self.batch_cared_fp_ind[i]): {}'.format(len(self.batch_cared_fp_ind[i])))
                     for j in range(len(self.batch_cared_fp_ind[i])):
                         ind = self.batch_cared_fp_ind[i][j]
                         data_dict = {"epoch": self.cur_epoch, "batch": self.cur_it, "tp/fp": "fp",
@@ -555,7 +564,10 @@ class AttributionGeneratorTensor:
                                      "pap": cared_pap[i][j].item()}
                         writer.writerow(data_dict)
             else:
+                print('len(self.batch_cared_ind): {}'.format(len(self.batch_cared_ind)))
+                print('cared_xc.size(): {}'.format(cared_xc.size()))
                 for i in range(len(self.batch_cared_ind)):
+                    print('len(self.batch_cared_ind[i]): {}'.format(len(self.batch_cared_ind[i])))
                     for j in range(len(self.batch_cared_ind[i])):
                         ind = self.batch_cared_ind[i][j]
                         data_dict = {"epoch": self.cur_epoch, "batch": self.cur_it,
@@ -1009,6 +1021,9 @@ class AttributionGeneratorTensor:
         total_pap = torch.where(total_pap_ == 0, nan_tensor, total_pap_)
         print("\ntotal_XC.size(): {}\ntotal_pap.size(): {}".format(total_XC.size(), total_pap.size()))
         print("\nsuccessfully reformatted the XC, far_attr, and pap values from lists to tensors\n")
+        total_XC = total_XC.transpose(0, 1)
+        total_far_attr = total_far_attr.transpose(0, 1)
+        total_pap = total_pap.transpose(0, 1)
         if self.selection == "tp/fp" or self.selection == "tp/fp_all":
             total_fp_XC = torch.stack(total_fp_XC_lst)
             total_fp_far_attr = torch.stack(total_fp_far_attr_lst)
@@ -1016,9 +1031,6 @@ class AttributionGeneratorTensor:
             fp_nan_tensor = torch.full(total_fp_XC.size(), float('nan')).cuda()
             total_fp_pap_ = torch.where(torch.isnan(total_fp_XC), fp_nan_tensor, total_fp_pap_raw)
             total_fp_pap = torch.where(total_fp_pap_ == 0, fp_nan_tensor, total_fp_pap_)
-            total_XC = total_XC.transpose(0, 1)
-            total_far_attr = total_far_attr.transpose(0, 1)
-            total_pap = total_pap.transpose(0, 1)
             if self.selection == "tp/fp" or self.selection == "tp/fp_all":
                 total_fp_XC = total_fp_XC.transpose(0, 1)
                 total_fp_far_attr = total_fp_far_attr.transpose(0, 1)
