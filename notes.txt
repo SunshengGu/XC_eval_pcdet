@@ -8,12 +8,15 @@ Problem with binary checkpoint files:
 - but now, they could be of type "binary" too
 - pytorch < 1.6 won't be able to handle this
 - so need to uninstall pytorch and install pytorch 1.6
-- then need to run `python setup.py clean --all && python setup.py develop` again
 - reset spconv by doing the following:
     git clone https://github.com/traveller59/spconv --recursive
     cd spconv
     python setup.py bdist_wheel
     pip install --force-reinstall dist/*
+- then need to run `python setup.py clean --all && python setup.py develop` again
+
+dynamic link:
+cd /root/pcdet/data && rm -r kitti && ln -s /root/datasets/kitti .
 
 Waymo stuff:
 eval_utils.py
