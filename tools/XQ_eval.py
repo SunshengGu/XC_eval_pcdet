@@ -206,11 +206,15 @@ def main():
     important variables:
     :return:
     """
+    use_XQ = True
     XC_only = True
     scatter_plot = False
     legacy_file = True # whether the data file was pre jan10 2021
     comb_plot = True
-    w_sum_explore = True
+    w_sum_explore = False
+    xc_term = 'XQ'
+    if not use_XQ:
+        xc_term = 'xc'
     dataset_name = "KITTI"
     cls_name_list = []
     if dataset_name == "KITTI":
@@ -295,14 +299,14 @@ def main():
                     if name == tp_name:
                         found = True
                         tp_data = pd.read_csv(os.path.join(root, name))
-                        # print("type(tp_data['XQ']): {}".format(type(tp_data['XQ'])))
-                        XC_list.append(tp_data['XQ'])
+                        # print("type(tp_data[xc_term]): {}".format(type(tp_data[xc_term])))
+                        XC_list.append(tp_data[xc_term])
                         if not legacy_file:
                             far_attr_list.append(tp_data['far_attr_cnt'])
                             PAP_list.append(tp_data['PAP'])
                             PAP_norm_list.append(tp_data['PAP_norm'])
                         score_list.append(tp_data['class_score'])
-                        TP_FP_label.append(np.ones(len(tp_data['XQ'])))
+                        TP_FP_label.append(np.ones(len(tp_data[xc_term])))
                         cls_label_list.append(tp_data['class_label'])
                         pts_list.append(tp_data['pts_in_box'])
                         dist_list.append(tp_data['dist_to_ego'])
@@ -313,13 +317,13 @@ def main():
                     elif name == fp_name:
                         found = True
                         fp_data = pd.read_csv(os.path.join(root, name))
-                        XC_list.append(fp_data['XQ'])
+                        XC_list.append(fp_data[xc_term])
                         if not legacy_file:
                             far_attr_list.append(fp_data['far_attr_cnt'])
                             PAP_list.append(fp_data['PAP'])
                             PAP_norm_list.append(fp_data['PAP_norm'])
                         score_list.append(fp_data['class_score'])
-                        TP_FP_label.append(np.zeros(len(fp_data['XQ'])))
+                        TP_FP_label.append(np.zeros(len(fp_data[xc_term])))
                         cls_label_list.append(fp_data['class_label'])
                         pts_list.append(fp_data['pts_in_box'])
                         dist_list.append(fp_data['dist_to_ego'])
@@ -344,24 +348,26 @@ def main():
                     # class score vs. XC plot
                     fig_name = "{}/XC_class_score_density_thresh{}.png".format(metric_result_path, thresh)
                     x_label = "class scores"
-                    tp_fp_density_plotting(XC_arr, score_arr, tp_data['XQ'], tp_data['class_score'], fp_data['XQ'],
+                    tp_fp_density_plotting(XC_arr, score_arr, tp_data[xc_term], tp_data['class_score'], fp_data[xc_term],
                                            fp_data['class_score'], fig_name, x_label)
 
                     # distance to ego vs. XC plot
                     fig_name = "{}/XC_distance_to_ego_thresh{}.png".format(metric_result_path, thresh)
                     x_label = 'distance to ego'
-                    tp_fp_density_plotting(XC_arr, dist_arr, tp_data['XQ'], tp_data['dist_to_ego'], fp_data['XQ'],
+                    tp_fp_density_plotting(XC_arr, dist_arr, tp_data[xc_term], tp_data['dist_to_ego'], fp_data[xc_term],
                                            fp_data['dist_to_ego'], fig_name, x_label)
 
                     # num of lidar points in box vs. XC plot
                     fig_name = "{}/XC_points_in_box_thresh{}.png".format(metric_result_path, thresh)
                     x_label = 'points in box'
-                    tp_fp_density_plotting(XC_arr, pts_arr, tp_data['XQ'], tp_data['pts_in_box'], fp_data['XQ'],
+                    tp_fp_density_plotting(XC_arr, pts_arr, tp_data[xc_term], tp_data['pts_in_box'], fp_data[xc_term],
                                            fp_data['pts_in_box'], fig_name, x_label, x_log=True)
 
                 eval_cols = ['XQ_thresh', 'measure', 'class', 'fpr_at_95_tpr', 'detection_error',
                              'auroc', 'aupr_out', 'aupr_in']
                 XC_eval_file = "XQ_eval_metrics_thresh{}.csv".format(thresh)
+                pts_eval_file = "pts_eval_metrics_thresh{}.csv".format(thresh)
+                dist_eval_file = "dist_eval_metrics_thresh{}.csv".format(thresh)
                 if not legacy_file:
                     far_attr_eval_file = "far_attr_eval_metrics_thresh{}.csv".format(thresh)
                     PAP_eval_file = "PAP_eval_metrics_thresh{}.csv".format(thresh)
@@ -369,6 +375,12 @@ def main():
                 XC_dict, XC_cls_dicts = evaluate_metric(XC_arr, TP_FP_arr, metric_result_path, XC_eval_file,
                                                        eval_cols, 'XQ', thresh,
                                                        cls_name_list, cls_label_arr)
+                pts_dict, pts_cls_dicts = evaluate_metric(
+                    pts_arr, TP_FP_arr, metric_result_path, pts_eval_file, eval_cols, 'pts', thresh, cls_name_list,
+                    cls_label_arr)
+                dist_dict, dist_cls_dicts = evaluate_metric(
+                    dist_arr, TP_FP_arr, metric_result_path, dist_eval_file, eval_cols, 'dist', thresh, cls_name_list,
+                    cls_label_arr)
                 if not legacy_file:
                     far_attr_dict, far_attr_cls_dicts = evaluate_metric(far_attr_arr, TP_FP_arr, metric_result_path,
                                                             far_attr_eval_file, eval_cols, 'far_attr', thresh,

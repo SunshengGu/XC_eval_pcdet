@@ -244,6 +244,7 @@ XAI analytics command:
 - kitti: python XAI_analytics.py --cfg_file cfgs/kitti_models/pointpillar_xai.yaml --batch_size 1 --attr_path ~/pcdet/tools/XAI_attributions/Nov_29_2020_15_58_56_IG_KittiDataset_all_batches_dont_delete
 
 XQ metric command:
+- kitti: python xc_eval_simple.py --XC_path /media/sg/02f4ed99-ea7d-47a9-9aed-3606f0fd7fda/tadenoud/Documents/WISEOpenLidarPerceptron/tools/XAI_results/Nov_29_2020_15_58_56_IG_KittiDataset_all_batches_dont_delete_analytics_Dec_17_2020_21_54_49_positive_attr_by_summing
 - kitti: python XQ_eval.py --XC_path ~/pcdet/tools/XAI_results/Nov_29_2020_15_58_56_IG_KittiDataset_all_batches_dont_delete_analytics_Dec_04_2020_02_08_56_positive_attr_by_counting
 - kitti: python XQ_eval.py --XC_path ~/pcdet/tools/XAI_results/Nov_29_2020_15_58_56_IG_KittiDataset_all_batches_dont_delete_analytics_Dec_03_2020_19_30_26_positive_attr_by_counting
 - kitti: python XQ_eval.py --XC_path ~/pcdet/tools/XAI_results/Nov_29_2020_15_58_56_IG_KittiDataset_all_batches_dont_delete_analytics_Dec_17_2020_21_54_49_positive_attr_by_summing
