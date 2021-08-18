@@ -24,6 +24,7 @@ from XAI_utils.bbox_utils import *
 from XAI_utils.tp_fp import *
 from XAI_utils.XQ_utils import *
 from pcdet.models import load_data_to_gpu
+from pcdet.ops.roiaware_pool3d import roiaware_pool3d_utils
 from pcdet.datasets.kitti.kitti_dataset import KittiDataset
 from pcdet.datasets.cadc.cadc_dataset import CadcDataset
 from pcdet.datasets.waymo.waymo_dataset import WaymoDataset
@@ -52,7 +53,8 @@ from scipy.spatial.transform import Rotation as R
 
 
 class AttributionGeneratorTensor:
-    def __init__(self, model, dataset_name, class_name_list, xai_method, output_path, gt_infos, pred_score_file_name, pred_score_field_name,
+    def __init__(self, model, dataset_name, class_name_list, xai_method, output_path, gt_infos, pred_score_file_name,
+                 pred_score_field_name, infos=None, dataset=None,
                  ig_steps=24, margin=0.2, num_boxes=3, selection='top', ignore_thresh=0.1, score_thresh=0.1, debug=False,
                  full_model=None):
         """
@@ -83,6 +85,10 @@ class AttributionGeneratorTensor:
         self.dataset_name = dataset_name
         self.class_name_list = class_name_list
         self.gt_infos = gt_infos
+        self.infos = None
+        if dataset_name == 'WaymoDataset':
+            self.infos = dataset.infos
+        self.dataset = dataset
         self.score_thresh = score_thresh
         self.full_model = full_model if (full_model is not None) else None
 
@@ -114,6 +120,8 @@ class AttributionGeneratorTensor:
         self.tight_iou = False
         self.batch_dict = None
         self.pred_boxes = None
+        self.tp_boxes = []
+        self.fp_boxes = []
         self.pred_labels = None
         self.pred_scores = None
         self.pred_vertices = None  # vertices of predicted boxes with a specified margin
@@ -289,6 +297,8 @@ class AttributionGeneratorTensor:
         self.batch_cared_ind = []
         self.batch_cared_tp_ind = None
         self.batch_cared_fp_ind = None
+        self.tp_boxes = []
+        self.fp_boxes = []
 
     def get_attr(self, target):
         """
@@ -576,6 +586,43 @@ class AttributionGeneratorTensor:
                                      "pap": cared_pap[i][j].item()}
                         writer.writerow(data_dict)
 
+    def record_pts(self, cared_pts, cared_dist, cared_fp_pts, cared_fp_dist):
+        """
+        Record number of lidar points and distance for each predicted box
+        :return:
+        """
+        with open(self.pred_score_file_name, 'a', newline='') as csvfile:
+            writer = csv.DictWriter(csvfile, delimiter=',', fieldnames=self.pred_score_field_name)
+            if self.selection == "tp/fp" or self.selection == "tp/fp_all":
+                print('len(self.batch_cared_tp_ind): {}'.format(len(self.batch_cared_tp_ind)))
+                print('len(self.batch_cared_fp_ind): {}'.format(len(self.batch_cared_fp_ind)))
+                print('cared_pts.size(): {}'.format(cared_pts.size()))
+                print('cared_fp_pts.size(): {}'.format(cared_fp_pts.size()))
+                for i in range(len(self.batch_cared_tp_ind)):
+                    # note that the length of self.batch_cared_tp_ind[i] will not exceed the actual number of tps
+                    # in a frame
+                    print('len(self.batch_cared_tp_ind[i]): {}'.format(len(self.batch_cared_tp_ind[i])))
+                    for j in range(len(self.batch_cared_tp_ind[i])):
+                        ind = self.batch_cared_tp_ind[i][j]
+                        data_dict = {"epoch": self.cur_epoch, "batch": self.cur_it, "tp/fp": "tp",
+                                     "pred_label": self.pred_labels[i][ind].item(), "pred_score": self.pred_scores[i][ind].item(),
+                                     "pts": cared_pts[i][j], "dist": cared_dist[i][j]}
+                        writer.writerow(data_dict)
+                for i in range(len(self.batch_cared_fp_ind)):
+                    # note that the length of self.batch_cared_fp_ind[i] will not exceed the actual number of fps
+                    # in a frame
+                    print('len(self.batch_cared_fp_ind[i]): {}'.format(len(self.batch_cared_fp_ind[i])))
+                    for j in range(len(self.batch_cared_fp_ind[i])):
+                        ind = self.batch_cared_fp_ind[i][j]
+                        data_dict = {"epoch": self.cur_epoch, "batch": self.cur_it, "tp/fp": "fp",
+                                     "pred_label": self.pred_labels[i][ind].item(), "pred_score": self.pred_scores[i][ind].item(),
+                                     "pts": cared_fp_pts[i][j], "dist": cared_fp_dist[i][j]}
+                        writer.writerow(data_dict)
+            elif self.selection == "tp":
+                print("not implemented")
+            else:
+                print("not implemented")
+
     def generate_targets_single_frame(self, epoch_obj_cnt):
         """
         only gets called when the batch_size is 1
@@ -690,6 +737,8 @@ class AttributionGeneratorTensor:
             fp_labels_arr = None
             fp_box_vertices = None
             fp_loc = None
+            tp_boxes = None
+            fp_boxes = None
             if self.selection == "tp/fp" or self.selection == "tp" or self.selection == "tp/fp_all":
                 # tp selection
                 cared_indices = batch_tp_indices[i]
@@ -700,6 +749,7 @@ class AttributionGeneratorTensor:
                 cared_labels_arr = np.array(cared_labels)
                 cared_box_vertices = [self.pred_vertices[i][ind] for ind in cared_indices]
                 cared_loc = [self.pred_loc[i][ind] for ind in cared_indices]
+                tp_boxes = [self.pred_boxes[i][ind] for ind in cared_indices]
                 # fp selection
                 fp_indices = batch_fp_indices[i]
                 if self.selection != "tp/fp_all" and len(fp_indices) > self.fp_limit: # too many boxes
@@ -709,6 +759,7 @@ class AttributionGeneratorTensor:
                 fp_labels_arr = np.array(fp_labels)
                 fp_box_vertices = [self.pred_vertices[i][ind] for ind in fp_indices]
                 fp_loc = [self.pred_loc[i][ind] for ind in fp_indices]
+                fp_boxes = [self.pred_boxes[i][ind] for ind in fp_indices]
                 if self.debug:
                     print("cared tp indices: {}".format(cared_indices))
                     print("cared fp indices: {}".format(fp_indices))
@@ -803,9 +854,11 @@ class AttributionGeneratorTensor:
                 batch_fp_target_list.append(fp_target_list)
                 batch_fp_box_vertices.append(fp_box_vertices)
                 batch_fp_loc.append(fp_loc)
+                self.fp_boxes.append(fp_boxes)
             batch_target_list.append(target_list)
             batch_cared_box_vertices.append(cared_box_vertices)
             batch_cared_loc.append(cared_loc)
+            self.tp_boxes.append(tp_boxes)
         self.batch_cared_ind = batch_cared_indices
         if self.selection == "tp/fp" or self.selection == "tp/fp_all":
             return batch_target_list, batch_cared_box_vertices, batch_cared_loc, batch_fp_target_list, batch_fp_box_vertices, batch_fp_loc
@@ -848,6 +901,55 @@ class AttributionGeneratorTensor:
                     print("frame id in batch: {} XC: {}".format(i, XC_))
         return XC_lst, far_attr_lst
 
+    def calc_dist(self, box_loc):
+        loc_list = []
+        for loc in box_loc:
+            loc_list.append(math.sqrt(loc[0] * loc[0] + loc[1] * loc[1]))
+        return loc_list
+
+    def compute_pts(self, batch_dict, batch_id):
+        """
+        :param batch_dict:
+        :param batch_id:
+        :return: number of points in each predicted box in this batch
+
+        note: only works if batch_size == 1
+        because we are matching points in a frame with boxes
+        """
+        self.preprocess(batch_dict, batch_id)
+        tp_pts_lst = []
+        fp_pts_lst = []
+        info = self.infos[batch_id]
+        print("\nkeys in info:")
+        for key in info:
+            print(key)
+        pc_info = info['point_cloud']
+        sequence_name = pc_info['lidar_sequence']
+        sample_idx = pc_info['sample_idx']
+        points = self.dataset.get_lidar(sequence_name, sample_idx)
+        for i in range(self.batch_size):
+            tp_sub_pts_list = []
+            fp_sub_pts_list = []
+
+            tp_box_idxs_of_pts = roiaware_pool3d_utils.points_in_boxes_gpu(
+                torch.from_numpy(points[:, 0:3]).unsqueeze(dim=0).float().cuda(),
+                self.tp_boxes[:, 0:7].unsqueeze(dim=0)
+            ).long().squeeze(dim=0).cpu().numpy()
+            for id in range(len(self.tp_boxes)):
+                box_pts = points[tp_box_idxs_of_pts == id]
+                tp_sub_pts_list.append(len(box_pts))
+            tp_pts_lst.append(tp_sub_pts_list)
+
+            fp_box_idxs_of_pts = roiaware_pool3d_utils.points_in_boxes_gpu(
+                torch.from_numpy(points[:, 0:3]).unsqueeze(dim=0).float().cuda(),
+                self.tp_boxes[:, 0:7].unsqueeze(dim=0)
+            ).long().squeeze(dim=0).cpu().numpy()
+            for id in range(len(self.fp_boxes)):
+                box_pts = points[fp_box_idxs_of_pts == id]
+                fp_sub_pts_list.append(len(box_pts))
+            fp_pts_lst.append(fp_sub_pts_list)
+        return tp_pts_lst, fp_pts_lst
+
     def get_PAP_single(self, pos_grad, neg_grad, sign):
         grad = None
         if sign == 'positive':
@@ -862,7 +964,7 @@ class AttributionGeneratorTensor:
             pap_loss.append(torch.sum(torch.abs(diff_1)) + torch.sum(torch.abs(diff_2)))
         return pap_loss
 
-    def xc_preprocess(self, batch_dict, epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt, cur_it):
+    def preprocess(self, batch_dict, cur_it):
         # Get the predictions, compute box vertices, and generate targets
         self.batch_dict = batch_dict
         self.cur_it = cur_it
@@ -877,6 +979,9 @@ class AttributionGeneratorTensor:
         if self.selection == "tp/fp" or self.selection == "tp" or self.selection == "tp/fp_all":
             self.get_tp_fp_indices(cur_it)
         self.compute_pred_box_vertices()
+
+    def xc_preprocess(self, batch_dict, epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt, cur_it):
+        self.preprocess(batch_dict, cur_it)
         return self.generate_targets(epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt)
 
     def compute_xc(self, batch_dict, epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt, cur_it, cur_epoch,
