@@ -116,7 +116,7 @@ class AttributionGeneratorTensor:
         self.ignore_thresh = ignore_thresh
         self.pred_score_file_name = pred_score_file_name
         self.pred_score_field_name = pred_score_field_name
-        self.box_debug = True
+        self.box_debug = False
         self.tight_iou = False
         self.batch_dict = None
         self.pred_boxes = None
@@ -750,6 +750,7 @@ class AttributionGeneratorTensor:
                 cared_box_vertices = [self.pred_vertices[i][ind] for ind in cared_indices]
                 cared_loc = [self.pred_loc[i][ind] for ind in cared_indices]
                 tp_boxes = [self.pred_boxes[i][ind] for ind in cared_indices]
+                print("len(tp_boxes): {}".format(len(tp_boxes)))
                 # fp selection
                 fp_indices = batch_fp_indices[i]
                 if self.selection != "tp/fp_all" and len(fp_indices) > self.fp_limit: # too many boxes
@@ -760,6 +761,7 @@ class AttributionGeneratorTensor:
                 fp_box_vertices = [self.pred_vertices[i][ind] for ind in fp_indices]
                 fp_loc = [self.pred_loc[i][ind] for ind in fp_indices]
                 fp_boxes = [self.pred_boxes[i][ind] for ind in fp_indices]
+                print("len(fp_boxes): {}".format(len(fp_boxes)))
                 if self.debug:
                     print("cared tp indices: {}".format(cared_indices))
                     print("cared fp indices: {}".format(fp_indices))
@@ -832,11 +834,13 @@ class AttributionGeneratorTensor:
                 print("fp pred_ids:")
                 for ind, label in enumerate(fp_labels):
                     pred_id = self.batch_cared_fp_ind[i][ind]
-                    print("pred_id: {}".format(pred_id))
-                    print("pred_label: {}".format(label))
+                    if self.debug:
+                        print("pred_id: {}".format(pred_id))
+                        print("pred_label: {}".format(label))
                     fp_target_list.append((self.selected_anchors[i][pred_id], label))
-                print("frame {} tp target_list: {}".format(i, target_list))
-                print("frame {} fp target_list: {}".format(i, fp_target_list))
+                if self.debug:
+                    print("frame {} tp target_list: {}".format(i, target_list))
+                    print("frame {} fp target_list: {}".format(i, fp_target_list))
                 if len(target_list) < self.tp_limit: # too few boxes
                     for c in range(len(target_list), self.tp_limit):
                         # creating some dummy entries
@@ -854,12 +858,20 @@ class AttributionGeneratorTensor:
                 batch_fp_target_list.append(fp_target_list)
                 batch_fp_box_vertices.append(fp_box_vertices)
                 batch_fp_loc.append(fp_loc)
+                fp_boxes = torch.stack(fp_boxes)
                 self.fp_boxes.append(fp_boxes)
+                tp_boxes = torch.stack(tp_boxes)
+                self.tp_boxes.append(tp_boxes)
             batch_target_list.append(target_list)
             batch_cared_box_vertices.append(cared_box_vertices)
             batch_cared_loc.append(cared_loc)
-            self.tp_boxes.append(tp_boxes)
+        if self.selection == "tp/fp" or self.selection == "tp" or self.selection == "tp/fp_all":
+            print("len(self.tp_boxes[0]) before stacking: {}".format(len(self.tp_boxes[0])))
+            self.tp_boxes = torch.stack(self.tp_boxes)
+            self.fp_boxes = torch.stack(self.fp_boxes)
+            print("len(self.tp_boxes[0]) after stacking: {}".format(len(self.tp_boxes[0])))
         self.batch_cared_ind = batch_cared_indices
+        
         if self.selection == "tp/fp" or self.selection == "tp/fp_all":
             return batch_target_list, batch_cared_box_vertices, batch_cared_loc, batch_fp_target_list, batch_fp_box_vertices, batch_fp_loc
         return batch_target_list, batch_cared_box_vertices, batch_cared_loc
@@ -907,7 +919,7 @@ class AttributionGeneratorTensor:
             loc_list.append(math.sqrt(loc[0] * loc[0] + loc[1] * loc[1]))
         return loc_list
 
-    def compute_pts(self, batch_dict, batch_id):
+    def compute_pts(self, batch_dict, batch_id, epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt):
         """
         :param batch_dict:
         :param batch_id:
@@ -916,38 +928,45 @@ class AttributionGeneratorTensor:
         note: only works if batch_size == 1
         because we are matching points in a frame with boxes
         """
-        self.preprocess(batch_dict, batch_id)
+        self.xc_preprocess(batch_dict, epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt, batch_id)
         tp_pts_lst = []
         fp_pts_lst = []
         info = self.infos[batch_id]
         print("\nkeys in info:")
         for key in info:
             print(key)
+        print("\nlen(self.tp_boxes): {}".format(len(self.tp_boxes)))
+        print("\nlen(self.fp_boxes): {}".format(len(self.fp_boxes)))
         pc_info = info['point_cloud']
         sequence_name = pc_info['lidar_sequence']
         sample_idx = pc_info['sample_idx']
         points = self.dataset.get_lidar(sequence_name, sample_idx)
+        # print("points.shape: {}".format(points.shape))
         for i in range(self.batch_size):
             tp_sub_pts_list = []
             fp_sub_pts_list = []
 
             tp_box_idxs_of_pts = roiaware_pool3d_utils.points_in_boxes_gpu(
-                torch.from_numpy(points[:, 0:3]).unsqueeze(dim=0).float().cuda(),
-                self.tp_boxes[:, 0:7].unsqueeze(dim=0)
+                torch.from_numpy(points[:, 0:3]).unsqueeze(dim=0).float().cuda(), 
+                self.tp_boxes[i][:, 0:7].unsqueeze(dim=0)
             ).long().squeeze(dim=0).cpu().numpy()
-            for id in range(len(self.tp_boxes)):
+            # print("tp_box_idxs_of_pts.shape: {}".format(tp_box_idxs_of_pts.shape))
+            for id in range(len(self.tp_boxes[i])):
                 box_pts = points[tp_box_idxs_of_pts == id]
                 tp_sub_pts_list.append(len(box_pts))
             tp_pts_lst.append(tp_sub_pts_list)
+            print("\nlen(tp_pts_lst): {}".format(len(tp_pts_lst)))
 
             fp_box_idxs_of_pts = roiaware_pool3d_utils.points_in_boxes_gpu(
-                torch.from_numpy(points[:, 0:3]).unsqueeze(dim=0).float().cuda(),
-                self.tp_boxes[:, 0:7].unsqueeze(dim=0)
+                torch.from_numpy(points[:, 0:3]).unsqueeze(dim=0).float().cuda(), 
+                self.fp_boxes[i][:, 0:7].unsqueeze(dim=0)
             ).long().squeeze(dim=0).cpu().numpy()
-            for id in range(len(self.fp_boxes)):
+            print("fp_box_idxs_of_pts.shape: {}".format(fp_box_idxs_of_pts.shape))
+            for id in range(len(self.fp_boxes[i])):
                 box_pts = points[fp_box_idxs_of_pts == id]
                 fp_sub_pts_list.append(len(box_pts))
             fp_pts_lst.append(fp_sub_pts_list)
+            print("\nlen(fp_pts_lst): {}".format(len(fp_pts_lst)))
         return tp_pts_lst, fp_pts_lst
 
     def get_PAP_single(self, pos_grad, neg_grad, sign):

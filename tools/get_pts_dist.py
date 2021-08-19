@@ -29,13 +29,13 @@ def main():
     steps = 24  # number of intermediate steps for IG
 
     # config file for the full PointPillars model
-    model_cfg_file = 'cfgs/kitti_models/pointpillar_xai.yaml'
+    model_cfg_file = 'cfgs/waymo_models/pointpillar_nick_xai.yaml'
     # model_cfg_file = 'cfgs/kitti_models/pointpillar.yaml'
     # model checkpoint, change to your checkpoint, make sure it's a well-trained model
-    model_ckpt = '../output/kitti_models/pointpillar/default/ckpt/pointpillar_7728.pth'
-    # model_ckpt = '../output/waymo_models/pointpillar/modified_07april/ckpt/checkpoint_epoch_30.pth'
+    # model_ckpt = '../output/kitti_models/pointpillar/default/ckpt/pointpillar_7728.pth'
+    model_ckpt = '../output/waymo_models/pointpillar/nick_models/ckpt/checkpoint_epoch_30.pth'
     # info_path = '../output/kitti_models/pointpillar/default/eval/epoch_2/val/default/result.pkl'
-    num_batchs = 2
+    num_batchs = 40
 
     '''________________________User Input End________________________'''
     # data set prepration, use the validation set (called 'test_set' here)
@@ -91,8 +91,8 @@ def main():
 
     gt_infos = get_gt_infos(cfg, test_set)
     infos = None
-    with open(info_path, 'rb') as f:
-        infos = pickle.load(f)
+    # with open(info_path, 'rb') as f:
+    #     infos = pickle.load(f)
 
     # myXCCalculator = AttributionGenerator(model_ckpt=ckpt, full_model_cfg_file=cfg_file,
     #                                       model_cfg_file=explained_cfg_file,
@@ -126,7 +126,7 @@ def main():
             continue  # only analyze 10% of the dataset
         print("\n\nAnalyzing the {}th batch\n".format(batch_num))
         if selection == "tp/fp" or selection == "tp/fp_all":
-            batch_tp_pts, batch_fp_pts = myXCCalculator.compute_pts(batch_dictionary, batch_num)
+            batch_tp_pts, batch_fp_pts = myXCCalculator.compute_pts(batch_dictionary, batch_num, epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt)
             print("\nTP XC values for the batch:\n {}".format(batch_tp_pts))
             print("\nFP XC values for the batch:\n {}".format(batch_fp_pts))
         myXCCalculator.reset()
