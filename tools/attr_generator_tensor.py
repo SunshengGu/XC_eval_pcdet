@@ -54,7 +54,7 @@ from scipy.spatial.transform import Rotation as R
 
 class AttributionGeneratorTensor:
     def __init__(self, model, dataset_name, class_name_list, xai_method, output_path, gt_infos, pred_score_file_name,
-                 pred_score_field_name, infos=None, dataset=None,
+                 pred_score_field_name, pts_file_name=None, pts_field_name=None, infos=None, dataset=None,
                  ig_steps=24, margin=0.2, num_boxes=3, selection='top', ignore_thresh=0.1, score_thresh=0.1, debug=False,
                  full_model=None):
         """
@@ -116,6 +116,8 @@ class AttributionGeneratorTensor:
         self.ignore_thresh = ignore_thresh
         self.pred_score_file_name = pred_score_file_name
         self.pred_score_field_name = pred_score_field_name
+        self.pts_file_name = pts_file_name
+        self.pts_field_name = pts_field_name
         self.box_debug = False
         self.tight_iou = False
         self.batch_dict = None
@@ -586,18 +588,14 @@ class AttributionGeneratorTensor:
                                      "pap": cared_pap[i][j].item()}
                         writer.writerow(data_dict)
 
-    def record_pts(self, cared_pts, cared_dist, cared_fp_pts, cared_fp_dist):
+    def record_dist_pts(self, tp_pts, tp_dist, fp_pts, fp_dist):
         """
-        Record number of lidar points and distance for each predicted box
+        Record the predicted labels and scores
         :return:
         """
-        with open(self.pred_score_file_name, 'a', newline='') as csvfile:
-            writer = csv.DictWriter(csvfile, delimiter=',', fieldnames=self.pred_score_field_name)
+        with open(self.pts_file_name, 'a', newline='') as csvfile:
+            writer = csv.DictWriter(csvfile, delimiter=',', fieldnames=self.pts_field_name)
             if self.selection == "tp/fp" or self.selection == "tp/fp_all":
-                print('len(self.batch_cared_tp_ind): {}'.format(len(self.batch_cared_tp_ind)))
-                print('len(self.batch_cared_fp_ind): {}'.format(len(self.batch_cared_fp_ind)))
-                print('cared_pts.size(): {}'.format(cared_pts.size()))
-                print('cared_fp_pts.size(): {}'.format(cared_fp_pts.size()))
                 for i in range(len(self.batch_cared_tp_ind)):
                     # note that the length of self.batch_cared_tp_ind[i] will not exceed the actual number of tps
                     # in a frame
@@ -606,7 +604,7 @@ class AttributionGeneratorTensor:
                         ind = self.batch_cared_tp_ind[i][j]
                         data_dict = {"epoch": self.cur_epoch, "batch": self.cur_it, "tp/fp": "tp",
                                      "pred_label": self.pred_labels[i][ind].item(), "pred_score": self.pred_scores[i][ind].item(),
-                                     "pts": cared_pts[i][j], "dist": cared_dist[i][j]}
+                                     "dist": tp_dist[i][j], "pts": tp_pts[i][j]}
                         writer.writerow(data_dict)
                 for i in range(len(self.batch_cared_fp_ind)):
                     # note that the length of self.batch_cared_fp_ind[i] will not exceed the actual number of fps
@@ -616,12 +614,10 @@ class AttributionGeneratorTensor:
                         ind = self.batch_cared_fp_ind[i][j]
                         data_dict = {"epoch": self.cur_epoch, "batch": self.cur_it, "tp/fp": "fp",
                                      "pred_label": self.pred_labels[i][ind].item(), "pred_score": self.pred_scores[i][ind].item(),
-                                     "pts": cared_fp_pts[i][j], "dist": cared_fp_dist[i][j]}
+                                     "dist": fp_dist[i][j], "pts": fp_pts[i][j]}
                         writer.writerow(data_dict)
-            elif self.selection == "tp":
-                print("not implemented")
             else:
-                print("not implemented")
+                raise NotImplementedError
 
     def generate_targets_single_frame(self, epoch_obj_cnt):
         """
@@ -915,6 +911,7 @@ class AttributionGeneratorTensor:
 
     def calc_dist(self, box_loc):
         loc_list = []
+        # print("box locations: {}".format(box_loc))
         for loc in box_loc:
             loc_list.append(math.sqrt(loc[0] * loc[0] + loc[1] * loc[1]))
         return loc_list
@@ -931,6 +928,8 @@ class AttributionGeneratorTensor:
         self.xc_preprocess(batch_dict, epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt, batch_id)
         tp_pts_lst = []
         fp_pts_lst = []
+        tp_dist_lst = []
+        fp_dist_lst = []
         info = self.infos[batch_id]
         print("\nkeys in info:")
         for key in info:
@@ -945,6 +944,11 @@ class AttributionGeneratorTensor:
         for i in range(self.batch_size):
             tp_sub_pts_list = []
             fp_sub_pts_list = []
+
+            tp_sub_dist_list = self.calc_dist(self.tp_boxes[i][:, 0:2])
+            fp_sub_dist_list = self.calc_dist(self.fp_boxes[i][:, 0:2])
+            tp_dist_lst.append(tp_sub_dist_list)
+            fp_dist_lst.append(fp_sub_dist_list)
 
             tp_box_idxs_of_pts = roiaware_pool3d_utils.points_in_boxes_gpu(
                 torch.from_numpy(points[:, 0:3]).unsqueeze(dim=0).float().cuda(), 
@@ -967,7 +971,8 @@ class AttributionGeneratorTensor:
                 fp_sub_pts_list.append(len(box_pts))
             fp_pts_lst.append(fp_sub_pts_list)
             print("\nlen(fp_pts_lst): {}".format(len(fp_pts_lst)))
-        return tp_pts_lst, fp_pts_lst
+        self.record_dist_pts(tp_pts_lst, tp_dist_lst, fp_pts_lst, fp_dist_lst)
+        return tp_pts_lst, fp_pts_lst, tp_dist_lst, fp_dist_lst
 
     def get_PAP_single(self, pos_grad, neg_grad, sign):
         grad = None

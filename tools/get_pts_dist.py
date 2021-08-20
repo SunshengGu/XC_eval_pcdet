@@ -21,7 +21,7 @@ def main():
     method = 'IntegratedGradients'  # explanation method
     attr_shown = 'positive'  # show positive or negative attributions
     aggre_method = 'sum'
-    check_all = False
+    check_all = True
     debugging = False
 
     # IG specific parameters
@@ -109,6 +109,7 @@ def main():
     myXCCalculator = AttributionGeneratorTensor(
         explained_model, cfg.DATA_CONFIG.DATASET, cfg.CLASS_NAMES, method, None, gt_infos, infos=infos,
         pred_score_file_name=pred_score_file_name, pred_score_field_name=pred_score_field_name, dataset=test_set,
+        pts_file_name=pred_score_file_name, pts_field_name=pred_score_field_name,
         score_thresh=cfg.MODEL.POST_PROCESSING.SCORE_THRESH, selection=selection, debug=debugging, full_model=full_model,
         margin=0.2, ignore_thresh=0.1)
     epoch_obj_cnt = {}
@@ -120,15 +121,18 @@ def main():
         epoch_fp_obj_cnt[i] = 0
     for batch_num, batch_dictionary in enumerate(test_loader):
         print("batch_num: {}".format(batch_num))
-        if (not check_all) and batch_num == num_batchs:
+        if (not check_all) and batch_num >= num_batchs:
             break
         if (batch_num % 10 != 0):
             continue  # only analyze 10% of the dataset
         print("\n\nAnalyzing the {}th batch\n".format(batch_num))
         if selection == "tp/fp" or selection == "tp/fp_all":
-            batch_tp_pts, batch_fp_pts = myXCCalculator.compute_pts(batch_dictionary, batch_num, epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt)
-            print("\nTP XC values for the batch:\n {}".format(batch_tp_pts))
-            print("\nFP XC values for the batch:\n {}".format(batch_fp_pts))
+            batch_tp_pts, batch_fp_pts, batch_tp_dist, batch_fp_dist = myXCCalculator.compute_pts(
+                batch_dictionary, batch_num, epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt)
+            print("\nTP lidar points count for the batch:\n {}".format(batch_tp_pts))
+            print("\nFP lidar points count for the batch:\n {}".format(batch_fp_pts))
+            print("\nTP dist for the batch:\n {}".format(batch_tp_dist))
+            print("\nFP dist for the batch:\n {}".format(batch_fp_dist))
         myXCCalculator.reset()
 
 
