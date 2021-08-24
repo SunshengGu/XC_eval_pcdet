@@ -190,14 +190,17 @@ def main():
     #TODO: change the class and label terms
     dist_n_pts = True  # whether we are evaluating dist and pts as well
     XC_only = False
+    skip_xc = True
     scatter_plot = False
     legacy_file = True # whether the data file was pre jan10 2021
     w_sum_explore = False
-    dataset_name = "KITTI"
+    dataset_name = "Waymo"
     cls_name_list = []
     xc_term = 'XQ'
-    score_term = "class_score"   # options: class_score pred_score
-    label_term = "class_label"   # options: class_label pred_label
+    score_term = "pred_score"   # options: class_score pred_score
+    label_term = "pred_label"   # options: class_label pred_label
+    pts_term = 'pts'            # options: pts pts_in_box
+    dist_term = 'dist'          # options: dist dist_to_ego
     if not use_XQ:
         xc_term = 'xc'
     if dataset_name == "KITTI":
@@ -226,12 +229,14 @@ def main():
     # create directory to store results just for this run, include the method in folder name
     XC_path = args.XC_path
     XC_folder = XC_path.split("XAI_results/", 1)[1]
+    print("XC_folder: {}".format(XC_folder))
     metric_result_path = os.path.join(cwd, 'XAI_results/{}_metrics_analysis_{}'.format(XC_folder, dt_string))
 
     print('\nmetric_result_path: {}'.format(metric_result_path))
     metric_res_path_str = str(metric_result_path)
     os.mkdir(metric_result_path)
     os.chmod(metric_res_path_str, 0o777)
+    print('\n ok so far')
 
     try:
         """
@@ -242,6 +247,7 @@ def main():
         # print("start trying")
         XC_thresh_list = ['0.1'] # ['0.0', '0.0333', '0.0667', '0.1', '0.1333', '0.1667', '0.2']
         for thresh in XC_thresh_list:
+            print("\nthresh: {}".format(thresh))
             XC_list = []
             far_attr_list = []
             PAP_list = []
@@ -253,26 +259,31 @@ def main():
             found = False
             tp_name = "tp_xq_thresh{}.csv".format(thresh)
             fp_name = "fp_xq_thresh{}.csv".format(thresh)
+            if skip_xc:
+                tp_name = "tp_pts.csv"
+                fp_name = "fp_pts.csv"
             tp_data = None
             fp_data = None
+            print('\n created file names to search')
             for root, dirs, files in os.walk(XC_path):
-                # print('processing files: ')
+                print('processing files: ')
                 for name in files:
-                    # print(os.path.join(root, name))
+                    print(os.path.join(root, name))
                     if name == tp_name:
                         found = True
                         tp_data = pd.read_csv(os.path.join(root, name))
-                        # print("type(tp_data['XQ']): {}".format(type(tp_data['XQ'])))
-                        XC_list.append(tp_data[xc_term])
-                        if not legacy_file:
-                            far_attr_list.append(tp_data['far_attr'])
-                            PAP_list.append(tp_data['pap'])
+                        if not skip_xc:
+                            # print("type(tp_data['XQ']): {}".format(type(tp_data['XQ'])))
+                            XC_list.append(tp_data[xc_term])
+                            if not legacy_file:
+                                far_attr_list.append(tp_data['far_attr'])
+                                PAP_list.append(tp_data['pap'])
                         score_list.append(tp_data[score_term])
-                        TP_FP_label.append(np.ones(len(tp_data[xc_term])))
+                        TP_FP_label.append(np.ones(len(tp_data[score_term])))
                         cls_label_list.append(tp_data[label_term])
                         if dist_n_pts:
-                            pts_list.append(tp_data['pts_in_box'])
-                            dist_list.append(-1 * tp_data['dist_to_ego'])
+                            pts_list.append(tp_data[pts_term])
+                            dist_list.append(-1 * tp_data[dist_term])
                         print("Number of TP instances for each class:")
                         print("class 0: {}".format(np.count_nonzero(tp_data[label_term] == 0)))
                         print("class 1: {}".format(np.count_nonzero(tp_data[label_term] == 1)))
@@ -280,27 +291,29 @@ def main():
                     elif name == fp_name:
                         found = True
                         fp_data = pd.read_csv(os.path.join(root, name))
-                        XC_list.append(fp_data[xc_term])
-                        if not legacy_file:
-                            far_attr_list.append(fp_data['far_attr'])
-                            PAP_list.append(fp_data['pap'])
+                        if not skip_xc:
+                            XC_list.append(fp_data[xc_term])
+                            if not legacy_file:
+                                far_attr_list.append(fp_data['far_attr'])
+                                PAP_list.append(fp_data['pap'])
                         score_list.append(fp_data[score_term])
-                        TP_FP_label.append(np.zeros(len(fp_data[xc_term])))
+                        TP_FP_label.append(np.zeros(len(fp_data[score_term])))
                         cls_label_list.append(fp_data[label_term])
                         if dist_n_pts:
-                            pts_list.append(fp_data['pts_in_box'])
-                            dist_list.append(-1 * fp_data['dist_to_ego'])
+                            pts_list.append(fp_data[pts_term])
+                            dist_list.append(-1 * fp_data[dist_term])
                         print("Number of FP instances for each class:")
                         print("class 0: {}".format(np.count_nonzero(fp_data[label_term] == 0)))
                         print("class 1: {}".format(np.count_nonzero(fp_data[label_term] == 1)))
                         print("class 2: {}".format(np.count_nonzero(fp_data[label_term] == 2)))
             if found:
-                XC_arr = np.concatenate(XC_list)
+                if not skip_xc:
+                    XC_arr = np.concatenate(XC_list)
+                    print("len(XC_arr): {}".format(len(XC_arr)))
                 score_arr = np.concatenate(score_list)
                 TP_FP_arr = np.concatenate(TP_FP_label)
                 cls_label_arr = np.concatenate(cls_label_list)
 
-                print("len(XC_arr): {}".format(len(XC_arr)))
                 print("len(TP_FP_arr): {}".format(len(TP_FP_arr)))
 
                 eval_cols = ['XQ_thresh', 'measure', 'class', 'fpr_at_95_tpr', 'detection_error',
@@ -310,9 +323,10 @@ def main():
                 PAP_eval_file = "PAP_eval_metrics_thresh{}.csv".format(thresh)
                 pts_eval_file = "pts_eval_metrics_thresh{}.csv".format(thresh)
                 dist_eval_file = "dist_eval_metrics_thresh{}.csv".format(thresh)
-                XC_dict, XC_cls_dicts = evaluate_metric(XC_arr, TP_FP_arr, metric_result_path, XC_eval_file,
-                                                        eval_cols, 'XQ', thresh,
-                                                        cls_name_list, cls_label_arr)
+                if not skip_xc:
+                    XC_dict, XC_cls_dicts = evaluate_metric(XC_arr, TP_FP_arr, metric_result_path, XC_eval_file,
+                                                            eval_cols, 'XQ', thresh,
+                                                            cls_name_list, cls_label_arr)
                 if not legacy_file:
                     far_attr_arr = np.concatenate(far_attr_list)
                     PAP_arr = np.concatenate(PAP_list)
@@ -338,20 +352,20 @@ def main():
                     w_sum_experiment_file = "cls_score_and_XC_weighted_sum_experiment.csv"
                     wsum_experiment(score_arr, XC_arr, TP_FP_arr, metric_result_path, w_sum_experiment_file,
                                     exp_cols, "weighted_sum", thresh, cls_name_list, cls_label_arr)
-                if not XC_only:
-                    score_eval_file = "class_score_eval_metrics.csv"
-                    score_dict, score_cls_dicts = evaluate_metric(
-                        score_arr, TP_FP_arr, metric_result_path, score_eval_file, eval_cols, 'cls_score',
-                        thresh, cls_name_list, cls_label_arr)
-
-                    XC_w = 0.11
-                    score_w = 0.89
-                    score_XC_wsum_arr = np.multiply(XC_arr, XC_w) + np.multiply(score_arr, score_w)
-                    wsum_eval_file = "cls_score_{}_XC_{}_weighted_sum_eval_metrics_thresh{}.csv".format(
-                            score_w, XC_w, thresh)
-                    wsum_dict, wsum_cls_dicts = evaluate_metric(
-                        score_XC_wsum_arr, TP_FP_arr, metric_result_path, wsum_eval_file,
-                        eval_cols, 'cls_score_XC_weighted_sum', thresh, cls_name_list, cls_label_arr)
+                # if not XC_only:
+                #     score_eval_file = "class_score_eval_metrics.csv"
+                #     score_dict, score_cls_dicts = evaluate_metric(
+                #         score_arr, TP_FP_arr, metric_result_path, score_eval_file, eval_cols, 'cls_score',
+                #         thresh, cls_name_list, cls_label_arr)
+                #
+                #     XC_w = 0.11
+                #     score_w = 0.89
+                #     score_XC_wsum_arr = np.multiply(XC_arr, XC_w) + np.multiply(score_arr, score_w)
+                #     wsum_eval_file = "cls_score_{}_XC_{}_weighted_sum_eval_metrics_thresh{}.csv".format(
+                #             score_w, XC_w, thresh)
+                #     wsum_dict, wsum_cls_dicts = evaluate_metric(
+                #         score_XC_wsum_arr, TP_FP_arr, metric_result_path, wsum_eval_file,
+                #         eval_cols, 'cls_score_XC_weighted_sum', thresh, cls_name_list, cls_label_arr)
 
     finally:
         print("--- {} seconds ---".format(time.time() - start_time))
