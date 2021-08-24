@@ -86,7 +86,7 @@ class AttributionGeneratorTensor:
         self.class_name_list = class_name_list
         self.gt_infos = gt_infos
         self.infos = None
-        if dataset_name == 'WaymoDataset':
+        if dataset_name == 'WaymoDataset' and dataset is not None:
             self.infos = dataset.infos
         self.dataset = dataset
         self.score_thresh = score_thresh
@@ -312,7 +312,8 @@ class AttributionGeneratorTensor:
         attr_size = PseudoImage2D[0].size()
         d, h, w = attr_size[0], attr_size[1], attr_size[2]
         zero_tensor = torch.zeros((h, w, d), dtype=torch.float).cuda()
-        if self.dataset_name == "WaymoDataset":
+        if self.dataset_name == "WaymoDataset" and self.xai_method != "Saliency":
+            print("is using Waymo")
             zero_tensor = torch.zeros((h, w, d), dtype=torch.double).cuda()
         if self.xai_method == "IntegratedGradients":
             # print("type(self.batch_dict['batch_size']): {}".format(type(self.batch_dict['batch_size'])))
@@ -325,17 +326,18 @@ class AttributionGeneratorTensor:
                                                   internal_batch_size=self.batch_dict['batch_size'])
         elif self.xai_method == "Saliency":
             batch_grad = self.explainer.attribute(PseudoImage2D, target=target, additional_forward_args=self.batch_dict)
-        # print("\nbatch_grad[0].type(): {}".format(batch_grad[0].type()))
+        print("\nbatch_grad[0].type(): {}".format(batch_grad[0].type()))
         grads = [gradients.squeeze().permute(1, 2, 0) for gradients in batch_grad]
         # print("\ngrads[0].size(): {}".format(grads[0].size()))
         # print("\ngrads[0].type(): {}".format(grads[0].type()))
         # print("\nzero_tensor.type(): {}".format(zero_tensor.type()))
         pos_grad = []
         # for grad in grads:
+        #     print("\ngrad.type(): {}".format(grad.type()))
         #     filtered_pos_grad = torch.where(grad > 0, grad, zero_tensor)
-        #     print("filtered_pos_grad.type(): {}".format(filtered_pos_grad.type()))
+        #     print("\nfiltered_pos_grad.type(): {}".format(filtered_pos_grad.type()))
         #     cur_pos_grad = torch.sum(filtered_pos_grad, axis = 2)
-        #     print("cur_pos_grad.type(): {}".format(cur_pos_grad.type()))
+        #     print("\ncur_pos_grad.type(): {}".format(cur_pos_grad.type()))
         #     pos_grad.append(cur_pos_grad)
         pos_grad = [torch.sum(torch.where(grad > 0, grad, zero_tensor), axis=2) for grad in grads]
         neg_grad = [torch.sum(-1 * torch.where(grad < 0, grad, zero_tensor), axis=2) for grad in grads]
