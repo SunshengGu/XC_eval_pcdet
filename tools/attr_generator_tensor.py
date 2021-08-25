@@ -482,7 +482,7 @@ class AttributionGeneratorTensor:
                 gt_present = False
             gt_exist.append(gt_present)
             if not gt_present:
-                for j in range(len(self.pred_scores)):
+                for j in range(len(self.pred_scores[i])):
                     curr_pred_score = self.pred_scores[i][j]
                     if curr_pred_score >= self.score_thresh:
                         conf_mat_frame.append('FP')
@@ -542,8 +542,10 @@ class AttributionGeneratorTensor:
             if self.selection == "tp/fp" or self.selection == "tp/fp_all":
                 print('len(self.batch_cared_tp_ind): {}'.format(len(self.batch_cared_tp_ind)))
                 print('len(self.batch_cared_fp_ind): {}'.format(len(self.batch_cared_fp_ind)))
-                print('cared_xc.size(): {}'.format(cared_xc.size()))
-                print('cared_fp_xc.size(): {}'.format(cared_fp_xc.size()))
+                if cared_xc is not None:
+                    print('cared_xc.size(): {}'.format(cared_xc.size()))
+                if cared_fp_xc is not None:
+                    print('cared_fp_xc.size(): {}'.format(cared_fp_xc.size()))
                 for i in range(len(self.batch_cared_tp_ind)):
                     # note that the length of self.batch_cared_tp_ind[i] will not exceed the actual number of tps
                     # in a frame
@@ -856,18 +858,22 @@ class AttributionGeneratorTensor:
                 batch_fp_target_list.append(fp_target_list)
                 batch_fp_box_vertices.append(fp_box_vertices)
                 batch_fp_loc.append(fp_loc)
-                fp_boxes = torch.stack(fp_boxes)
-                self.fp_boxes.append(fp_boxes)
-                tp_boxes = torch.stack(tp_boxes)
-                self.tp_boxes.append(tp_boxes)
+                if (len(fp_boxes) > 0):
+                    fp_boxes = torch.stack(fp_boxes)
+                    self.fp_boxes.append(fp_boxes)
+                if (len(tp_boxes) > 0):
+                    tp_boxes = torch.stack(tp_boxes)
+                    self.tp_boxes.append(tp_boxes)
             batch_target_list.append(target_list)
             batch_cared_box_vertices.append(cared_box_vertices)
             batch_cared_loc.append(cared_loc)
         if self.selection == "tp/fp" or self.selection == "tp" or self.selection == "tp/fp_all":
-            print("len(self.tp_boxes[0]) before stacking: {}".format(len(self.tp_boxes[0])))
-            self.tp_boxes = torch.stack(self.tp_boxes)
-            self.fp_boxes = torch.stack(self.fp_boxes)
-            print("len(self.tp_boxes[0]) after stacking: {}".format(len(self.tp_boxes[0])))
+            # print("len(self.tp_boxes[0]) before stacking: {}".format(len(self.tp_boxes[0])))
+            if (len(self.tp_boxes) > 0): # since batch size is only one, this is ok
+                self.tp_boxes = torch.stack(self.tp_boxes)
+            if (len(self.fp_boxes) > 0):
+                self.fp_boxes = torch.stack(self.fp_boxes)
+            # print("len(self.tp_boxes[0]) after stacking: {}".format(len(self.tp_boxes[0])))
         self.batch_cared_ind = batch_cared_indices
         
         if self.selection == "tp/fp" or self.selection == "tp/fp_all":
@@ -1140,29 +1146,30 @@ class AttributionGeneratorTensor:
                 total_far_attr_lst.append(torch.stack(far_attr))
                 total_pap_lst.append(torch.stack(pap))
         # normalizing by the batch size
-        if len(total_XC_lst) == 0: # to account for the case where we don't have any TP in a frame in the tp and tp/fp modes
-            total_XC_lst.append(torch.full((1,1), float('nan')).cuda())
-            total_far_attr_lst.append(torch.full((1,1), float('nan')).cuda())
-            total_pap_lst.append(torch.full((1,1), float('nan')).cuda())
-        total_XC = torch.stack(total_XC_lst)
-        total_far_attr = torch.stack(total_far_attr_lst)
-        total_pap_raw = torch.stack(total_pap_lst).float()
-        nan_tensor = torch.full(total_XC.size(), float('nan')).cuda()
-        total_pap_ = torch.where(torch.isnan(total_XC), nan_tensor, total_pap_raw)
-        total_pap = torch.where(total_pap_ == 0, nan_tensor, total_pap_)
-        print("\ntotal_XC.size(): {}\ntotal_pap.size(): {}".format(total_XC.size(), total_pap.size()))
-        print("\nsuccessfully reformatted the XC, far_attr, and pap values from lists to tensors\n")
-        total_XC = total_XC.transpose(0, 1)
-        total_far_attr = total_far_attr.transpose(0, 1)
-        total_pap = total_pap.transpose(0, 1)
+        # Note: the below section is designed for the "tp/fp_all" specifically, changed at Aug 25, may need to revert back to old one later for other options
+        if len(total_XC_lst) != 0: # to account for the case where we don't have any TP in a frame in the tp and tp/fp modes
+            total_XC = torch.stack(total_XC_lst)
+            total_far_attr = torch.stack(total_far_attr_lst)
+            total_pap_raw = torch.stack(total_pap_lst).float()
+            nan_tensor = torch.full(total_XC.size(), float('nan')).cuda()
+            total_pap_ = torch.where(torch.isnan(total_XC), nan_tensor, total_pap_raw)
+            total_pap = torch.where(total_pap_ == 0, nan_tensor, total_pap_)
+            print("\ntotal_XC.size(): {}\ntotal_pap.size(): {}".format(total_XC.size(), total_pap.size()))
+            print("\nsuccessfully reformatted the XC, far_attr, and pap values from lists to tensors\n")
+            total_XC = total_XC.transpose(0, 1)
+            total_far_attr = total_far_attr.transpose(0, 1)
+            #total_XC_lst.append(torch.full((1,1), float('nan')).cuda())
+            #total_far_attr_lst.append(torch.full((1,1), float('nan')).cuda())
+            #total_pap_lst.append(torch.full((1,1), float('nan')).cuda())
+            total_pap = total_pap.transpose(0, 1)
         if self.selection == "tp/fp" or self.selection == "tp/fp_all":
-            total_fp_XC = torch.stack(total_fp_XC_lst)
-            total_fp_far_attr = torch.stack(total_fp_far_attr_lst)
-            total_fp_pap_raw = torch.stack(total_fp_pap_lst).float()
-            fp_nan_tensor = torch.full(total_fp_XC.size(), float('nan')).cuda()
-            total_fp_pap_ = torch.where(torch.isnan(total_fp_XC), fp_nan_tensor, total_fp_pap_raw)
-            total_fp_pap = torch.where(total_fp_pap_ == 0, fp_nan_tensor, total_fp_pap_)
-            if self.selection == "tp/fp" or self.selection == "tp/fp_all":
+            if len(total_fp_XC_lst) != 0:
+                total_fp_XC = torch.stack(total_fp_XC_lst)
+                total_fp_far_attr = torch.stack(total_fp_far_attr_lst)
+                total_fp_pap_raw = torch.stack(total_fp_pap_lst).float()
+                fp_nan_tensor = torch.full(total_fp_XC.size(), float('nan')).cuda()
+                total_fp_pap_ = torch.where(torch.isnan(total_fp_XC), fp_nan_tensor, total_fp_pap_raw)
+                total_fp_pap = torch.where(total_fp_pap_ == 0, fp_nan_tensor, total_fp_pap_)
                 total_fp_XC = total_fp_XC.transpose(0, 1)
                 total_fp_far_attr = total_fp_far_attr.transpose(0, 1)
                 total_fp_pap = total_fp_pap.transpose(0, 1)

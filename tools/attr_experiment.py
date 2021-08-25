@@ -17,7 +17,7 @@ from XAI_utils.tp_fp import get_gt_infos
 def main():
     '''________________________User Input Begin________________________'''
     # dataset_name = 'KittiDataset'  # change to your dataset, follow naming convention in the config yaml files in PCDet
-    method = 'IntegratedGradients'  # explanation method
+    method = 'Saliency'  # explanation method
     attr_shown = 'positive'  # show positive or negative attributions
     aggre_method = 'sum'
     check_all = True
@@ -28,11 +28,11 @@ def main():
     steps = 24  # number of intermediate steps for IG
 
     # config file for the full PointPillars model
-    # model_cfg_file = 'cfgs/kitti_models/pointpillar_xai.yaml'
-    model_cfg_file = 'cfgs/waymo_models/pointpillar_xai.yaml'
+    model_cfg_file = 'cfgs/kitti_models/pointpillar_xai.yaml'
+    # model_cfg_file = 'cfgs/waymo_models/pointpillar_nick_xai.yaml'
     # model checkpoint, change to your checkpoint, make sure it's a well-trained model
-    # model_ckpt = '../output/kitti_models/pointpillar/default/ckpt/pointpillar_7728.pth'
-    model_ckpt = '../output/waymo_models/pointpillar/modified_07april/ckpt/checkpoint_epoch_30.pth'
+    model_ckpt = '../output/kitti_models/pointpillar/default/ckpt/pointpillar_7728.pth'
+    # model_ckpt = '../output/waymo_models/pointpillar/nick_models/ckpt/checkpoint_epoch_30.pth'
     num_batchs = 2
 
     '''________________________User Input End________________________'''
@@ -79,6 +79,7 @@ def main():
         logger=logger,
         dist=dist_test, workers=workers, training=False
     )
+    print("\ndataset created")
 
     # Build the model
     full_model = build_network(model_cfg=cfg.MODEL, num_class=len(cfg.CLASS_NAMES), dataset=test_set)
@@ -86,8 +87,10 @@ def main():
     full_model.cuda()
     full_model.eval()
     explained_model = full_model.forward_model2D
+    print("\nmodel built")
 
     gt_infos = get_gt_infos(cfg, test_set)
+    print("\ngot gt_infos")
 
     # myXCCalculator = AttributionGenerator(model_ckpt=ckpt, full_model_cfg_file=cfg_file,
     #                                       model_cfg_file=explained_cfg_file,
@@ -106,6 +109,7 @@ def main():
         pred_score_file_name=pred_score_file_name, pred_score_field_name=pred_score_field_name,
         score_thresh=cfg.MODEL.POST_PROCESSING.SCORE_THRESH, selection=selection, debug=debugging, full_model=full_model,
         margin=0.2, ignore_thresh=0.1)
+    print("\ncreated the xc calculator")
     epoch_obj_cnt = {}
     epoch_tp_obj_cnt = {}
     epoch_fp_obj_cnt = {}
@@ -117,16 +121,20 @@ def main():
         print("batch_num: {}".format(batch_num))
         if (not check_all) and batch_num == num_batchs:
             break
-        if (batch_num % 10 != 0):
-            continue  # only analyze 10% of the dataset
+        # if batch_num != 13:
+        #     continue
+        #if (batch_num % 10 != 0):
+        #    continue  # only analyze 10% of the dataset
         print("\n\nAnalyzing the {}th batch\n".format(batch_num))
         if selection == "tp/fp" or selection == "tp/fp_all":
             batch_XC, batch_far_attr, batch_total_pap, batch_fp_XC, batch_fp_far_attr, batch_fp_total_pap = \
                 myXCCalculator.compute_xc(
                     batch_dictionary, epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt, cur_it=batch_num,
                     cur_epoch=0, method=aggre_method, sign=attr_shown)
-            print("\nTP XC values for the batch:\n {}".format(batch_XC))
-            print("\nFP XC values for the batch:\n {}".format(batch_fp_XC))
+            if (batch_XC is not None):
+                print("\nTP XC values for the batch:\n {}".format(batch_XC))
+            if (batch_fp_XC is not None):
+                print("\nFP XC values for the batch:\n {}".format(batch_fp_XC))
         else:
             batch_XC, batch_far_attr, batch_total_pap = myXCCalculator.compute_xc(
                 batch_dictionary, epoch_obj_cnt, epoch_tp_obj_cnt, epoch_fp_obj_cnt, cur_it=batch_num,
