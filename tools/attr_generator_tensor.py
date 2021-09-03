@@ -88,6 +88,8 @@ class AttributionGeneratorTensor:
         self.infos = None
         if dataset_name == 'WaymoDataset' and dataset is not None:
             self.infos = dataset.infos
+        if dataset_name == 'KittiDataset' and dataset is not None:
+            self.infos = dataset.kitti_infos
         self.dataset = dataset
         self.score_thresh = score_thresh
         self.full_model = full_model if (full_model is not None) else None
@@ -938,6 +940,7 @@ class AttributionGeneratorTensor:
         fp_pts_lst = []
         tp_dist_lst = []
         fp_dist_lst = []
+        
         info = self.infos[batch_id]
         print("\nkeys in info:")
         for key in info:
@@ -945,28 +948,32 @@ class AttributionGeneratorTensor:
         print("\nlen(self.tp_boxes): {}".format(len(self.tp_boxes)))
         print("\nlen(self.fp_boxes): {}".format(len(self.fp_boxes)))
         pc_info = info['point_cloud']
-        sequence_name = pc_info['lidar_sequence']
-        sample_idx = pc_info['sample_idx']
-        points = self.dataset.get_lidar(sequence_name, sample_idx)
+        points = None
+        if self.dataset_name == "WaymoDataset":
+            sequence_name = pc_info['lidar_sequence']
+            sample_idx = pc_info['sample_idx']
+            points = self.dataset.get_lidar(sequence_name, sample_idx)
+        if self.dataset_name == "KittiDataset":
+            sample_idx = pc_info['lidar_idx']
+            points = self.dataset.get_lidar(sample_idx)
         # print("points.shape: {}".format(points.shape))
         for i in range(self.batch_size):
             tp_sub_pts_list = []
             fp_sub_pts_list = []
-
-            tp_sub_dist_list = self.calc_dist(self.tp_boxes[i][:, 0:2])
+            if (len(self.tp_boxes)) > 0:   # again, only works for the batch_size == 1 case
+                tp_sub_dist_list = self.calc_dist(self.tp_boxes[i][:, 0:2])
+                tp_box_idxs_of_pts = roiaware_pool3d_utils.points_in_boxes_gpu(
+                    torch.from_numpy(points[:, 0:3]).unsqueeze(dim=0).float().cuda(), 
+                    self.tp_boxes[i][:, 0:7].unsqueeze(dim=0)
+                ).long().squeeze(dim=0).cpu().numpy()
+                # print("tp_box_idxs_of_pts.shape: {}".format(tp_box_idxs_of_pts.shape))
+                for id in range(len(self.tp_boxes[i])):
+                    box_pts = points[tp_box_idxs_of_pts == id]
+                    tp_sub_pts_list.append(len(box_pts))
+                tp_dist_lst.append(tp_sub_dist_list)
+                tp_pts_lst.append(tp_sub_pts_list)
             fp_sub_dist_list = self.calc_dist(self.fp_boxes[i][:, 0:2])
-            tp_dist_lst.append(tp_sub_dist_list)
             fp_dist_lst.append(fp_sub_dist_list)
-
-            tp_box_idxs_of_pts = roiaware_pool3d_utils.points_in_boxes_gpu(
-                torch.from_numpy(points[:, 0:3]).unsqueeze(dim=0).float().cuda(), 
-                self.tp_boxes[i][:, 0:7].unsqueeze(dim=0)
-            ).long().squeeze(dim=0).cpu().numpy()
-            # print("tp_box_idxs_of_pts.shape: {}".format(tp_box_idxs_of_pts.shape))
-            for id in range(len(self.tp_boxes[i])):
-                box_pts = points[tp_box_idxs_of_pts == id]
-                tp_sub_pts_list.append(len(box_pts))
-            tp_pts_lst.append(tp_sub_pts_list)
             print("\nlen(tp_pts_lst): {}".format(len(tp_pts_lst)))
 
             fp_box_idxs_of_pts = roiaware_pool3d_utils.points_in_boxes_gpu(
