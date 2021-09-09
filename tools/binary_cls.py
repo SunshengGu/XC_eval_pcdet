@@ -168,6 +168,8 @@ def main():
         cls_name_list = ['Car', 'Pedestrian', 'Cyclist']
     elif dataset_name == "CADC":
         cls_name_list = ['Car', 'Pedestrian', 'Truck']
+    elif dataset_name == "WAYMO":
+        cls_name_list = ['Vehicle', 'Pedestrian', 'Cyclist']
     ignore_thresh_list = [0.0]
     # ignore_thresh_list = [0.0, 0.0333, 0.0667, 0.1, 0.1333, 0.1667, 0.2]
     start_time = time.time()
@@ -198,7 +200,7 @@ def main():
         2. Read in XQ from the FP file
         3. Concatenate into one array, with TP labeled 1 and FP labeled 0
         """
-        XQ_thresh_list = ['0.0', '0.0333', '0.0667', '0.1', '0.1333', '0.1667', '0.2']
+        XQ_thresh_list = ['0.1']
         for thresh in XQ_thresh_list:
             pred_type_list = []
             found = False
@@ -230,22 +232,30 @@ def main():
                 #                            torch.nn.Softmax(dim=1))
                 frames = [tp_data, fp_data]
                 data_df = pd.concat(frames)
-                new_df = data_df[['class_score']]
+                new_df = data_df[['pred_score']]
+                # new_df = data_df[['pred_score', 'pts']]
+                # new_df = data_df[['pred_score', 'pts', 'dist']]
+                # new_df = data_df[['pred_score', 'xc_neg_cnt']]
+                # new_df = data_df[['pred_score', 'xc_neg_cnt', 'pts', 'dist']]
+
                 # new_df = data_df[['XQ_cnt^+', 'class_score']]
                 # new_df = data_df[['XQ_cnt^+', 'class_score', 'pts_in_box']]
                 # new_df = data_df[['XQ_cnt^-', 'XQ_sum^-', 'XQ_cnt^+', 'XQ_sum^+', 'class_score']]
                 # new_df = data_df # [['XQ_cnt^-', 'XQ_sum^-', 'XQ_cnt^+', 'XQ_sum^+', 'class_score']] #
+
                 all_data = new_df.values
                 pred_type = np.concatenate(pred_type_list)
                 print("number of entries in all_data: {}".format(len(new_df['class_score'])))
                 print("number of entries in pred_type: {}".format(len(pred_type)))
                 print("shape of all_data: {}".format(all_data.shape))
-                X_train_, X_test, y_train_, y_test = train_test_split(
-                    all_data, pred_type, test_size=0.4, shuffle=True, random_state=42)
+                # X_train_, X_test, y_train_, y_test = train_test_split(
+                #     all_data, pred_type, test_size=0.4, shuffle=True, random_state=42)
+
                 # print("training data before normalization: {}".format(X_train_[:10]))
                 scaler = StandardScaler()
-                X_train_ = scaler.fit_transform(X_train_)
-                X_test = scaler.fit_transform(X_test)
+                X_train_ = scaler.fit_transform(all_data)
+                y_train_ = pred_type
+                # X_test = scaler.fit_transform(X_test)
                 # print("training data after normalization: {}".format(X_train_[:10]))
                 # X_train, X_val, y_train, y_val = train_test_split(X_train_, y_train_, test_size=0.25, random_state=42)
                 k = 5
