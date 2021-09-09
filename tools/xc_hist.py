@@ -11,6 +11,7 @@ import math
 from pathlib import Path
 
 # XAI related imports
+import scikitplot as skplt
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
@@ -26,6 +27,14 @@ def parse_config():
     return args
 
 def main():
+    old_file = False
+    XC_term = "xc"
+    label_term = "pred_label"
+    score_term = "pred_score"
+    if old_file:
+        XC_term = "XQ"
+        label_term = "class_label"
+        score_term = "class_score"
     start_time = time.time()
     args = parse_config()
     # get the date and time to create a folder for the specific time when this script is run
@@ -68,55 +77,61 @@ def main():
                     if name == tp_name:
                         found = True
                         tp_data = pd.read_csv(os.path.join(root, name))
-                        # print("type(tp_data['XQ']): {}".format(type(tp_data['XQ'])))
-                        XC_list.append(tp_data['XQ'])
-                        score_list.append(tp_data['class_score'])
-                        TP_FP_label.append(np.ones(len(tp_data['XQ'])))
-                        cls_label_list.append(tp_data['class_label'])
-                        pts_list.append(tp_data['pts_in_box'])
-                        dist_list.append(tp_data['dist_to_ego'])
+                        # print("type(tp_data[XC_term]): {}".format(type(tp_data[XC_term])))
+                        XC_list.append(tp_data[XC_term])
+                        score_list.append(tp_data[score_term])
+                        TP_FP_label.append(np.ones(len(tp_data[XC_term])))
+                        cls_label_list.append(tp_data[label_term])
+                        # pts_list.append(tp_data['pts_in_box'])
+                        # dist_list.append(tp_data['dist_to_ego'])
                         print("Number of TP instances for each class:")
-                        print("class 0: {}".format(np.count_nonzero(tp_data['class_label'] == 0)))
-                        print("class 1: {}".format(np.count_nonzero(tp_data['class_label'] == 1)))
-                        print("class 2: {}".format(np.count_nonzero(tp_data['class_label'] == 2)))
+                        print("class 0: {}".format(np.count_nonzero(tp_data[label_term] == 0)))
+                        print("class 1: {}".format(np.count_nonzero(tp_data[label_term] == 1)))
+                        print("class 2: {}".format(np.count_nonzero(tp_data[label_term] == 2)))
                     elif name == fp_name:
                         found = True
                         fp_data = pd.read_csv(os.path.join(root, name))
-                        XC_list.append(fp_data['XQ'])
-                        score_list.append(fp_data['class_score'])
-                        TP_FP_label.append(np.zeros(len(fp_data['XQ'])))
-                        cls_label_list.append(fp_data['class_label'])
-                        pts_list.append(fp_data['pts_in_box'])
-                        dist_list.append(fp_data['dist_to_ego'])
+                        XC_list.append(fp_data[XC_term])
+                        score_list.append(fp_data[score_term])
+                        TP_FP_label.append(np.zeros(len(fp_data[XC_term])))
+                        cls_label_list.append(fp_data[label_term])
+                        # pts_list.append(fp_data['pts_in_box'])
+                        # dist_list.append(fp_data['dist_to_ego'])
                         print("Number of FP instances for each class:")
-                        print("class 0: {}".format(np.count_nonzero(fp_data['class_label'] == 0)))
-                        print("class 1: {}".format(np.count_nonzero(fp_data['class_label'] == 1)))
-                        print("class 2: {}".format(np.count_nonzero(fp_data['class_label'] == 2)))
+                        print("class 0: {}".format(np.count_nonzero(fp_data[label_term] == 0)))
+                        print("class 1: {}".format(np.count_nonzero(fp_data[label_term] == 1)))
+                        print("class 2: {}".format(np.count_nonzero(fp_data[label_term] == 2)))
             if found:
                 XC_arr = np.concatenate(XC_list)
                 score_arr = np.concatenate(score_list)
                 TP_FP_arr = np.concatenate(TP_FP_label)
                 cls_label_arr = np.concatenate(cls_label_list)
-                pts_arr = np.concatenate(pts_list)
-                dist_arr = np.concatenate(dist_list)
+                # pts_arr = np.concatenate(pts_list)
+                # dist_arr = np.concatenate(dist_list)
                 print("len(XC_arr): {}".format(len(XC_arr)))
                 print("len(TP_FP_arr): {}".format(len(TP_FP_arr)))
 
-                fig, axs = plt.subplots(1, figsize=(10, 7))
+                n_bins = 50
+                fig, axs = plt.subplots(2, figsize=(10, 13))
                 fig.tight_layout(pad=8.0)
-                axs.hist(tp_data['XQ'], bins=20, alpha=0.5, range=(0.0, 1.0), label="TP")
-                axs.hist(fp_data['XQ'], bins=20, alpha=0.5, range=(0.0, 1.0), label="FP")
-                axs.set_title('XC Distribution', fontsize=20)
-                axs.legend(loc='upper right', fontsize=20)
-                # axs[1].hist(tp_data['XQ'], bins=20, range=(0.0, 1.0))
-                # axs[1].set_title('TP Boxes', fontsize=20)
-                # axs[2].hist(fp_data['XQ'], bins=20, range=(0.0, 1.0))
-                # axs[2].set_title('FP Boxes', fontsize=20)
-                # for ax in axs:
-                axs.set_xlabel('XC', fontsize=20)
-                axs.set_ylabel('box_count', fontsize=20)
-                axs.tick_params(axis='x', labelsize=16)
-                axs.tick_params(axis='y', labelsize=16)
+                axs[0].hist(tp_data[XC_term], bins=n_bins, alpha=0.5, range=(0.0, 1.0), label="TP")
+                axs[0].hist(fp_data[XC_term], bins=n_bins, alpha=0.5, range=(0.0, 1.0), label="FP")
+                axs[0].set_title('XC Distribution', fontsize=20)
+                axs[0].legend(loc='upper right', fontsize=20)
+                axs[0].set_xlabel('XC', fontsize=20)
+                axs[0].set_ylabel('box_count', fontsize=20)
+                axs[0].tick_params(axis='x', labelsize=16)
+                axs[0].tick_params(axis='y', labelsize=16)
+                axs[1].hist(tp_data[XC_term], bins=n_bins, density=True, cumulative=True, alpha=0.5, range=(0.0, 1.0),
+                            label="TP", histtype='step', linewidth=2)
+                axs[1].hist(fp_data[XC_term], bins=n_bins, density=True, cumulative=True, alpha=0.5, range=(0.0, 1.0),
+                            label="FP", histtype='step', linewidth=2)
+                axs[1].set_title('XC Cumulative Distribution', fontsize=20)
+                axs[1].legend(loc='upper right', fontsize=20)
+                axs[1].set_xlabel('XC', fontsize=20)
+                axs[1].set_ylabel('box_count', fontsize=20)
+                axs[1].tick_params(axis='x', labelsize=16)
+                axs[1].tick_params(axis='y', labelsize=16)
                 plt.savefig("{}/pred_box_XC_histograms_thresh{}.png".format(metric_result_path, thresh))
                 plt.close()
 
