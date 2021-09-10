@@ -165,9 +165,9 @@ def main():
     :return:
     """
     model = "MLP"
-    batch_size = 32
-    epochs = 2
-    trials = 5
+    batch_size = 128
+    epochs = 6
+    trials = 10
     kfolds = 5
     dataset_name = "KITTI"
     show_distribution = True
@@ -224,7 +224,10 @@ def main():
                     if name == tp_name:
                         found = True
                         tp_data = pd.read_csv(os.path.join(root, name))
+                        print('tp_len before: {}'.format(len(tp_data['pred_score'])))
+                        tp_data = tp_data.loc[tp_data['pred_label'] == 1]
                         tp_len = len(tp_data['pred_score'])
+                        print('tp_len after selecting pedestrian: {}'.format(tp_len))
                         pred_type_list.append(np.ones(len(tp_data['pred_score'])))
             for root, dirs, files in os.walk(XQ_path):
                 # print('processing files: ')
@@ -233,9 +236,14 @@ def main():
                     if name == fp_name:
                         found = True
                         fp_data = pd.read_csv(os.path.join(root, name))
+                        print('fp_len before: {}'.format(len(fp_data['pred_score'])))
                         np.random.shuffle(fp_data.values)
+                        fp_data = fp_data.loc[fp_data['pred_label'] == 1]
+                        fp_data = fp_data.reset_index(drop=True)
                         fp_len = len(fp_data['pred_score'])
+                        print('fp_len after selecting pedestrian: {}'.format(fp_len))
                         fp_data = fp_data.drop(labels=range(tp_len,fp_len), axis=0)
+                        print('fp_len after matching tp_len: {}'.format(len(fp_data['pred_score'])))
                         pred_type_list.append(np.zeros(tp_len))
             if found:
                 all_avg_acc = 0.0
@@ -254,13 +262,14 @@ def main():
                     #new_df = data_df[['pred_score']]
                     #new_df = data_df[['pred_score', 'dist']]
                     #new_df = data_df[['pred_score', 'pts']]
-                    # new_df = data_df[['pred_score', 'xc_neg_cnt']]
+                    #new_df = data_df[['pred_score', 'xc_neg_cnt']]
                     # new_df = data_df[['pred_score', 'xc_pos_cnt']]
                     # new_df = data_df[['pred_score', 'xc_neg_sum']]
                     # new_df = data_df[['pred_score', 'xc_pos_sum']]
                     # new_df = data_df[['pred_score', 'pts', 'dist']]
                     # new_df = data_df[['pred_score', 'xc_neg_cnt']]
                     new_df = data_df[['pred_score', 'xc_neg_cnt', 'pts', 'dist']]
+                    #new_df = data_df[['pred_score', 'xc_neg_cnt', 'xc_neg_sum', 'xc_pos_sum','xc_pos_cnt', 'pts', 'dist']]
 
                     # new_df = data_df[['XQ_cnt^+', 'class_score']]
                     # new_df = data_df[['XQ_cnt^+', 'class_score', 'pts_in_box']]
@@ -292,6 +301,7 @@ def main():
                     val_acc_avg = []  # mean validation accuracy for each C value
                     acc_sum = 0
                     fold = 0
+                    print('\n')
                     for train_index, val_index in kf.split(X_train_):
                         fold += 1
                         X_train, X_val = X_train_[train_index], X_train_[val_index]
