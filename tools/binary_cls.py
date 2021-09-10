@@ -167,6 +167,8 @@ def main():
     model = "MLP"
     batch_size = 32
     epochs = 2
+    trials = 5
+    kfolds = 5
     dataset_name = "KITTI"
     show_distribution = True
     cls_name_list = []
@@ -236,164 +238,169 @@ def main():
                         fp_data = fp_data.drop(labels=range(tp_len,fp_len), axis=0)
                         pred_type_list.append(np.zeros(tp_len))
             if found:
-                # input_size = 2
-                # hidden_sizes = [4,3]
-                # output_size = 2
-                # fcnn = torch.nn.Sequential(torch.nn.Linear(input_size, hidden_sizes[0]),
-                #                            torch.nn.ReLU(),
-                #                            torch.nn.Linear(hidden_sizes[0], hidden_sizes[1]),
-                #                            torch.nn.ReLU(),
-                #                            torch.nn.Linear(hidden_sizes[1], output_size),
-                #                            torch.nn.Softmax(dim=1))
-                frames = [tp_data, fp_data]
-                data_df = pd.concat(frames)
-                #new_df = data_df[['pred_score']]
-                #new_df = data_df[['pred_score', 'dist']]
-                #new_df = data_df[['pred_score', 'pts']]
-                # new_df = data_df[['pred_score', 'xc_neg_cnt']]
-                # new_df = data_df[['pred_score', 'xc_pos_cnt']]
-                # new_df = data_df[['pred_score', 'xc_neg_sum']]
-                # new_df = data_df[['pred_score', 'xc_pos_sum']]
-                # new_df = data_df[['pred_score', 'pts', 'dist']]
-                # new_df = data_df[['pred_score', 'xc_neg_cnt']]
-                new_df = data_df[['pred_score', 'xc_neg_cnt', 'pts', 'dist']]
+                all_avg_acc = 0.0
+                for t in range(trials):
+                    # input_size = 2
+                    # hidden_sizes = [4,3]
+                    # output_size = 2
+                    # fcnn = torch.nn.Sequential(torch.nn.Linear(input_size, hidden_sizes[0]),
+                    #                            torch.nn.ReLU(),
+                    #                            torch.nn.Linear(hidden_sizes[0], hidden_sizes[1]),
+                    #                            torch.nn.ReLU(),
+                    #                            torch.nn.Linear(hidden_sizes[1], output_size),
+                    #                            torch.nn.Softmax(dim=1))
+                    frames = [tp_data, fp_data]
+                    data_df = pd.concat(frames)
+                    #new_df = data_df[['pred_score']]
+                    #new_df = data_df[['pred_score', 'dist']]
+                    #new_df = data_df[['pred_score', 'pts']]
+                    # new_df = data_df[['pred_score', 'xc_neg_cnt']]
+                    # new_df = data_df[['pred_score', 'xc_pos_cnt']]
+                    # new_df = data_df[['pred_score', 'xc_neg_sum']]
+                    # new_df = data_df[['pred_score', 'xc_pos_sum']]
+                    # new_df = data_df[['pred_score', 'pts', 'dist']]
+                    # new_df = data_df[['pred_score', 'xc_neg_cnt']]
+                    new_df = data_df[['pred_score', 'xc_neg_cnt', 'pts', 'dist']]
 
-                # new_df = data_df[['XQ_cnt^+', 'class_score']]
-                # new_df = data_df[['XQ_cnt^+', 'class_score', 'pts_in_box']]
-                # new_df = data_df[['XQ_cnt^-', 'XQ_sum^-', 'XQ_cnt^+', 'XQ_sum^+', 'class_score']]
-                # new_df = data_df # [['XQ_cnt^-', 'XQ_sum^-', 'XQ_cnt^+', 'XQ_sum^+', 'class_score']] #
+                    # new_df = data_df[['XQ_cnt^+', 'class_score']]
+                    # new_df = data_df[['XQ_cnt^+', 'class_score', 'pts_in_box']]
+                    # new_df = data_df[['XQ_cnt^-', 'XQ_sum^-', 'XQ_cnt^+', 'XQ_sum^+', 'class_score']]
+                    # new_df = data_df # [['XQ_cnt^-', 'XQ_sum^-', 'XQ_cnt^+', 'XQ_sum^+', 'class_score']] #
 
-                all_data = new_df.values
-                pred_type = np.concatenate(pred_type_list)
-                print("number of entries in all_data: {}".format(len(new_df['pred_score'])))
-                print("number of entries in pred_type: {}".format(len(pred_type)))
-                print("shape of all_data: {}".format(all_data.shape))
-                #X_train_, X_test, y_train_, y_test = train_test_split(
-                #    all_data, pred_type, test_size=0.2, shuffle=True, random_state=42)
+                    all_data = new_df.values
+                    pred_type = np.concatenate(pred_type_list)
+                    print("number of entries in all_data: {}".format(len(new_df['pred_score'])))
+                    print("number of entries in pred_type: {}".format(len(pred_type)))
+                    print("shape of all_data: {}".format(all_data.shape))
+                    #X_train_, X_test, y_train_, y_test = train_test_split(
+                    #    all_data, pred_type, test_size=0.2, shuffle=True, random_state=42)
 
-                # print("training data before normalization: {}".format(X_train_[:10]))
-                scaler = StandardScaler()
-                X_train_ = scaler.fit_transform(all_data)
-                y_train_ = pred_type
-                # X_train_ = scaler.fit_transform(X_train_)
-                # X_test = scaler.fit_transform(X_test)
-                # print("training data after normalization: {}".format(X_train_[:10]))
-                # X_train, X_val, y_train, y_val = train_test_split(X_train_, y_train_, test_size=0.25, random_state=42)
-                k = 5
-                kf = KFold(n_splits=k, shuffle=True, random_state=42) # , shuffle=True, random_state=42
-                C_list = [0.1, 0.5, 1, 2, 5, 10, 20, 50]
-                neigh = [5, 10, 20, 50]
-                # C_list = [0.1, 1, 5, 20]
-                val_acc = []  # validation accuracies
-                val_acc_avg = []  # mean validation accuracy for each C value
-                acc_sum = 0
-                fold = 0
-                for train_index, val_index in kf.split(X_train_):
-                    fold += 1
-                    X_train, X_val = X_train_[train_index], X_train_[val_index]
-                    y_train, y_val = y_train_[train_index], y_train_[val_index]
-                    if show_distribution:
-                        train_pos = np.count_nonzero(y_train == 1)
-                        val_pos = np.count_nonzero(y_val == 1)
-                        pos_portion_train = train_pos/len(y_train)
-                        pos_portion_val = val_pos/len(y_val)
-                        print("proportion of positives in training: {}".format(pos_portion_train))
-                        print("proportion of positives in validation: {}".format(pos_portion_val))
-                    k_acc = []  # accuracy values for for each split
-                    if model == "SVM":
-                        for c in C_list:
-                            clf = LinearSVC(C=c)
-                            clf.fit(X_train, y_train)
-                            k_acc.append(clf.score(X_val, y_val))
-                            print("tried c={}".format(c))
-                    elif model == "KNN":
-                        for n_neigh in neigh:
-                            clf = KNN(n_neighbors=n_neigh)
-                            clf.fit(X_train, y_train)
-                            k_acc.append(clf.score(X_val, y_val))
-                            print("tried n_neigh={}".format(n_neigh))
-                    elif model == "MLP":
-                        train_set = MyDataset(X_train, y_train)
-                        val_set = MyDataset(X_val, y_val)
-                        mlp = MLP()
-                        train_dl = DataLoader(train_set, batch_size=batch_size, shuffle=False)
-                        val_dl = DataLoader(val_set, batch_size=batch_size, shuffle=False)
-                        # Training
-                        criterion = nn.BCEWithLogitsLoss() # binary cross entropy loss
-                        # optimizer = torch.optim.SGD(mlp.parameters(), lr=0.001, momentum=0.9)
-                        optimizer = torch.optim.Adam(mlp.parameters(), lr=0.001)
-                        mlp.train()
-                        for epoch in range(epochs):
-                            correct = 0
-                            for i, (inputs, targets) in enumerate(train_dl):
-                                optimizer.zero_grad()
+                    # print("training data before normalization: {}".format(X_train_[:10]))
+                    scaler = StandardScaler()
+                    X_train_ = scaler.fit_transform(all_data)
+                    y_train_ = pred_type
+                    # X_train_ = scaler.fit_transform(X_train_)
+                    # X_test = scaler.fit_transform(X_test)
+                    # print("training data after normalization: {}".format(X_train_[:10]))
+                    # X_train, X_val, y_train, y_val = train_test_split(X_train_, y_train_, test_size=0.25, random_state=42)
+                    k = kfolds
+                    kf = KFold(n_splits=k, shuffle=True, random_state=42) # , shuffle=True, random_state=42
+                    C_list = [0.1, 0.5, 1, 2, 5, 10, 20, 50]
+                    neigh = [5, 10, 20, 50]
+                    # C_list = [0.1, 1, 5, 20]
+                    val_acc = []  # validation accuracies
+                    val_acc_avg = []  # mean validation accuracy for each C value
+                    acc_sum = 0
+                    fold = 0
+                    for train_index, val_index in kf.split(X_train_):
+                        fold += 1
+                        X_train, X_val = X_train_[train_index], X_train_[val_index]
+                        y_train, y_val = y_train_[train_index], y_train_[val_index]
+                        if show_distribution:
+                            train_pos = np.count_nonzero(y_train == 1)
+                            val_pos = np.count_nonzero(y_val == 1)
+                            pos_portion_train = train_pos/len(y_train)
+                            pos_portion_val = val_pos/len(y_val)
+                            print("proportion of positives in training: {}".format(pos_portion_train))
+                            print("proportion of positives in validation: {}".format(pos_portion_val))
+                        k_acc = []  # accuracy values for for each split
+                        if model == "SVM":
+                            for c in C_list:
+                                clf = LinearSVC(C=c)
+                                clf.fit(X_train, y_train)
+                                k_acc.append(clf.score(X_val, y_val))
+                                print("tried c={}".format(c))
+                        elif model == "KNN":
+                            for n_neigh in neigh:
+                                clf = KNN(n_neighbors=n_neigh)
+                                clf.fit(X_train, y_train)
+                                k_acc.append(clf.score(X_val, y_val))
+                                print("tried n_neigh={}".format(n_neigh))
+                        elif model == "MLP":
+                            train_set = MyDataset(X_train, y_train)
+                            val_set = MyDataset(X_val, y_val)
+                            mlp = MLP()
+                            train_dl = DataLoader(train_set, batch_size=batch_size, shuffle=False)
+                            val_dl = DataLoader(val_set, batch_size=batch_size, shuffle=False)
+                            # Training
+                            criterion = nn.BCEWithLogitsLoss() # binary cross entropy loss
+                            # optimizer = torch.optim.SGD(mlp.parameters(), lr=0.001, momentum=0.9)
+                            optimizer = torch.optim.Adam(mlp.parameters(), lr=0.001)
+                            mlp.train()
+                            for epoch in range(epochs):
+                                correct = 0
+                                for i, (inputs, targets) in enumerate(train_dl):
+                                    optimizer.zero_grad()
+                                    inputs = inputs.float()
+                                    targets = targets.float()
+                                    y_hat = mlp(inputs)
+                                    # print("inputs.shape: {}".format(inputs.shape))
+                                    # print("y_hat.shape: {}".format(y_hat.shape))
+                                    # print("targets.shape: {}".format(targets.shape))
+                                    loss = criterion(y_hat, targets)
+                                    loss.backward()
+                                    optimizer.step()
+                                    y_pred_tag = torch.round(torch.sigmoid(y_hat))
+                                    correct += (y_pred_tag == targets).sum().float()
+                                train_acc = correct / len(train_set)
+                                print("epoch {} training accuracy: {}".format(epoch, train_acc))
+                                # print("correct predictions: {}".format(correct))
+                            # Validation
+                            mlp.eval()
+                            predictions, actuals = list(), list()
+                            for i, (inputs, targets) in enumerate(val_dl):
+                                # evaluate the model on the test set
                                 inputs = inputs.float()
                                 targets = targets.float()
-                                y_hat = mlp(inputs)
-                                # print("inputs.shape: {}".format(inputs.shape))
-                                # print("y_hat.shape: {}".format(y_hat.shape))
-                                # print("targets.shape: {}".format(targets.shape))
-                                loss = criterion(y_hat, targets)
-                                loss.backward()
-                                optimizer.step()
-                                y_pred_tag = torch.round(torch.sigmoid(y_hat))
-                                correct += (y_pred_tag == targets).sum().float()
-                            train_acc = correct / len(train_set)
-                            print("epoch {} training accuracy: {}".format(epoch, train_acc))
-                            # print("correct predictions: {}".format(correct))
-                        # Validation
-                        mlp.eval()
-                        predictions, actuals = list(), list()
-                        for i, (inputs, targets) in enumerate(val_dl):
-                            # evaluate the model on the test set
-                            inputs = inputs.float()
-                            targets = targets.float()
-                            yhat = mlp(inputs)
-                            ysig = torch.sigmoid(yhat)
-                            # if i == 0:
-                            #     print("ysig: {}".format(ysig))
-                            yhat = torch.round(ysig)
-                            # retrieve numpy array
-                            yhat = yhat.detach().numpy()
-                            actual = targets.numpy()
-                            # # convert to class labels
-                            # yhat = np.argmax(yhat, axis=1)
-                            # reshape for stacking
-                            actual = actual.reshape((len(actual), 1))
-                            yhat = yhat.reshape((len(yhat), 1))
-                            # store
-                            predictions.append(yhat)
-                            actuals.append(actual)
-                        predictions, actuals = np.vstack(predictions), np.vstack(actuals)
-                        # print("sample predictions: {}".format(predictions[:10]))
-                        # print("sample ground_truths: {}".format(actuals[:10]))
-                        pos_pred_cnt = np.count_nonzero(predictions == 1)
-                        val_pos_pred = pos_pred_cnt/len(predictions)
-                        print("proportion of positive predictions in validation: {}".format(val_pos_pred))
-                        # calculate accuracy
-                        acc = accuracy_score(actuals, predictions)
-                        acc_sum += acc
-                        print("the accuracy for this MLP is: {}".format(acc))
-                    val_acc.append(k_acc)
-                    if acc_sum != 0:
-                        avg_acc = acc_sum/fold
-                        print("average accuracy for MLP is: {}".format(avg_acc))
-                    print("finished one set of validation")
-                '''
-                Note on accuracy_score:
-                This is #(correct predictions)/#(all predictions)
-                Source: https://github.com/scikit-learn/scikit-learn/blob/42aff4e2e/sklearn/metrics/_classification.py#L140
-                See the `accuracy_score` function
-                '''
-                if model != "MLP":
-                    for j in range(len(val_acc[0])):
-                        # sum_acc = sum(val_acc[:][j])
-                        sum_acc = 0
-                        for i in range(len(val_acc)):
-                            sum_acc += val_acc[i][j]
-                        avg_acc = sum_acc / k
-                        val_acc_avg.append(avg_acc)
-                    print(val_acc_avg)
+                                yhat = mlp(inputs)
+                                ysig = torch.sigmoid(yhat)
+                                # if i == 0:
+                                #     print("ysig: {}".format(ysig))
+                                yhat = torch.round(ysig)
+                                # retrieve numpy array
+                                yhat = yhat.detach().numpy()
+                                actual = targets.numpy()
+                                # # convert to class labels
+                                # yhat = np.argmax(yhat, axis=1)
+                                # reshape for stacking
+                                actual = actual.reshape((len(actual), 1))
+                                yhat = yhat.reshape((len(yhat), 1))
+                                # store
+                                predictions.append(yhat)
+                                actuals.append(actual)
+                            predictions, actuals = np.vstack(predictions), np.vstack(actuals)
+                            # print("sample predictions: {}".format(predictions[:10]))
+                            # print("sample ground_truths: {}".format(actuals[:10]))
+                            pos_pred_cnt = np.count_nonzero(predictions == 1)
+                            val_pos_pred = pos_pred_cnt/len(predictions)
+                            print("proportion of positive predictions in validation: {}".format(val_pos_pred))
+                            # calculate accuracy
+                            acc = accuracy_score(actuals, predictions)
+                            acc_sum += acc
+                            all_avg_acc += acc
+                            print("the accuracy for this MLP is: {}".format(acc))
+                        val_acc.append(k_acc)
+                        if acc_sum != 0:
+                            avg_acc = acc_sum/fold
+                            print("average accuracy for MLP is: {}".format(avg_acc))
+                        print("finished one set of validation")
+                    '''
+                    Note on accuracy_score:
+                    This is #(correct predictions)/#(all predictions)
+                    Source: https://github.com/scikit-learn/scikit-learn/blob/42aff4e2e/sklearn/metrics/_classification.py#L140
+                    See the `accuracy_score` function
+                    '''
+                    if model != "MLP":
+                        for j in range(len(val_acc[0])):
+                            # sum_acc = sum(val_acc[:][j])
+                            sum_acc = 0
+                            for i in range(len(val_acc)):
+                                sum_acc += val_acc[i][j]
+                            avg_acc = sum_acc / k
+                            val_acc_avg.append(avg_acc)
+                        print(val_acc_avg)
+                all_avg_acc = all_avg_acc / (kfolds * trials)
+                print('\n\navg accuracy through {} trials: {}'.format(trials, all_avg_acc))
     finally:
         print("--- {} seconds ---".format(time.time() - start_time))
 
