@@ -137,7 +137,7 @@ class MLP(nn.Module):
 
         # Inputs to hidden layer linear transformation
         self.hidden1 = nn.Linear(4, 3)
-        self.bm1 = nn.BatchNorm1d(3)
+        #self.bm1 = nn.BatchNorm1d(3)
         self.act1 = nn.ReLU()
         #self.hidden2 = nn.Linear(3, 3)
         #self.bm2 = nn.BatchNorm1d(3)
@@ -149,7 +149,7 @@ class MLP(nn.Module):
     def forward(self, x):
         # Pass the input tensor through each of our operations
         x = self.hidden1(x)
-        x = self.bm1(x)
+        #x = self.bm1(x)
         x = self.act1(x)
         #x = self.hidden2(x)
         #x = self.bm2(x)
@@ -165,6 +165,8 @@ def main():
     :return:
     """
     model = "MLP"
+    batch_size = 32
+    epochs = 2
     dataset_name = "KITTI"
     show_distribution = True
     cls_name_list = []
@@ -229,6 +231,7 @@ def main():
                     if name == fp_name:
                         found = True
                         fp_data = pd.read_csv(os.path.join(root, name))
+                        np.random.shuffle(fp_data.values)
                         fp_len = len(fp_data['pred_score'])
                         fp_data = fp_data.drop(labels=range(tp_len,fp_len), axis=0)
                         pred_type_list.append(np.zeros(tp_len))
@@ -244,8 +247,13 @@ def main():
                 #                            torch.nn.Softmax(dim=1))
                 frames = [tp_data, fp_data]
                 data_df = pd.concat(frames)
-                # new_df = data_df[['pred_score']]
-                # new_df = data_df[['pred_score', 'pts']]
+                #new_df = data_df[['pred_score']]
+                #new_df = data_df[['pred_score', 'dist']]
+                #new_df = data_df[['pred_score', 'pts']]
+                # new_df = data_df[['pred_score', 'xc_neg_cnt']]
+                # new_df = data_df[['pred_score', 'xc_pos_cnt']]
+                # new_df = data_df[['pred_score', 'xc_neg_sum']]
+                # new_df = data_df[['pred_score', 'xc_pos_sum']]
                 # new_df = data_df[['pred_score', 'pts', 'dist']]
                 # new_df = data_df[['pred_score', 'xc_neg_cnt']]
                 new_df = data_df[['pred_score', 'xc_neg_cnt', 'pts', 'dist']]
@@ -260,19 +268,19 @@ def main():
                 print("number of entries in all_data: {}".format(len(new_df['pred_score'])))
                 print("number of entries in pred_type: {}".format(len(pred_type)))
                 print("shape of all_data: {}".format(all_data.shape))
-                X_train_, X_test, y_train_, y_test = train_test_split(
-                    all_data, pred_type, test_size=0.2, shuffle=True, random_state=42)
+                #X_train_, X_test, y_train_, y_test = train_test_split(
+                #    all_data, pred_type, test_size=0.2, shuffle=True, random_state=42)
 
                 # print("training data before normalization: {}".format(X_train_[:10]))
                 scaler = StandardScaler()
-                #X_train_ = scaler.fit_transform(all_data)
-                #y_train_ = pred_type
-                X_train_ = scaler.fit_transform(X_train_)
+                X_train_ = scaler.fit_transform(all_data)
+                y_train_ = pred_type
+                # X_train_ = scaler.fit_transform(X_train_)
                 # X_test = scaler.fit_transform(X_test)
                 # print("training data after normalization: {}".format(X_train_[:10]))
                 # X_train, X_val, y_train, y_val = train_test_split(X_train_, y_train_, test_size=0.25, random_state=42)
                 k = 5
-                kf = KFold(n_splits=k) # , shuffle=True, random_state=42
+                kf = KFold(n_splits=k, shuffle=True, random_state=42) # , shuffle=True, random_state=42
                 C_list = [0.1, 0.5, 1, 2, 5, 10, 20, 50]
                 neigh = [5, 10, 20, 50]
                 # C_list = [0.1, 1, 5, 20]
@@ -308,14 +316,14 @@ def main():
                         train_set = MyDataset(X_train, y_train)
                         val_set = MyDataset(X_val, y_val)
                         mlp = MLP()
-                        train_dl = DataLoader(train_set, batch_size=32, shuffle=False)
-                        val_dl = DataLoader(val_set, batch_size=32, shuffle=False)
+                        train_dl = DataLoader(train_set, batch_size=batch_size, shuffle=False)
+                        val_dl = DataLoader(val_set, batch_size=batch_size, shuffle=False)
                         # Training
                         criterion = nn.BCEWithLogitsLoss() # binary cross entropy loss
                         # optimizer = torch.optim.SGD(mlp.parameters(), lr=0.001, momentum=0.9)
                         optimizer = torch.optim.Adam(mlp.parameters(), lr=0.001)
                         mlp.train()
-                        for epoch in range(4):
+                        for epoch in range(epochs):
                             correct = 0
                             for i, (inputs, targets) in enumerate(train_dl):
                                 optimizer.zero_grad()
