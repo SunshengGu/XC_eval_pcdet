@@ -136,10 +136,12 @@ class MLP(nn.Module):
         super().__init__()
 
         # Inputs to hidden layer linear transformation
-        self.hidden1 = nn.Linear(1, 3)
+        self.hidden1 = nn.Linear(4, 3)
+        self.bm1 = nn.BatchNorm1d(3)
         self.act1 = nn.ReLU()
-        self.hidden2 = nn.Linear(3, 3)
-        self.act2 = nn.ReLU()
+        #self.hidden2 = nn.Linear(3, 3)
+        #self.bm2 = nn.BatchNorm1d(3)
+        #self.act2 = nn.ReLU()
         # Output layer, 10 units - one for each digit
         self.output = nn.Linear(3, 1)
         # self.sig = nn.Sigmoid()
@@ -147,9 +149,11 @@ class MLP(nn.Module):
     def forward(self, x):
         # Pass the input tensor through each of our operations
         x = self.hidden1(x)
+        x = self.bm1(x)
         x = self.act1(x)
-        x = self.hidden2(x)
-        x = self.act2(x)
+        #x = self.hidden2(x)
+        #x = self.bm2(x)
+        #x = self.act2(x)
         x = self.output(x)
         # x = self.sig(x)
         return x
@@ -208,6 +212,7 @@ def main():
             fp_name = "fp_xq_thresh{}.csv".format(thresh)
             tp_data = None
             fp_data = None
+            tp_len = 0
             for root, dirs, files in os.walk(XQ_path):
                 # print('processing files: ')
                 for name in files:
@@ -215,11 +220,18 @@ def main():
                     if name == tp_name:
                         found = True
                         tp_data = pd.read_csv(os.path.join(root, name))
-                        pred_type_list.append(np.ones(len(tp_data['class_score'])))
-                    elif name == fp_name:
+                        tp_len = len(tp_data['pred_score'])
+                        pred_type_list.append(np.ones(len(tp_data['pred_score'])))
+            for root, dirs, files in os.walk(XQ_path):
+                # print('processing files: ')
+                for name in files:
+                    # print(os.path.join(root, name))
+                    if name == fp_name:
                         found = True
                         fp_data = pd.read_csv(os.path.join(root, name))
-                        pred_type_list.append(np.zeros(len(fp_data['class_score'])))
+                        fp_len = len(fp_data['pred_score'])
+                        fp_data = fp_data.drop(labels=range(tp_len,fp_len), axis=0)
+                        pred_type_list.append(np.zeros(tp_len))
             if found:
                 # input_size = 2
                 # hidden_sizes = [4,3]
@@ -232,11 +244,11 @@ def main():
                 #                            torch.nn.Softmax(dim=1))
                 frames = [tp_data, fp_data]
                 data_df = pd.concat(frames)
-                new_df = data_df[['pred_score']]
+                # new_df = data_df[['pred_score']]
                 # new_df = data_df[['pred_score', 'pts']]
                 # new_df = data_df[['pred_score', 'pts', 'dist']]
                 # new_df = data_df[['pred_score', 'xc_neg_cnt']]
-                # new_df = data_df[['pred_score', 'xc_neg_cnt', 'pts', 'dist']]
+                new_df = data_df[['pred_score', 'xc_neg_cnt', 'pts', 'dist']]
 
                 # new_df = data_df[['XQ_cnt^+', 'class_score']]
                 # new_df = data_df[['XQ_cnt^+', 'class_score', 'pts_in_box']]
@@ -245,21 +257,22 @@ def main():
 
                 all_data = new_df.values
                 pred_type = np.concatenate(pred_type_list)
-                print("number of entries in all_data: {}".format(len(new_df['class_score'])))
+                print("number of entries in all_data: {}".format(len(new_df['pred_score'])))
                 print("number of entries in pred_type: {}".format(len(pred_type)))
                 print("shape of all_data: {}".format(all_data.shape))
-                # X_train_, X_test, y_train_, y_test = train_test_split(
-                #     all_data, pred_type, test_size=0.4, shuffle=True, random_state=42)
+                X_train_, X_test, y_train_, y_test = train_test_split(
+                    all_data, pred_type, test_size=0.2, shuffle=True, random_state=42)
 
                 # print("training data before normalization: {}".format(X_train_[:10]))
                 scaler = StandardScaler()
-                X_train_ = scaler.fit_transform(all_data)
-                y_train_ = pred_type
+                #X_train_ = scaler.fit_transform(all_data)
+                #y_train_ = pred_type
+                X_train_ = scaler.fit_transform(X_train_)
                 # X_test = scaler.fit_transform(X_test)
                 # print("training data after normalization: {}".format(X_train_[:10]))
                 # X_train, X_val, y_train, y_val = train_test_split(X_train_, y_train_, test_size=0.25, random_state=42)
                 k = 5
-                kf = KFold(n_splits=k)
+                kf = KFold(n_splits=k) # , shuffle=True, random_state=42
                 C_list = [0.1, 0.5, 1, 2, 5, 10, 20, 50]
                 neigh = [5, 10, 20, 50]
                 # C_list = [0.1, 1, 5, 20]
@@ -302,7 +315,7 @@ def main():
                         # optimizer = torch.optim.SGD(mlp.parameters(), lr=0.001, momentum=0.9)
                         optimizer = torch.optim.Adam(mlp.parameters(), lr=0.001)
                         mlp.train()
-                        for epoch in range(10):
+                        for epoch in range(4):
                             correct = 0
                             for i, (inputs, targets) in enumerate(train_dl):
                                 optimizer.zero_grad()
