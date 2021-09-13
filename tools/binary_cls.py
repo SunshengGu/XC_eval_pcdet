@@ -136,7 +136,7 @@ class MLP(nn.Module):
         super().__init__()
 
         # Inputs to hidden layer linear transformation
-        self.hidden1 = nn.Linear(4, 3)
+        self.hidden1 = nn.Linear(3, 3)
         #self.bm1 = nn.BatchNorm1d(3)
         self.act1 = nn.ReLU()
         #self.hidden2 = nn.Linear(3, 3)
@@ -167,8 +167,9 @@ def main():
     model = "MLP"
     batch_size = 128
     epochs = 6
-    trials = 10
+    trials = 20
     kfolds = 5
+    interested_class = 1 # 0-car, 1-pedestrian, 2-cyclist
     dataset_name = "KITTI"
     show_distribution = True
     cls_name_list = []
@@ -225,9 +226,9 @@ def main():
                         found = True
                         tp_data = pd.read_csv(os.path.join(root, name))
                         print('tp_len before: {}'.format(len(tp_data['pred_score'])))
-                        tp_data = tp_data.loc[tp_data['pred_label'] == 1]
+                        tp_data = tp_data.loc[tp_data['pred_label'] == interested_class]
                         tp_len = len(tp_data['pred_score'])
-                        print('tp_len after selecting pedestrian: {}'.format(tp_len))
+                        print('tp_len after selecting the class: {}'.format(tp_len))
                         pred_type_list.append(np.ones(len(tp_data['pred_score'])))
             for root, dirs, files in os.walk(XQ_path):
                 # print('processing files: ')
@@ -238,10 +239,10 @@ def main():
                         fp_data = pd.read_csv(os.path.join(root, name))
                         print('fp_len before: {}'.format(len(fp_data['pred_score'])))
                         np.random.shuffle(fp_data.values)
-                        fp_data = fp_data.loc[fp_data['pred_label'] == 1]
+                        fp_data = fp_data.loc[fp_data['pred_label'] == interested_class]
                         fp_data = fp_data.reset_index(drop=True)
                         fp_len = len(fp_data['pred_score'])
-                        print('fp_len after selecting pedestrian: {}'.format(fp_len))
+                        print('fp_len after selecting the class: {}'.format(fp_len))
                         fp_data = fp_data.drop(labels=range(tp_len,fp_len), axis=0)
                         print('fp_len after matching tp_len: {}'.format(len(fp_data['pred_score'])))
                         pred_type_list.append(np.zeros(tp_len))
@@ -268,7 +269,9 @@ def main():
                     # new_df = data_df[['pred_score', 'xc_pos_sum']]
                     # new_df = data_df[['pred_score', 'pts', 'dist']]
                     # new_df = data_df[['pred_score', 'xc_neg_cnt']]
-                    new_df = data_df[['pred_score', 'xc_neg_cnt', 'pts', 'dist']]
+                    #new_df = data_df[['pred_score', 'xc_neg_cnt', 'pts', 'dist']]
+                    new_df = data_df[['pred_score', 'xc_neg_cnt', 'xc_pos_cnt']]
+                    #new_df = data_df[['pred_score', 'xc_neg_cnt', 'xc_neg_sum', 'xc_pos_sum', 'xc_pos_cnt']]
                     #new_df = data_df[['pred_score', 'xc_neg_cnt', 'xc_neg_sum', 'xc_pos_sum','xc_pos_cnt', 'pts', 'dist']]
 
                     # new_df = data_df[['XQ_cnt^+', 'class_score']]
