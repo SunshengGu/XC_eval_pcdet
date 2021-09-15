@@ -136,9 +136,10 @@ class MLP(nn.Module):
         super().__init__()
 
         # Inputs to hidden layer linear transformation
-        self.hidden1 = nn.Linear(4, 3)
+        self.hidden1 = nn.Linear(2, 3)
         #self.bm1 = nn.BatchNorm1d(3)
         self.act1 = nn.ReLU()
+        self.drop = nn.Dropout()
         #self.hidden2 = nn.Linear(3, 3)
         #self.bm2 = nn.BatchNorm1d(3)
         #self.act2 = nn.ReLU()
@@ -148,6 +149,7 @@ class MLP(nn.Module):
 
     def forward(self, x):
         # Pass the input tensor through each of our operations
+        #x = self.drop(x)
         x = self.hidden1(x)
         #x = self.bm1(x)
         x = self.act1(x)
@@ -165,11 +167,12 @@ def main():
     :return:
     """
     model = "MLP"
-    batch_size = 128
-    epochs = 6
-    trials = 20
+    single_score = False
+    batch_size = 8
+    epochs = 20
+    trials = 5
     kfolds = 5
-    interested_class = 2 # 0-car, 1-pedestrian, 2-cyclist
+    interested_class = 1 # 0-car, 1-pedestrian, 2-cyclist
     dataset_name = "KITTI"
     show_distribution = True
     cls_name_list = []
@@ -237,21 +240,21 @@ def main():
                     if name == fp_name:
                         found = True
                         fp_data = pd.read_csv(os.path.join(root, name))
-                        print('fp_data pre-shuffle: {}'.format(fp_data.head()))
+                        #print('fp_data pre-shuffle: {}'.format(fp_data.head()))
                         print('fp_len before: {}'.format(len(fp_data['pred_score'])))
                         fp_data = fp_data.iloc[np.random.permutation(len(fp_data))]
                         fp_data = fp_data.reset_index(drop=True)
-                        print('fp_data post-shuffle: {}'.format(fp_data.head()))
+                        #print('fp_data post-shuffle: {}'.format(fp_data.head()))
                         fp_data = fp_data.loc[fp_data['pred_label'] == interested_class]
                         fp_data = fp_data.reset_index(drop=True)
-                        print('fp_data after class selection: {}'.format(fp_data.head()))
+                        #print('fp_data after class selection: {}'.format(fp_data.head()))
                         fp_len = len(fp_data['pred_score'])
                         print('fp_len after selecting the class: {}'.format(fp_len))
                         fp_data = fp_data.drop(labels=range(tp_len,fp_len), axis=0)
                         print('fp_len after matching tp_len: {}'.format(len(fp_data['pred_score'])))
                         pred_type_list.append(np.zeros(tp_len))
             if found:
-                all_avg_acc = 0.0
+                all_avg_acc, all_avg_auroc, all_avg_aupr, all_avg_aupr_op = 0.0, 0.0, 0.0, 0.0
                 for t in range(trials):
                     # input_size = 2
                     # hidden_sizes = [4,3]
@@ -273,11 +276,11 @@ def main():
                     # new_df = data_df[['pred_score', 'xc_neg_sum']]
                     # new_df = data_df[['pred_score', 'xc_pos_sum']]
                     # new_df = data_df[['pred_score', 'pts', 'dist']]
-                    # new_df = data_df[['pred_score', 'xc_neg_cnt']]
+                    new_df = data_df[['pred_score', 'xc_neg_cnt']]
                     #new_df = data_df[['pred_score', 'xc_neg_cnt', 'pts', 'dist']]
                     #new_df = data_df[['pred_score', 'xc_neg_cnt', 'xc_pos_cnt']]
                     #new_df = data_df[['xc_neg_cnt', 'xc_pos_cnt']]
-                    new_df = data_df[['xc_neg_cnt', 'xc_pos_cnt', 'xc_neg_sum', 'xc_pos_sum']]
+                    #new_df = data_df[['xc_neg_cnt', 'xc_pos_cnt', 'xc_neg_sum', 'xc_pos_sum']]
                     #new_df = data_df[['pred_score', 'xc_neg_cnt', 'xc_neg_sum', 'xc_pos_sum', 'xc_pos_cnt']]
                     #new_df = data_df[['pred_score', 'xc_neg_cnt', 'xc_neg_sum', 'xc_pos_sum','xc_pos_cnt', 'pts', 'dist']]
 
@@ -290,7 +293,7 @@ def main():
                     #new_df.reset_index(drop=True)
                     all_data = new_df.values
                     pred_type = np.concatenate(pred_type_list)
-                    print("number of entries in all_data: {}".format(len(new_df['xc_neg_cnt'])))
+                    print("number of entries in all_data: {}".format(len(new_df)))
                     print("number of entries in pred_type: {}".format(len(pred_type)))
                     print("shape of all_data: {}".format(all_data.shape))
                     X_train_, X_test, y_train_, y_test = train_test_split(
@@ -343,31 +346,32 @@ def main():
                             train_set = MyDataset(X_train, y_train)
                             val_set = MyDataset(X_val, y_val)
                             mlp = MLP()
-                            train_dl = DataLoader(train_set, batch_size=batch_size, shuffle=False)
+                            train_dl = DataLoader(train_set, batch_size=batch_size, shuffle=True)
                             val_dl = DataLoader(val_set, batch_size=batch_size, shuffle=False)
                             # Training
                             criterion = nn.BCEWithLogitsLoss() # binary cross entropy loss
                             # optimizer = torch.optim.SGD(mlp.parameters(), lr=0.001, momentum=0.9)
                             optimizer = torch.optim.Adam(mlp.parameters(), lr=0.001)
                             mlp.train()
-                            for epoch in range(epochs):
-                                correct = 0
-                                for i, (inputs, targets) in enumerate(train_dl):
-                                    optimizer.zero_grad()
-                                    inputs = inputs.float()
-                                    targets = targets.float()
-                                    y_hat = mlp(inputs)
-                                    # print("inputs.shape: {}".format(inputs.shape))
-                                    # print("y_hat.shape: {}".format(y_hat.shape))
-                                    # print("targets.shape: {}".format(targets.shape))
-                                    loss = criterion(y_hat, targets)
-                                    loss.backward()
-                                    optimizer.step()
-                                    y_pred_tag = torch.round(torch.sigmoid(y_hat))
-                                    correct += (y_pred_tag == targets).sum().float()
-                                train_acc = correct / len(train_set)
-                                print("epoch {} training accuracy: {}".format(epoch, train_acc))
-                                # print("correct predictions: {}".format(correct))
+                            if not single_score:
+                                for epoch in range(epochs):
+                                    correct = 0
+                                    for i, (inputs, targets) in enumerate(train_dl):
+                                        optimizer.zero_grad()
+                                        inputs = inputs.float()
+                                        targets = targets.float()
+                                        y_hat = mlp(inputs)
+                                        # print("inputs.shape: {}".format(inputs.shape))
+                                        # print("y_hat.shape: {}".format(y_hat.shape))
+                                        # print("targets.shape: {}".format(targets.shape))
+                                        loss = criterion(y_hat, targets)
+                                        loss.backward()
+                                        optimizer.step()
+                                        y_pred_tag = torch.round(torch.sigmoid(y_hat))
+                                        correct += (y_pred_tag == targets).sum().float()
+                                    train_acc = correct / len(train_set)
+                                    print("epoch {} training accuracy: {}".format(epoch, train_acc))
+                                    # print("correct predictions: {}".format(correct))
                             # Validation
                             mlp.eval()
                             predictions, actuals, scores = list(), list(), list()
@@ -375,26 +379,35 @@ def main():
                                 # evaluate the model on the test set
                                 inputs = inputs.float()
                                 targets = targets.float()
-                                yhat = mlp(inputs)
-                                ysig = torch.sigmoid(yhat)
-                                yhat = torch.round(ysig)
-                                # retrieve numpy array
-                                yhat = yhat.detach().numpy()
-                                ysig_val = ysig.detach().numpy()
-                                actual = targets.numpy()
+                                if not single_score:
+                                    yhat = mlp(inputs)
+                                    ysig = torch.sigmoid(yhat)
+                                    yhat = torch.round(ysig)
+                                    # retrieve numpy array
+                                    yhat = yhat.detach().numpy()
+                                    ysig_val = ysig.detach().numpy()
+                                    actual = targets.numpy()
                                 
-                                # # convert to class labels
-                                # yhat = np.argmax(yhat, axis=1)
-                                # reshape for stacking
-                                score = ysig_val.reshape((len(ysig_val),1))
-                                actual = actual.reshape((len(actual), 1))
-                                yhat = yhat.reshape((len(yhat), 1))
-                                # store
-                                predictions.append(yhat)
-                                actuals.append(actual)
-                                scores.append(score)
-                                #if i == 0:
-                                    #print("actual: {}".format(actual))
+                                    # # convert to class labels
+                                    # yhat = np.argmax(yhat, axis=1)
+                                    # reshape for stacking
+                                    score = ysig_val.reshape((len(ysig_val),1))
+                                    actual = actual.reshape((len(actual), 1))
+                                    yhat = yhat.reshape((len(yhat), 1))
+                                    # store
+                                    predictions.append(yhat)
+                                    actuals.append(actual)
+                                    scores.append(score)
+                                    #if i == 0:
+                                        #print("actual: {}".format(actual))
+                                else:
+                                    score = inputs.detach().numpy()
+                                    actual = targets.numpy()
+                                    score = score.reshape((len(score), 1))
+                                    actual = actual.reshape((len(actual), 1))
+                                    predictions.append(actual)
+                                    actuals.append(actual)
+                                    scores.append(score)
                             predictions, actuals, scores = np.vstack(predictions), np.vstack(actuals), np.vstack(scores)
                             # print("sample predictions: {}".format(predictions[:10]))
                             # print("sample ground_truths: {}".format(actuals[:10]))
@@ -410,6 +423,9 @@ def main():
                             scores = [-s for s in scores]
                             actuals = [1-a for a in actuals]
                             aupr_op = aupr(scores, actuals)
+                            all_avg_auroc += auroc_
+                            all_avg_aupr += aupr_
+                            all_avg_aupr_op += aupr_op
                             print("the accuracy for this MLP is: {}".format(acc))
                             print("the auroc for this MLP is: {}".format(auroc_))
                             print("the aupr for this MLP is: {}".format(aupr_))
@@ -435,7 +451,13 @@ def main():
                             val_acc_avg.append(avg_acc)
                         print(val_acc_avg)
                 all_avg_acc = all_avg_acc / (kfolds * trials)
+                all_avg_auroc = all_avg_auroc / (kfolds * trials)
+                all_avg_aupr = all_avg_aupr / (kfolds * trials)
+                all_avg_aupr_op = all_avg_aupr_op / (kfolds * trials)
                 print('\n\navg accuracy through {} trials: {}'.format(trials, all_avg_acc))
+                print('\navg auroc through {} trials: {}'.format(trials, all_avg_auroc))
+                print('\navg aupr through {} trials: {}'.format(trials, all_avg_aupr))
+                print('\navg aupr_op through {} trials: {}'.format(trials, all_avg_aupr_op))
     finally:
         print("--- {} seconds ---".format(time.time() - start_time))
 
