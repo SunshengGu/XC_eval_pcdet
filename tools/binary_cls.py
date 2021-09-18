@@ -140,9 +140,11 @@ class MLP(nn.Module):
         #self.bm1 = nn.BatchNorm1d(3)
         self.act1 = nn.ReLU()
         self.drop = nn.Dropout()
-        #self.hidden2 = nn.Linear(3, 3)
+        #self.hidden2 = nn.Linear(16, 8)
         #self.bm2 = nn.BatchNorm1d(3)
         #self.act2 = nn.ReLU()
+        #self.hidden3 = nn.Linear(8, 3)
+        #self.act3 = nn.ReLU()
         # Output layer, 10 units - one for each digit
         self.output = nn.Linear(3, 1)
         # self.sig = nn.Sigmoid()
@@ -151,11 +153,15 @@ class MLP(nn.Module):
         # Pass the input tensor through each of our operations
         #x = self.drop(x)
         x = self.hidden1(x)
+        #x = self.drop(x)
         #x = self.bm1(x)
         x = self.act1(x)
         #x = self.hidden2(x)
+        #x = self.drop(x)
         #x = self.bm2(x)
         #x = self.act2(x)
+        #x = self.hidden3(x)
+        #x = self.act3(x)
         x = self.output(x)
         # x = self.sig(x)
         return x
@@ -166,13 +172,18 @@ def main():
     important variables:
     :return:
     """
+    augmentation = 4
     model = "MLP"
-    single_score = False
-    batch_size = 8
-    epochs = 20
+    learning_rate = 0.001
+    n_features = 1
+    single_score = True
+    if n_features > 1:
+        single_score = False
+    batch_size = 16
+    epochs = 12
     trials = 5
     kfolds = 5
-    interested_class = 1 # 0-car, 1-pedestrian, 2-cyclist
+    interested_class = 0 # 0-car, 1-pedestrian, 2-cyclist
     dataset_name = "KITTI"
     show_distribution = True
     cls_name_list = []
@@ -214,7 +225,6 @@ def main():
         """
         XQ_thresh_list = ['0.1']
         for thresh in XQ_thresh_list:
-            pred_type_list = []
             found = False
             tp_name = "tp_xq_thresh{}.csv".format(thresh)
             fp_name = "fp_xq_thresh{}.csv".format(thresh)
@@ -230,9 +240,10 @@ def main():
                         tp_data = pd.read_csv(os.path.join(root, name))
                         print('tp_len before: {}'.format(len(tp_data['pred_score'])))
                         tp_data = tp_data.loc[tp_data['pred_label'] == interested_class]
+                        tp_data = tp_data.loc[tp_data['pts'] >= 100]
                         tp_len = len(tp_data['pred_score'])
                         print('tp_len after selecting the class: {}'.format(tp_len))
-                        pred_type_list.append(np.ones(len(tp_data['pred_score'])))
+                        #pred_type_list.append(np.ones(len(tp_data)))
             for root, dirs, files in os.walk(XQ_path):
                 # print('processing files: ')
                 for name in files:
@@ -242,17 +253,18 @@ def main():
                         fp_data = pd.read_csv(os.path.join(root, name))
                         #print('fp_data pre-shuffle: {}'.format(fp_data.head()))
                         print('fp_len before: {}'.format(len(fp_data['pred_score'])))
-                        fp_data = fp_data.iloc[np.random.permutation(len(fp_data))]
-                        fp_data = fp_data.reset_index(drop=True)
+                        #fp_data = fp_data.iloc[np.random.permutation(len(fp_data))]
+                        #fp_data = fp_data.reset_index(drop=True)
                         #print('fp_data post-shuffle: {}'.format(fp_data.head()))
                         fp_data = fp_data.loc[fp_data['pred_label'] == interested_class]
+                        fp_data = fp_data.loc[fp_data['pts'] >= 100]
                         fp_data = fp_data.reset_index(drop=True)
                         #print('fp_data after class selection: {}'.format(fp_data.head()))
                         fp_len = len(fp_data['pred_score'])
                         print('fp_len after selecting the class: {}'.format(fp_len))
-                        fp_data = fp_data.drop(labels=range(tp_len,fp_len), axis=0)
-                        print('fp_len after matching tp_len: {}'.format(len(fp_data['pred_score'])))
-                        pred_type_list.append(np.zeros(tp_len))
+                        #fp_data = fp_data.drop(labels=range(tp_len,fp_len), axis=0)
+                        #print('fp_len after matching tp_len: {}'.format(len(fp_data['pred_score'])))
+                        #pred_type_list.append(np.zeros(fp_len))
             if found:
                 all_avg_acc, all_avg_auroc, all_avg_aupr, all_avg_aupr_op = 0.0, 0.0, 0.0, 0.0
                 for t in range(trials):
@@ -265,9 +277,15 @@ def main():
                     #                            torch.nn.ReLU(),
                     #                            torch.nn.Linear(hidden_sizes[1], output_size),
                     #                            torch.nn.Softmax(dim=1))
-                    frames = [tp_data, fp_data]
+                    frames = []
+                    pred_type_list = []
+                    for i in range(augmentation):
+                        frames.append(tp_data)
+                        pred_type_list.append(np.ones(tp_len))
+                        frames.append(fp_data)
+                        pred_type_list.append(np.zeros(fp_len))
                     data_df = pd.concat(frames)
-                    #new_df = data_df[['pred_score']]
+                    new_df = data_df[['pred_score']]
                     #new_df = data_df[['xc_neg_cnt']]
                     #new_df = data_df[['pred_score', 'dist']]
                     #new_df = data_df[['pred_score', 'pts']]
@@ -276,7 +294,7 @@ def main():
                     # new_df = data_df[['pred_score', 'xc_neg_sum']]
                     # new_df = data_df[['pred_score', 'xc_pos_sum']]
                     # new_df = data_df[['pred_score', 'pts', 'dist']]
-                    new_df = data_df[['pred_score', 'xc_neg_cnt']]
+                    #new_df = data_df[['pred_score', 'xc_neg_cnt']]
                     #new_df = data_df[['pred_score', 'xc_neg_cnt', 'pts', 'dist']]
                     #new_df = data_df[['pred_score', 'xc_neg_cnt', 'xc_pos_cnt']]
                     #new_df = data_df[['xc_neg_cnt', 'xc_pos_cnt']]
@@ -351,7 +369,7 @@ def main():
                             # Training
                             criterion = nn.BCEWithLogitsLoss() # binary cross entropy loss
                             # optimizer = torch.optim.SGD(mlp.parameters(), lr=0.001, momentum=0.9)
-                            optimizer = torch.optim.Adam(mlp.parameters(), lr=0.001)
+                            optimizer = torch.optim.Adam(mlp.parameters(), lr=learning_rate)
                             mlp.train()
                             if not single_score:
                                 for epoch in range(epochs):
@@ -359,9 +377,11 @@ def main():
                                     for i, (inputs, targets) in enumerate(train_dl):
                                         optimizer.zero_grad()
                                         inputs = inputs.float()
+                                        #print("inputs.shape: {}".format(inputs.shape))
+                                        if augmentation > 1:
+                                            inputs += 0.1 * torch.sub(torch.rand(inputs.shape[0], n_features), 0.5)
                                         targets = targets.float()
                                         y_hat = mlp(inputs)
-                                        # print("inputs.shape: {}".format(inputs.shape))
                                         # print("y_hat.shape: {}".format(y_hat.shape))
                                         # print("targets.shape: {}".format(targets.shape))
                                         loss = criterion(y_hat, targets)
@@ -378,6 +398,7 @@ def main():
                             for i, (inputs, targets) in enumerate(val_dl):
                                 # evaluate the model on the test set
                                 inputs = inputs.float()
+                                #print("inputs.shape: {}".format(inputs.shape))
                                 targets = targets.float()
                                 if not single_score:
                                     yhat = mlp(inputs)
@@ -423,6 +444,10 @@ def main():
                             scores = [-s for s in scores]
                             actuals = [1-a for a in actuals]
                             aupr_op = aupr(scores, actuals)
+                            if val_pos_pred == 0.0:
+                                aupr_ = 0.0
+                            if val_pos_pred == 1.0:
+                                aupr_op = 0.0
                             all_avg_auroc += auroc_
                             all_avg_aupr += aupr_
                             all_avg_aupr_op += aupr_op
