@@ -9,6 +9,7 @@ import argparse
 import csv
 import math
 from pathlib import Path
+import scipy
 
 # XAI related imports
 import scikitplot as skplt
@@ -23,16 +24,17 @@ def parse_config():
     parser.add_argument('--XC_path', type=str, default=None, required=True,
                         help='the folder where all XC values are saved')
     parser.add_argument('--workers', type=int, default=4, help='number of workers for dataloader')
+    parser.add_argument('--pick_class', type=int, default=-1, help='the class to plot')
     args = parser.parse_args()
     return args
 
 def main():
-    old_file = False
+    old_file = True
     XC_term = "xc"
     label_term = "pred_label"
     score_term = "pred_score"
     if old_file:
-        XC_term = "XQ"
+        XC_term = "XQ_cnt^+"
         label_term = "class_label"
         score_term = "class_score"
     start_time = time.time()
@@ -44,6 +46,7 @@ def main():
     cwd = os.getcwd()
     # create directory to store results just for this run, include the method in folder name
     XC_path = args.XC_path
+    interested_cls = args.pick_class
     XC_folder = XC_path.split("XAI_results/", 1)[1]
     metric_result_path = os.path.join(cwd, 'XAI_results/{}_xc_hist_{}'.format(XC_folder, dt_string))
     metric_res_path_str = str(metric_result_path)
@@ -77,6 +80,8 @@ def main():
                     if name == tp_name:
                         found = True
                         tp_data = pd.read_csv(os.path.join(root, name))
+                        if interested_cls != -1:
+                            tp_data = tp_data.loc[tp_data[label_term] == interested_cls]
                         # print("type(tp_data[XC_term]): {}".format(type(tp_data[XC_term])))
                         XC_list.append(tp_data[XC_term])
                         score_list.append(tp_data[score_term])
@@ -91,6 +96,8 @@ def main():
                     elif name == fp_name:
                         found = True
                         fp_data = pd.read_csv(os.path.join(root, name))
+                        if interested_cls != -1:
+                            fp_data = fp_data.loc[fp_data[label_term] == interested_cls]
                         XC_list.append(fp_data[XC_term])
                         score_list.append(fp_data[score_term])
                         TP_FP_label.append(np.zeros(len(fp_data[XC_term])))
@@ -112,26 +119,28 @@ def main():
                 print("len(TP_FP_arr): {}".format(len(TP_FP_arr)))
 
                 n_bins = 50
-                fig, axs = plt.subplots(2, figsize=(10, 13))
+                fig, axs = plt.subplots(2, 1, figsize=(10, 10))
                 fig.tight_layout(pad=8.0)
                 axs[0].hist(tp_data[XC_term], bins=n_bins, alpha=0.5, range=(0.0, 1.0), label="TP")
                 axs[0].hist(fp_data[XC_term], bins=n_bins, alpha=0.5, range=(0.0, 1.0), label="FP")
-                axs[0].set_title('XC Distribution', fontsize=20)
-                axs[0].legend(loc='upper right', fontsize=20)
-                axs[0].set_xlabel('XC', fontsize=20)
-                axs[0].set_ylabel('box_count', fontsize=20)
-                axs[0].tick_params(axis='x', labelsize=16)
-                axs[0].tick_params(axis='y', labelsize=16)
-                axs[1].hist(tp_data[XC_term], bins=n_bins, density=True, cumulative=True, alpha=0.5, range=(0.0, 1.0),
+                axs[0].set_title('IG XC Distribution', fontsize=30)
+                axs[0].legend(loc='upper right', fontsize=15)
+                axs[0].set_xlabel('XC', fontsize=30)
+                axs[0].set_ylabel('box_count', fontsize=30)
+                axs[0].tick_params(axis='x', labelsize=26)
+                axs[0].tick_params(axis='y', labelsize=26, rotation=60)
+                axs[1].hist(tp_data[XC_term], bins=n_bins*2, density=True, cumulative=True, alpha=0.5, range=(0.0, 1.0),
                             label="TP", histtype='step', linewidth=2)
-                axs[1].hist(fp_data[XC_term], bins=n_bins, density=True, cumulative=True, alpha=0.5, range=(0.0, 1.0),
+                axs[1].hist(fp_data[XC_term], bins=n_bins*2, density=True, cumulative=True, alpha=0.5, range=(0.0, 1.0),
                             label="FP", histtype='step', linewidth=2)
-                axs[1].set_title('XC Cumulative Distribution', fontsize=20)
-                axs[1].legend(loc='upper right', fontsize=20)
-                axs[1].set_xlabel('XC', fontsize=20)
-                axs[1].set_ylabel('box_count', fontsize=20)
-                axs[1].tick_params(axis='x', labelsize=16)
-                axs[1].tick_params(axis='y', labelsize=16)
+                ks, pval = scipy.stats.ks_2samp(tp_data[XC_term], fp_data[XC_term])
+                print("ks distance is: {}".format(ks))
+                axs[1].set_title('IG XC Empirical CDF, KS = {:.3f}'.format(ks), fontsize=30)
+                axs[1].legend(loc='lower right', fontsize=15)
+                axs[1].set_xlabel('XC', fontsize=30)
+                axs[1].set_ylabel('box_count', fontsize=30)
+                axs[1].tick_params(axis='x', labelsize=26)
+                axs[1].tick_params(axis='y', labelsize=26)
                 plt.savefig("{}/pred_box_XC_histograms_thresh{}.png".format(metric_result_path, thresh))
                 plt.close()
 

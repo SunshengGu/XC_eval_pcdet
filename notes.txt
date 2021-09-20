@@ -3,16 +3,26 @@ When you can't `git pull`, and `git stash` also won't work, try this:
 - `git restore <file_that_causes_trouble>`
 - `git pull`
 
+pushing just one branch to a new repo:
+cd old_repo
+git remote add new /path/to/new/repo
+git push new newBranch1
+git push new newBranch2
+
+untrack a file in local repo:
+git update-index --assume-unchanged your_filename
+
 Problem with binary checkpoint files:
 - previously, the .pth checkpoint files are of type "program"
 - but now, they could be of type "binary" too
 - pytorch < 1.6 won't be able to handle this
-- so need to uninstall pytorch and install pytorch 1.6
+- so need to uninstall pytorch
 - reset spconv by doing the following:
     git clone https://github.com/traveller59/spconv --recursive
     cd spconv
     python setup.py bdist_wheel
     pip install --force-reinstall dist/*
+- install captum
 - then need to run `python setup.py clean --all && python setup.py develop` again
 
 dynamic link:
@@ -248,7 +258,7 @@ XQ metric command:
 - kitti: python XQ_eval.py --XC_path ~/pcdet/tools/XAI_results/Nov_29_2020_15_58_56_IG_KittiDataset_all_batches_dont_delete_analytics_Dec_04_2020_02_08_56_positive_attr_by_counting
 - kitti: python XQ_eval.py --XC_path ~/pcdet/tools/XAI_results/Nov_29_2020_15_58_56_IG_KittiDataset_all_batches_dont_delete_analytics_Dec_03_2020_19_30_26_positive_attr_by_counting
 - kitti: python XQ_eval.py --XC_path ~/pcdet/tools/XAI_results/Nov_29_2020_15_58_56_IG_KittiDataset_all_batches_dont_delete_analytics_Dec_17_2020_21_54_49_positive_attr_by_summing
-- kitti: python binary_cls.py --XC_path ~/pcdet/tools/XAI_results/Nov_29_2020_15_58_56_IG_KittiDataset_all_batches_dont_delete_analytics_ALL_XQ_with_1e-1_thresh
+- kitti: python binary_cls.py --XQ_path ~/pcdet/tools/XAI_results/Nov_29_2020_15_58_56_IG_KittiDataset_all_batches_dont_delete_analytics_ALL_XQ_with_1e-1_thresh
 - kitti: python xc_hist.py --XC_path /media/sg/02f4ed99-ea7d-47a9-9aed-3606f0fd7fda/tadenoud/Documents/WISEOpenLidarPerceptron/tools/XAI_results/Nov_29_2020_15_58_56_IG_KittiDataset_all_batches_dont_delete_analytics_Dec_04_2020_02_08_56_positive_attr_by_counting
 
 XAI with 2 GPUs:
