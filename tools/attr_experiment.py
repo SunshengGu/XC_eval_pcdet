@@ -17,9 +17,9 @@ from XAI_utils.tp_fp import get_gt_infos
 def main():
     '''________________________User Input Begin________________________'''
     # dataset_name = 'KittiDataset'  # change to your dataset, follow naming convention in the config yaml files in PCDet
-    method = 'Saliency'  # explanation method
+    method = 'Saliency'  # explanation method: Saliency(i.e., backprop) or IntegratedGradients
     attr_shown = 'positive'  # show positive or negative attributions
-    aggre_method = 'sum'
+    aggre_method = 'sum' # sum or cnt
     check_all = True
     debugging = False
 

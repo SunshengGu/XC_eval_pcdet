@@ -186,15 +186,15 @@ def main():
     important variables:
     :return:
     """
-    use_XQ = True
+    use_XQ = False
     #TODO: change the class and label terms
-    dist_n_pts = True  # whether we are evaluating dist and pts as well
-    XC_only = False
-    skip_xc = True
+    dist_n_pts = False  # If True, we are evaluating dist and pts as well
+    XC_only = False     # If False, then evaluate the top class score as well, otherwise, skip top class score
+    skip_xc = False     # If False, evaluate the XC score
     scatter_plot = False
-    legacy_file = True # whether the data file was pre jan10 2021
+    legacy_file = True  # If True, skip far_attr and pap
     w_sum_explore = False
-    dataset_name = "Waymo"
+    dataset_name = "KITTI"
     cls_name_list = []
     xc_term = 'XQ'
     score_term = "pred_score"   # options: class_score pred_score
@@ -352,11 +352,11 @@ def main():
                     w_sum_experiment_file = "cls_score_and_XC_weighted_sum_experiment.csv"
                     wsum_experiment(score_arr, XC_arr, TP_FP_arr, metric_result_path, w_sum_experiment_file,
                                     exp_cols, "weighted_sum", thresh, cls_name_list, cls_label_arr)
-                # if not XC_only:
-                #     score_eval_file = "class_score_eval_metrics.csv"
-                #     score_dict, score_cls_dicts = evaluate_metric(
-                #         score_arr, TP_FP_arr, metric_result_path, score_eval_file, eval_cols, 'cls_score',
-                #         thresh, cls_name_list, cls_label_arr)
+                if not XC_only:
+                    score_eval_file = "class_score_eval_metrics.csv"
+                    score_dict, score_cls_dicts = evaluate_metric(
+                        score_arr, TP_FP_arr, metric_result_path, score_eval_file, eval_cols, 'cls_score',
+                        thresh, cls_name_list, cls_label_arr)
                 #
                 #     XC_w = 0.11
                 #     score_w = 0.89
