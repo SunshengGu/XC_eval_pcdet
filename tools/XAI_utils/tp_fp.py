@@ -10,13 +10,6 @@ def get_gt_infos(cfg, dataset):
     :return: gt_infos--containing gt boxes that have labels corresponding to the classes of interest, as well as the
                 labels themselves
     '''
-    # dataset_cfg = cfg.DATA_CONFIG
-    # class_names = cfg.CLASS_NAMES
-    # kitti = KittiDataset(
-    #     dataset_cfg=dataset_cfg,
-    #     class_names=class_names,
-    #     training=False
-    # )
     gt_infos = []
     dataset_infos = []
     dataset_name = cfg.DATA_CONFIG.DATASET

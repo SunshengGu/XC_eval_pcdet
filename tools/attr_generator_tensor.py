@@ -56,7 +56,7 @@ class AttributionGeneratorTensor:
     def __init__(self, model, dataset_name, class_name_list, xai_method, output_path, gt_infos, pred_score_file_name,
                  pred_score_field_name, pts_file_name=None, pts_field_name=None, infos=None, dataset=None,
                  ig_steps=24, margin=0.2, num_boxes=3, selection='top', ignore_thresh=0.1, score_thresh=0.1, debug=False,
-                 full_model=None):
+                 full_model=None, train_mode=False):
         """
         You should have the data loader ready and the specific batch dictionary available before computing any
         attributions.
@@ -77,6 +77,7 @@ class AttributionGeneratorTensor:
         :param score_thresh: threshold for filtering out low confidence predictions
         :param debug: whether to show debug messages
         :param full_model: the full pointpillars model
+        :param train_mode: whether we are in training or test mode
         """
 
         # Load model configurations
@@ -134,6 +135,7 @@ class AttributionGeneratorTensor:
         self.explainer = None
         self.tp_fp = None
         self.gt_dict = None
+        self.bacth_gt = None
         self.batch_cared_ind = []
         self.batch_cared_tp_ind = None # tp pred box indices for the cared boxes for which explanations are generated
         self.batch_cared_fp_ind = None  # tp pred box indices for the cared boxes for which explanations are generated
@@ -144,6 +146,7 @@ class AttributionGeneratorTensor:
         self.tp_limit = 0
         self.fp_limit = 0
         self.xai_method = xai_method
+        self.train_mode = train_mode
         if xai_method == 'Saliency':
             self.explainer = Saliency(self.model)
         elif xai_method == 'IntegratedGradients':
@@ -423,6 +426,9 @@ class AttributionGeneratorTensor:
     def get_tp_fp_indices(self, cur_it):
         # obtain gt information
         self.gt_dict = self.gt_infos[cur_it * self.batch_size:(cur_it + 1) * self.batch_size]
+        if self.train_mode: 
+            self.batch_gt = self.batch_dict['gt_boxes']
+            # print("\nself.gt_dict: {}".format(self.gt_dict))
         conf_mat = []
         gt_exist = []
         pred_box_iou = []
@@ -466,17 +472,35 @@ class AttributionGeneratorTensor:
             # filter out out-of-range gt boxes for Kitti
             filtered_gt_boxes = []
             filtered_gt_labels = []
-            for gt_ind in range(len(self.gt_dict[i]['boxes'])):
-                x, y = self.gt_dict[i]['boxes'][gt_ind][0], self.gt_dict[i]['boxes'][gt_ind][1]
-                if (x_low < x < x_high) and (y_low < y < y_high):
-                    filtered_gt_boxes.append(self.gt_dict[i]['boxes'][gt_ind])
-                    filtered_gt_labels.append(self.gt_dict[i]['labels'][gt_ind])
-            if len(filtered_gt_boxes) != 0:
-                print("len(filtered_gt_boxes): {}".format(len(filtered_gt_boxes)))
-                self.gt_dict[i]['boxes'] = np.vstack(filtered_gt_boxes)
+            if not self.train_mode:
+                for gt_ind in range(len(self.gt_dict[i]['boxes'])):
+                    x, y = self.gt_dict[i]['boxes'][gt_ind][0], self.gt_dict[i]['boxes'][gt_ind][1]
+                    if (x_low < x < x_high) and (y_low < y < y_high):
+                        filtered_gt_boxes.append(self.gt_dict[i]['boxes'][gt_ind])
+                        filtered_gt_labels.append(self.gt_dict[i]['labels'][gt_ind])
+                if len(filtered_gt_boxes) != 0:
+                    print("len(filtered_gt_boxes): {}".format(len(filtered_gt_boxes)))
+                    self.gt_dict[i]['boxes'] = np.vstack(filtered_gt_boxes)
+                else:
+                    self.gt_dict[i]['boxes'] = filtered_gt_boxes
+                self.gt_dict[i]['labels'] = filtered_gt_labels
             else:
-                self.gt_dict[i]['boxes'] = filtered_gt_boxes
-            self.gt_dict[i]['labels'] = filtered_gt_labels
+                for gt_ind in range(len(self.batch_gt[i])):
+                    if self.batch_gt[i][gt_ind][7] == 0:
+                        continue
+                    x, y = self.batch_gt[i][gt_ind][0], self.batch_gt[i][gt_ind][1]
+                    if (x_low < x < x_high) and (y_low < y < y_high):
+                        filtered_gt_boxes.append(torch.unsqueeze(self.batch_gt[i][gt_ind][:7], 0))
+                        filtered_gt_labels.append(self.batch_gt[i][gt_ind][7]-1)
+                if len(filtered_gt_boxes) != 0:
+                    print('\nfiltered_gt_boxes[0].shape: {}'.format(filtered_gt_boxes[0].shape))
+                    print("len(filtered_gt_boxes): {}".format(len(filtered_gt_boxes)))
+                    self.gt_dict[i]['boxes'] = torch.cat(filtered_gt_boxes).detach().cpu().numpy()
+                    print('\nself.gt_dict[i][\'boxes\'].shape: {}'.format(self.gt_dict[i]['boxes'].shape))
+                    self.gt_dict[i]['labels'] = [label.item() for label in filtered_gt_labels]
+                else:
+                    self.gt_dict[i]['boxes'] = filtered_gt_boxes
+                    self.gt_dict[i]['labels'] = filtered_gt_labels
 
             # need to handle the case when no gt boxes exist
             gt_present = True
@@ -502,8 +526,13 @@ class AttributionGeneratorTensor:
             pred_box_iou.append(iou)
             print("len(self.pred_scores[i]): {}".format(len(self.pred_scores[i])))
             for j in range(len(self.pred_scores[i])):  # j is prediction box id in the i-th image
+                print('\nlen(self.gt_dict[i][\'labels\']): {}'.format(len(self.gt_dict[i]['labels'])))
+                print('\ntype(self.gt_dict[i][\'labels\'][0]): {}'.format(type(self.gt_dict[i]['labels'][0])))
+                print('\ntype(gt_index[j]): {}'.format(type(gt_index[j])))
                 gt_cls = self.gt_dict[i]['labels'][gt_index[j]]
                 print("gt class name: {}".format(gt_cls))
+                if self.train_mode:
+                    gt_cls = self.class_name_list[int(gt_cls)]
                 # print("self.class_name_list: {}".format(self.class_name_list))
                 iou_thresh_3d = d3_iou_thresh_dict[gt_cls]
                 curr_pred_score = self.pred_scores[i][j]
@@ -869,7 +898,7 @@ class AttributionGeneratorTensor:
             batch_target_list.append(target_list)
             batch_cared_box_vertices.append(cared_box_vertices)
             batch_cared_loc.append(cared_loc)
-        if self.selection == "tp/fp" or self.selection == "tp" or self.selection == "tp/fp_all":
+        if (self.selection == "tp/fp" or self.selection == "tp" or self.selection == "tp/fp_all") and self.batch_size == 1:
             # print("len(self.tp_boxes[0]) before stacking: {}".format(len(self.tp_boxes[0])))
             if (len(self.tp_boxes) > 0): # since batch size is only one, this is ok
                 self.tp_boxes = torch.stack(self.tp_boxes)
@@ -1006,6 +1035,9 @@ class AttributionGeneratorTensor:
     def preprocess(self, batch_dict, cur_it):
         # Get the predictions, compute box vertices, and generate targets
         self.batch_dict = batch_dict
+        #print("/nkeys of batch_dict:")
+        #print(batch_dict.keys())
+        #print("/n")
         self.cur_it = cur_it
         if self.full_model is not None:
             print("full_model is not None")

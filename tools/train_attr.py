@@ -33,6 +33,7 @@ def parse_config():
     parser.add_argument('--attr_loss', type=str, default='XC', help='specify the attribution loss')
     parser.add_argument('--attr_method', type=str, default='Saliency', help='specify the method for generating attributions')
     parser.add_argument('--box_selection', type=str, default='tp/fp', help='how to apply the attr loss')
+    parser.add_argument('--xc_goal', type=str, default='higher', help='make xc higher or lower')
     parser.add_argument('--aggre_method', type=str, default='sum', help='how to aggregate the attributions for XC')
     parser.add_argument('--attr_sign', type=str, default='positive', help='filter attributions by sign')
     parser.add_argument('--explained_cfg_file', type=str, default=None,
@@ -244,7 +245,8 @@ def main():
         attr_loss=attr_loss, box_selection=args.box_selection,
         output_dir=output_dir,
         aggre_method=args.aggre_method,
-        attr_sign=args.attr_sign
+        attr_sign=args.attr_sign,
+        xc_goal=args.xc_goal
     )
 
     logger.info('**********************End training %s/%s(%s)**********************\n\n\n'

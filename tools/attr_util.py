@@ -36,7 +36,7 @@ def attr_func_draft(explained_model, explainer, batch):
 
 def attr_func(explained_model, explainer, batch, dataset_name, cls_names, cur_it, gt_infos, score_thresh,
               object_cnt, tp_object_cnt, fp_object_cnt, box_selection, pred_score_file_name, pred_score_field_name,
-              cur_epoch, aggre_method, attr_sign, pap_only=False):
+              cur_epoch, aggre_method, attr_sign, pap_only=False, train_mode=False):
     '''
     :param explained_model: the model being explained
     :param explainer: parameters for the attribution generator
@@ -52,7 +52,7 @@ def attr_func(explained_model, explainer, batch, dataset_name, cls_names, cur_it
     myExplainer = AttributionGeneratorTensor(
         explained_model, dataset_name, cls_names, explainer['method'], None, gt_infos,
         pred_score_file_name=pred_score_file_name, pred_score_field_name=pred_score_field_name,
-        score_thresh=score_thresh, debug=True, selection=box_selection)
+        score_thresh=score_thresh, debug=True, selection=box_selection, train_mode=train_mode)
     if not pap_only:
         if box_selection == "tp/fp":
             tp_XC, tp_far_attr, tp_pap, fp_XC, fp_far_attr, fp_pap = myExplainer.compute_xc(
