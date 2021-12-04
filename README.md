@@ -93,6 +93,39 @@ The XC scores for IG and all XC scores generated from Waymo were scattered acros
 - `python binary_cls.py --XQ_path where\you\saved\theCSVfiles\containing\tp_and_fp\data`.
 - You should see results (accuracy, AUROC, AUPR, AUPR_op) printed in the terminal. 
 
+## Training a model with attribution-based loss terms
+- This portion of my work is not included in the NeurIPS workshop paper, but is 
+described in details in my thesis. I will link my thesis here once it has been fully
+reviewed and revised. Below are instructions for training with attribution-based loss.
+- Below are instructions for training with attribution-based losses.
+- First, navigate to the `tools` folder.
+- Example command:
+`python train_attr.py --cfg_file cfgs/kitti_models/pointpillar_xai.yaml --attr_loss xc --attr_method Saliency --aggre_method sum --attr_sign positive --box_selection bottom --xc_goal lower --batch_size 4 --epochs 80 --ckpt_save_interval 5 --extra_tag oct29_lower_xc_bottom_epoch_80_lambda_pt2`
+- `--cfg_file`: Model configuration file.
+- `--attr_loss`: The measure for which we compute the attribution-based loss from,
+can be `xc` or `pap` (pixel attribution prior).
+- `--attr_method`: The specific XAI method we use to generate the attributions, 
+can be `Saliency` (backprop) or `IntegratedGradients`.
+- `--aggre_method`: How we aggregate the attribution, either by summing (`sum`) or by 
+counting (`cnt`). See the paper for more details.
+- `--attr_sign`: `positive` or `negative`, indicates if we are computing XC or PAP 
+based on the positive or negative attributions.
+- `--xc_goal`: If we are computing XC-based loss, then this term indicates if the 
+specific loss function will reduce (`lower`) or increase (`higher`) the XC scores
+ of the selected predicitons.
+- For the remaining arguments, please refer to comments in `tools\train_attr.py`
+- If you want to adjust the lambda values for the attribution-based loss terms, 
+go to `tools/train_utils/train_utils_new_loss.py`, int the `train_one_epoch` function,
+modify the value of `lambda_xc` and `lambda_pap` as you see fit.
+- Also, in your local `Captum` repo, you need to go to `captum/captum/_utils/gradient.py` 
+and in the `compute_gradients` function, change
+`grads = torch.autograd.grad(torch.unbind(outputs), inputs)`
+to 
+`grads = torch.autograd.grad(torch.unbind(outputs), inputs, create_graph=True)`.
+This allows the computation of second order gradients, which is crucial for the 
+computation of graidents of XC/PAP (derived from attributions, which are 
+gradient values themselves) with respect to model weights.
+
 The following is the README.md from OpenPCDet:
 
 
